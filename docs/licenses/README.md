@@ -39,6 +39,14 @@ content. Missing license declarations or notice texts are recorded explicitly as
 `UNKNOWN`/`MISSING` and fail the packaging gate. Paths in records are package
 relative or public upstream URLs, never build-machine paths.
 
+Before dependency discovery, the generator checks pinned SHA-256 values for the
+three repository font notices and exact equality of the two frontend copies.
+Existing Windows worktrees can retain old CRLF bytes even after `.gitattributes`
+changes. Back up intentional edits and refresh affected files from their canonical
+Git blobs if that check fails. The generator refuses the mismatch before writing
+resources; it does not normalize third-party notice text. Intentional font/notice
+updates must update the reviewed source, matching frontend copy and pinned hash.
+
 Most notices come directly from Cargo/npm/NuGet packages. `upstream/index.json`
 records supplemental text files, their public source URLs and content hashes.
 These cover crates which publish a license declaration but omit the license file.

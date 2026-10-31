@@ -1,15 +1,15 @@
 # Windows desktop candidate acceptance
 
 Recorded on **2026-11-01 (Asia/Shanghai)**. The tested application is the unsigned
-Windows x64 Entwurf 0.1.0 NSIS bundle built from **`f05e572`**. Later documentation
+Windows x64 Entwurf 0.1.0 NSIS bundle built from **`536a23a`**. Later documentation
 and acceptance-driver changes do not change that application binary.
 
 | Artifact | Identity |
 | --- | --- |
-| Frozen installer | `artifacts/installers/Entwurf_0.1.0_f05e572_x64-setup.exe` in the native Windows checkout |
-| Installer size | 77,947,200 bytes |
-| Installer SHA-256 | `665d4eeea03dbf2be85b9058743034ac415149f1cf8c44d4a13906392868284b` |
-| Installed executable SHA-256 | `ea32f7714bdd0cde8300073599ae67efe04e2329a6cf710a85e104d3893f163c` |
+| Frozen installer | `artifacts/installers/Entwurf_0.1.0_536a23a_x64-setup.exe` in the native Windows checkout |
+| Installer size | 77,931,550 bytes |
+| Installer SHA-256 | `b8c433727f3c9b6d8a9509c9a9e6c2d41a1c2a51d912c199ae51c91fc06130ff` |
+| Installed executable SHA-256 | `5e4dd07320544f4baee40fd742f49c497854ff405fa181155b5ee6eca5058ad4` |
 | Test installation | `%LOCALAPPDATA%\Programs\Entwurf` |
 | Reinstall evidence | `%LOCALAPPDATA%\EntwurfAcceptance\v0.1-20261031\cycle-1` and `cycle-2` |
 
@@ -49,8 +49,8 @@ Both cycles pass all **11 workflow checks**:
 
 | Final reviewed-driver run (UTC) | Checks | Existing project files unchanged after uninstall |
 | --- | ---: | ---: |
-| Cycle 1, 2026-10-31 16:18:43–16:19:43 | 11/11 | 167 |
-| Cycle 2, 2026-10-31 16:19:44–16:20:42 | 11/11 | 224 |
+| Cycle 1, 2026-10-31 16:44:12–16:45:29 | 11/11 | 285 |
+| Cycle 2, 2026-10-31 16:45:29–16:46:50 | 11/11 | 350 |
 
 Both installation records explicitly confirm the requested installer was applied
 in that cycle and that no existing executable was reused.
@@ -61,22 +61,35 @@ paths, and an existing unowned installation without changing the sentinel data.
 Earlier attempts that exposed invalid test inputs or overly strict driver
 assertions were retained separately; they are not counted as passing cycles.
 
+The final rebuild resolves stale CRLF font-notice copies in the earlier Windows
+checkout. The affected files were compared with canonical Git blobs before being
+refreshed; original bytes were retained as local evidence. A new build gate pins
+three font-notice hashes and checks both frontend copies before dependency reads
+or output writes. Seven regression tests and complete notice-generation checks
+pass on Windows and WSL, with byte-identical generated resources. Existing Git
+attributes already preserved notice bytes; the stale checkout required refreshing.
+
 ## Separate native checks
+
+The following functional checks used earlier installed builds as identified
+below. The final `536a23a` change adds the notice build gate and restores canonical
+notice bytes; application source code is unchanged from `f05e572`.
 
 - **Fresh application configuration: 17/17 passed.** Only Entwurf's remembered
   workspace file was temporarily isolated, with a new WebView profile. Empty
   startup, capabilities, offline UI reload, native project creation and public PDF
   import passed. The exact original configuration was restored, a new process
   automatically reopened the original project, and all 55 original project files
-  remained unchanged. This used the same Windows account, not a newly created OS user.
+  remained unchanged. This used `f05e572` on the same Windows account, not a newly
+  created OS user.
 - **Database recovery: 22/22 passed.** In a separate owned public project, the
   SQLite/WAL/SHM files were quarantined while closed. Normal native project opening
   rebuilt the database. Two tasks, seven versions, 22 audit events, seven immutable
   IR files, two source copies, five artifact files and the manual edit survived.
   All 17 non-database files remained byte-identical; SQLite integrity, relational
-  records and WAL checks passed. The main project was restored unchanged.
+  records and WAL checks passed on `f05e572`. The main project was restored unchanged.
 - **Packaged PDFium:** a two-page PDF retains anchors for pages 1 and 2; Windows
-  process-module inspection confirms the DLL is loaded from installed resources.
+  process-module inspection on `f05e572` confirms the DLL is loaded from installed resources.
   Its SHA-256 is `79d4676b656cfb1abcea88f9ade3b4b0826c5200382db5f4ec72a636c598c118`.
 - **Private references: 9/9 checks passed on baseline `988fc22`.** Two images were
   stored as style references with no knowledge sources; separate OCR imports kept

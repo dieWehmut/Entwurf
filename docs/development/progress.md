@@ -8,7 +8,7 @@ See [native acceptance](native-acceptance.md) for the tested installer and limit
 
 | Stage | Required evidence | Status on 2026-11-01 |
 | --- | --- | --- |
-| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native tools verified; Release NSIS built at f05e572 and installed; build compiles the shipped desktop once |
+| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native tools verified; Release NSIS built at 536a23a and installed; build compiles the shipped desktop once |
 | 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | Implemented and reviewed, including desktop event transitions, immutable edits, recovery and legacy snapshot compatibility |
 | 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Native parent and self-contained resources integrated; 41 C# and 8 actual parent/child tests pass; no verified ChatGPT window and all four gates remain false |
 | 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Actual-engine tests pass; installed two-page PDF uses the pinned bundled DLL; two private images retain exact originals and pending OCR/formula reviews |
@@ -153,11 +153,17 @@ installed checks for subsequent additions remain outstanding.
 
 ## Final installed candidate checkpoint — 2026-11-01
 
-The `f05e572` bundle passes two complete runs of the reviewed native reinstall
-driver, with 11 workflow checks per cycle and 167/224 existing project files
+The `536a23a` bundle passes two complete runs of the reviewed native reinstall
+driver, with 11 workflow checks per cycle and 285/350 existing project files
 unchanged after the respective uninstalls. The same installer/executable hashes
 were verified in both runs. Native IR reimport, actual two-page GPT grouping,
 repair undo and diagnostic Save As/cancel all pass. Separate fresh App configuration
 checks pass 17/17, and installed database recovery checks pass 22/22. The final
 application is installed; test processes are closed. See [the complete native
 acceptance record](native-acceptance.md) for hashes, commands, scope and limitations.
+
+The final rebuild corrects stale font-notice line endings retained by the earlier
+Windows checkout. Canonical Git bytes are now verified before notice generation,
+with seven regression tests passing on Windows and WSL. Installed notices match
+the checked-in bytes; the earlier native functional checks remain scoped to their
+recorded builds because this fix changes only notice bytes and build validation.

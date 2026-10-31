@@ -25,6 +25,8 @@
   compatible GPT group/page proposals applied with explicit fallback warnings.
 - Offline diagnostic export with fixed, redacted fields; bundled dependency
   inventory and notices generated from the locked release dependency closure.
+- Canonical font-notice hash checks reject stale Windows checkout bytes before
+  dependency discovery or release-resource writes.
 - User-provided icon bundled as PNG and multi-resolution Windows ICO.
 - Native NSIS installation and repeatable installed-app acceptance harness.
 
