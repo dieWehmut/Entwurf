@@ -10,16 +10,19 @@ export class BrowserTransport {
   }
   async probe() {
     const tabs = await this.browser.tabs.query({ url: 'https://chatgpt.com/*' });
+    let loginRequired = false;
     for (const tab of tabs) {
       try {
         const report = await this.call(tab.id, 'probe');
         if (report.available) return report;
+        if (report.reason === 'login_required') loginRequired = true;
       } catch { /* An existing tab may predate extension installation. */ }
     }
-    return { available: false, adapter: 'chatgpt-browser', reason: tabs.length ? 'reload_chatgpt_tab' : 'open_existing_chatgpt_session' };
+    return { available: false, adapter: 'chatgpt-browser', reason: loginRequired ? 'login_required' : tabs.length ? 'reload_chatgpt_tab' : 'open_existing_chatgpt_session' };
   }
   async prepare(run) {
-    if (!(await this.probe()).available) throw new Error('existing_session_unavailable');
+    const report = await this.probe();
+    if (!report.available) throw new Error(report.reason === 'login_required' ? 'login_required' : 'existing_session_unavailable');
     const tabs = await this.browser.tabs.query({ url: 'https://chatgpt.com/*' });
     const existing = tabs.find(tab => tab.active) ?? tabs[0];
     // A new tab shares the user's current browser profile and login. Never launch another profile.
@@ -28,9 +31,10 @@ export class BrowserTransport {
     for (let attempt = 0; attempt < 100; attempt++) {
       const current = await this.browser.tabs.get(tab.id);
       if (current.url && new URL(current.url).origin !== 'https://chatgpt.com') throw new Error('login_required');
-      let ready = false;
-      try { ready = (await this.call(tab.id, 'probe')).available; } catch { /* Only readiness checks retry. */ }
-      if (ready) { await this.call(tab.id, 'prepare', { run }); return { target: tab.id }; }
+      let ready;
+      try { ready = await this.call(tab.id, 'probe'); } catch { /* Only readiness checks retry. */ }
+      if (ready?.reason === 'login_required') throw new Error('login_required');
+      if (ready?.available) { await this.call(tab.id, 'prepare', { run }); return { target: tab.id }; }
       await delay(200);
     }
     throw new Error('composer_timeout');
