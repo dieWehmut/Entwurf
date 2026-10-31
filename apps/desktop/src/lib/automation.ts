@@ -6,6 +6,29 @@ export interface AutomationRun {
   phase: AutomationPhase; reason?: string; sha256?: string; mime_type?: string;
 }
 export const automationOrigin = "http://127.0.0.1:48123";
+const reasonLabels: Record<string, string> = {
+  ready: "ChatGPT 已就绪，可以开始生成。",
+  windows_locked: "Windows 当前已锁屏，请解锁后继续。",
+  chatgpt_not_found: "未找到 ChatGPT 客户端，请先打开并登录。",
+  ambiguous_chatgpt_windows: "检测到多个 ChatGPT 窗口，请保留要使用的窗口。",
+  chatgpt_mode_required: "请在客户端切换到 ChatGPT 模式。",
+  image_surface_unavailable: "请打开 ChatGPT 客户端的“图像”页面。",
+  foreground_unavailable: "无法操作 ChatGPT 窗口，请将客户端切到前台。",
+  user_changed_composer: "输入内容已被修改，观察已暂停，请检查 ChatGPT。",
+  conversation_changed: "ChatGPT 会话已切换，观察已暂停。",
+  generation_timeout: "等待图片生成超时，请查看 ChatGPT 中的进度。",
+  download_unavailable: "尚未找到图片下载入口，请查看 ChatGPT。",
+  download_dialog_unavailable: "未找到保存窗口，请查看 ChatGPT 的下载状态。",
+  download_failed: "图片下载失败，可检查后继续处理。",
+  artifact_invalid: "图片文件校验失败，尚未保存到项目。",
+  submission_uncertain: "无法确认提示是否已发送，请先查看 ChatGPT，避免重复提交。",
+  adapter_restarted: "连接程序已重启，请检查这次运行的状态。",
+  cancelled: "观察已停止。",
+};
+export function automationReason(reason?: string): string {
+  if (!reason) return "等待连接状态。";
+  return reasonLabels[reason] ?? (/^[a-z][a-z0-9_]*$/.test(reason) ? `连接状态：${reason}` : reason);
+}
 export class AutomationHttpError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }

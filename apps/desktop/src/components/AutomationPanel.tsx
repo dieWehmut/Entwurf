@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Run } from "../App";
 import type { GeneratedImage } from "../lib/types";
 import { errorMessage, type WorkspaceClient, type WorkspaceSnapshot } from "../lib/workspace";
-import { AutomationHttpError, createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, type AutomationRun, type AutomationService } from "../lib/automation";
+import { AutomationHttpError, automationReason, createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, type AutomationRun, type AutomationService } from "../lib/automation";
 import { download } from "../lib/web-files";
 
 const phases = { queued: "等待执行", preparing: "准备 ChatGPT", submitting: "正在提交", generating: "等待生成", downloading: "取回图片", awaiting_import: "等待保存到项目", completed: "图片已入库", paused: "观察已暂停", failed: "执行失败", cancelled: "观察已停止" };
@@ -93,13 +93,14 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
   const running = runs.some(item => activePhases.has(item.phase));
   return <section className="panel"><h2>ChatGPT 图片生成</h2>
     <p className="muted">使用已登录的 ChatGPT 会话。图片独立保存为任务结果，知识节点与来源保持原有审阅流程。</p>
-    <div className="handoff-actions"><button className="secondary-button" disabled={locked || busy} onClick={() => { void connect(); }}>{service ? "重新连接自动化" : "连接 ChatGPT 自动化"}</button><span role="status">{status ? `${status.connected ? "已连接" : "未连接"} · ${status.reason}` : "尚未连接自动化服务"}</span></div>
-    <button className="text-button" disabled={locked || busy} onClick={() => { void run("打开连接设置", () => client.call("open_automation_setup", undefined)); }}>安装扩展与连接设置</button>
+    <div className="handoff-actions"><button className="secondary-button" disabled={locked || busy} onClick={() => { void connect(); }}>{service ? "重新连接自动化" : "连接 ChatGPT 自动化"}</button><span role="status">{status ? `${status.connected ? "已连接" : "未连接"} · ${automationReason(status.reason)}` : "尚未连接自动化服务"}</span></div>
+    <button className="text-button" disabled={locked || busy} onClick={() => { void run("打开连接设置", () => client.call("open_automation_setup", undefined)); }}>ChatGPT 连接设置</button>
+    <p className="muted">在连接设置中选择 ChatGPT 客户端或浏览器。客户端模式无需安装浏览器扩展。</p>
     {error && <p className="callout warn" role="alert">{error}</p>}
     <label className="field">图片生成提示<textarea rows={5} disabled={locked || busy || running} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述这次希望 ChatGPT 生成的图片" /></label>
     <p className="muted">{version ? `本次生成绑定任务 ${taskId} 的 r${version.revision}。` : "导入资料建立知识版本后可开始生成。"}</p>
     <button className="primary-button" disabled={locked || busy || running || !version || !prompt.trim() || !status?.connected || !status.available} onClick={() => { void start(); }}>启动一次图片生成</button>
-    {runs.map(item => <article className="source-record" key={item.run_id}><strong>{phases[item.phase] ?? item.phase}</strong><p>{item.reason}</p><p className="path-text">运行：{item.run_id} · 基础版本：{item.base_version_id}</p>
+    {runs.map(item => <article className="source-record" key={item.run_id}><strong>{phases[item.phase] ?? item.phase}</strong>{item.reason && <p>{automationReason(item.reason)}</p>}<p className="path-text">运行：{item.run_id} · 基础版本：{item.base_version_id}</p>
       {version && item.base_version_id !== version.id && <p className="muted">此运行绑定其他知识版本；导入时会校验版本，已保存图片仍可查看。</p>}
       <div className="handoff-actions">{activePhases.has(item.phase) && <button className="secondary-button" disabled={locked || busy} onClick={() => { void cancel(item); }}>停止观察</button>}
       {(item.phase === "awaiting_import" || item.sha256) && item.phase !== "completed" && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run("保存生成图片", () => importAutomationImage(service, item, client)); }}>继续导入图片</button>}</div>
