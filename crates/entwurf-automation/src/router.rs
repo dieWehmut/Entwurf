@@ -352,7 +352,27 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
                 .runs
                 .get_mut(id)
                 .ok_or(AutomationError("run_not_found"))?;
-            if !active(&r.view.phase) || r.view.sha256.is_some() || r.view.phase == "paused" {
+            if !active(&r.view.phase) {
+                // Reconnection restores the companion's own unfinished record.
+                // Reconcile a cancel or durable ACK that could not reach it while
+                // disconnected, without replaying a prompt or broadcasting history.
+                // A matching terminal status is confirmation, not a new request.
+                if active(phase) {
+                    let command = if r.view.phase == "completed" {
+                        json!({"type":"artifact_accepted","run_id":id})
+                    } else {
+                        json!({"type":"cancel","run_id":id})
+                    };
+                    i.peer
+                        .as_ref()
+                        .unwrap()
+                        .sender
+                        .try_send(command)
+                        .map_err(|_| AutomationError("extension_disconnected"))?;
+                }
+                return Ok(());
+            }
+            if r.view.sha256.is_some() || r.view.phase == "paused" {
                 return Ok(());
             }
             let order = [
