@@ -54,6 +54,14 @@ jobs:
       - name: Verify browser persistence and rendering
         working-directory: apps/desktop
         run: pnpm exec playwright test --config playwright.web.config.ts --workers 1
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-evidence
+          path: apps/desktop/test-results
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
