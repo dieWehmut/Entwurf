@@ -519,10 +519,24 @@ fn assert_review_blocks_export_then_can_be_cleared(mut ir: entwurf_core::Knowled
         Err(EntwurfError::ValidationBlocked { .. })
     ));
     assert!(!output.exists(), "blocked export created output files");
-    // The caller's explicit review clears the queue; grounded source nodes still
-    // have their original verified=false flag and are not blanket-blocked.
+    // Queue review alone cannot repair missing extraction coverage. Source diagnostics
+    // remain authoritative until reimport; complete source content can be reviewed.
     ir.unverified.clear();
     assert!(ir.nodes.iter().any(|n| !n.verified));
+    if ir.sources.iter().any(|source| {
+        source.notes.iter().any(|note| {
+            note.strip_prefix("ingestion_diagnostic:")
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                .is_some_and(|d| d["level"] != "info" && d["code"] != "empty_source")
+        })
+    }) {
+        assert!(matches!(
+            compile(&ir, &StyleSpec::default(), &options),
+            Err(EntwurfError::ValidationBlocked { .. })
+        ));
+        assert!(!output.exists());
+        return;
+    }
     let artifacts = compile(&ir, &StyleSpec::default(), &options).unwrap();
     assert!(artifacts.pdf_path.exists());
     assert!(artifacts.svg_paths[0].exists());
@@ -538,6 +552,8 @@ fn unresolved_ingestion_and_formula_reviews_block_export_until_cleared() {
         binary_dir: Some(dir.path().into()),
         ..IngestOptions::standard()
     };
+    let complete = ingest_paths(&[path.clone()], &options).unwrap();
+    assert_review_blocks_export_then_can_be_cleared(complete.into_ir("p", "t", "formula review"));
     let report = ingest_paths(&[path, fixture("bilingual.png")], &options).unwrap();
     assert_review_blocks_export_then_can_be_cleared(report.into_ir("p", "t", "source review"));
 }

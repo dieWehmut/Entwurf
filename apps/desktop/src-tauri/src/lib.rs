@@ -1,291 +1,505 @@
-use std::path::PathBuf;
+mod bridge;
+use entwurf_core::{
+    ingest::IngestOptions,
+    workspace::{NodeEdit, Workspace, WorkspaceSnapshot},
+    StyleSpec,
+};
+use std::{path::PathBuf, sync::Mutex};
+use tauri::Manager;
+use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
-use entwurf_core::compiler::{ArtifactSet, CompileOptions};
-use entwurf_core::ingest::{ingest_project_paths, IngestOptions};
-use entwurf_core::project::{Project, VersionReason};
-use entwurf_core::storage::{load_project, save_project, ProjectPaths};
-use entwurf_core::StyleSpec;
-use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
-
-#[derive(Default)]
-struct AppState {
-    project: Option<Project>,
-    root: Option<PathBuf>,
+type AppState = Mutex<Option<Workspace>>;
+async fn state_call(
+    app: tauri::AppHandle,
+    action: impl FnOnce(&mut Option<Workspace>) -> Result<WorkspaceSnapshot, String> + Send + 'static,
+) -> Result<WorkspaceSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut state = state.lock().map_err(|e| e.to_string())?;
+        action(&mut state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
-
-#[derive(Serialize)]
-struct BootstrapResponse {
-    version: String,
-    schemas: Vec<String>,
+async fn workspace_call(
+    app: tauri::AppHandle,
+    action: impl FnOnce(&mut Workspace) -> entwurf_core::Result<WorkspaceSnapshot> + Send + 'static,
+) -> Result<WorkspaceSnapshot, String> {
+    state_call(app, move |state| {
+        action(state.as_mut().ok_or("no project is open")?).map_err(|e| e.to_string())
+    })
+    .await
 }
-
-#[tauri::command]
-fn bootstrap() -> BootstrapResponse {
-    BootstrapResponse {
-        version: entwurf_core::VERSION.to_string(),
-        schemas: ["knowledge-ir", "task-envelope", "result-envelope", "style"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
+fn tesseract_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Some(root) = std::env::var_os("ProgramFiles") {
+            let path = PathBuf::from(root).join("Tesseract-OCR");
+            if path.join("tesseract.exe").is_file() {
+                return Some(path);
+            }
+        }
+        if let Some(root) = std::env::var_os("LOCALAPPDATA") {
+            let path = PathBuf::from(root).join("Entwurf").join("tesseract");
+            if path.join("tesseract.exe").is_file() {
+                return Some(path);
+            }
+        }
     }
+    None
+}
+fn ocr_command() -> std::process::Command {
+    let mut c = std::process::Command::new(
+        tesseract_dir()
+            .map(|p| p.join("tesseract.exe"))
+            .unwrap_or_else(|| "tesseract".into()),
+    );
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x08000000);
+    }
+    c
+}
+#[tauri::command]
+async fn bootstrap(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let mut value=tauri::async_runtime::spawn_blocking(|| {
+        let available=ocr_command().arg("--version").output().is_ok_and(|o|o.status.success());
+        let languages=ocr_command().arg("--list-langs").output().ok().filter(|o|o.status.success()).map(|o|String::from_utf8_lossy(&o.stdout).lines().filter(|l|!l.starts_with("List of")).map(str::to_owned).collect::<Vec<_>>()).unwrap_or_default();
+        serde_json::json!({"version":entwurf_core::VERSION,"platform":std::env::consts::OS,"tesseract_available":available,"ocr_languages":languages,"automation_enabled":false})
+    }).await.map_err(|e|e.to_string())?;
+    let probe = bridge::probe(
+        app.path()
+            .resource_dir()
+            .map_err(|e| e.to_string())?
+            .join("resources/gpt-bridge/Entwurf.Bridge.exe"),
+    )
+    .await;
+    value["bridge_status"] = probe.status.into();
+    value["bridge_detail"] = probe.detail.into();
+    value["bridge"] = serde_json::to_value(probe).map_err(|e| e.to_string())?;
+    Ok(value)
 }
 
+fn last_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("last-workspace.json"))
+}
+fn remember(app: &tauri::AppHandle, root: &str) -> Result<(), String> {
+    let path = last_root(app)?;
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    entwurf_core::storage::write_atomic(
+        &path,
+        &serde_json::to_vec(root).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
 #[tauri::command]
-fn create_project(
-    state: State<'_, std::sync::Mutex<AppState>>,
+async fn open_workspace(
+    app: tauri::AppHandle,
+    root: Option<String>,
+    name: String,
+) -> Result<WorkspaceSnapshot, String> {
+    let app2 = app.clone();
+    state_call(app, move |state| {
+        let root = match root.filter(|s| !s.trim().is_empty()) {
+            Some(r) => PathBuf::from(r),
+            None => {
+                let last = last_root(&app2)?;
+                if last.exists() {
+                    PathBuf::from(
+                        serde_json::from_slice::<String>(
+                            &std::fs::read(last).map_err(|e| e.to_string())?,
+                        )
+                        .map_err(|e| e.to_string())?,
+                    )
+                } else {
+                    app2.path()
+                        .app_data_dir()
+                        .map_err(|e| e.to_string())?
+                        .join("workspace")
+                }
+            }
+        };
+        let paths = entwurf_core::storage::ProjectPaths::new(&root);
+        let ws = if paths.database_file().exists() || paths.project_file().exists() {
+            Workspace::open(root)
+        } else {
+            Workspace::create(root, &name)
+        }
+        .map_err(|e| e.to_string())?;
+        let snapshot = ws.snapshot(None).map_err(|e| e.to_string())?;
+        remember(&app2, &snapshot.root)?;
+        *state = Some(ws);
+        Ok(snapshot)
+    })
+    .await
+}
+#[tauri::command]
+async fn create_project(
+    app: tauri::AppHandle,
     root: String,
     name: String,
-) -> Result<Project, String> {
-    let project = Project::new(name);
-    let paths = ProjectPaths::new(&root);
-    save_project(&paths, &project).map_err(|error| error.to_string())?;
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    state.project = Some(project.clone());
-    state.root = Some(root.into());
-    Ok(project)
+) -> Result<WorkspaceSnapshot, String> {
+    let app2 = app.clone();
+    state_call(app, move |state| {
+        let ws = Workspace::create(root, &name).map_err(|e| e.to_string())?;
+        let snapshot = ws.snapshot(None).map_err(|e| e.to_string())?;
+        remember(&app2, &snapshot.root)?;
+        *state = Some(ws);
+        Ok(snapshot)
+    })
+    .await
 }
-
 #[tauri::command]
-fn load_existing_project(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    root: String,
-) -> Result<Project, String> {
-    let paths = ProjectPaths::new(&root);
-    let project = load_project(&paths).map_err(|error| error.to_string())?;
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    state.project = Some(project.clone());
-    state.root = Some(root.into());
-    Ok(project)
-}
-
-#[tauri::command]
-fn import_sources(
+async fn load_existing_project(
     app: tauri::AppHandle,
-    state: State<'_, std::sync::Mutex<AppState>>,
-    task_id: String,
-    paths: Vec<String>,
-) -> Result<entwurf_core::KnowledgeIr, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let root = state.root.clone().ok_or("no project is open")?;
-    let project_paths = ProjectPaths::new(root);
-    let project = state.project.as_mut().ok_or("no project is open")?;
-    if !project.tasks.iter().any(|task| task.id == task_id) {
-        return Err("task does not belong to this project".into());
-    }
-    let options = IngestOptions {
+    root: String,
+) -> Result<WorkspaceSnapshot, String> {
+    let app2 = app.clone();
+    state_call(app, move |state| {
+        let ws = Workspace::open(root).map_err(|e| e.to_string())?;
+        let snapshot = ws.snapshot(None).map_err(|e| e.to_string())?;
+        remember(&app2, &snapshot.root)?;
+        *state = Some(ws);
+        Ok(snapshot)
+    })
+    .await
+}
+#[tauri::command]
+async fn workspace_snapshot(
+    app: tauri::AppHandle,
+    task_id: Option<String>,
+) -> Result<WorkspaceSnapshot, String> {
+    let app2 = app.clone();
+    state_call(app, move |state| {
+        if state.is_none() && task_id.is_none() {
+            let path = last_root(&app2)?;
+            if !path.is_file() {
+                return Err("no saved project; create or open a project".into());
+            }
+            let root: String =
+                serde_json::from_slice(&std::fs::read(&path).map_err(|e| e.to_string())?)
+                    .map_err(|e| format!("cannot read last workspace: {e}"))?;
+            *state = Some(
+                Workspace::open(root).map_err(|e| format!("cannot restore last workspace: {e}"))?,
+            );
+        }
+        state
+            .as_mut()
+            .ok_or("no project is open")?
+            .select_task(task_id.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+#[tauri::command]
+async fn create_task(
+    app: tauri::AppHandle,
+    title: String,
+    chapter: Option<String>,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.create_task(&title, chapter)).await
+}
+fn ingestion_options(app: &tauri::AppHandle) -> Result<IngestOptions, String> {
+    Ok(IngestOptions {
         pdfium_dir: Some(
             app.path()
                 .resource_dir()
                 .map_err(|e| e.to_string())?
                 .join("resources/pdfium"),
         ),
+        binary_dir: tesseract_dir(),
         ..IngestOptions::standard()
-    };
-    let report = ingest_project_paths(
-        &project_paths,
-        &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
-        &options,
-    )
-    .map_err(|error| error.to_string())?;
-    let ir = report.into_ir(&project.id, &task_id, &project.name);
-    project
-        .save_version(&task_id, ir.clone(), VersionReason::Ingested)
-        .map_err(|error| error.to_string())?;
-    save_project(&project_paths, project).map_err(|error| error.to_string())?;
-    Ok(ir)
-}
-
-#[tauri::command]
-fn compile_current(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    task_id: String,
-    output_dir: String,
-) -> Result<entwurf_core::compiler::ArtifactSet, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let AppState { project, root } = &mut *state;
-    let project = project.as_mut().ok_or("no project is open")?;
-    let artifacts = project
-        .compile_current(&task_id, &CompileOptions::new(output_dir))
-        .map_err(|error| error.to_string())?;
-    if let Some(root) = root {
-        save_project(&ProjectPaths::new(root.as_path()), project)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(artifacts)
-}
-
-#[tauri::command]
-fn default_style() -> StyleSpec {
-    StyleSpec::default()
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ExportResult {
-    artifacts: ArtifactSet,
-    validation_passed: bool,
-    blocking_findings: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct NodeEdit {
-    id: String,
-    title: String,
-    body: String,
-    latex: Option<String>,
-}
-
-fn save_current_project(root: &Option<PathBuf>, project: &Project) -> Result<(), String> {
-    if let Some(root) = root {
-        save_project(&ProjectPaths::new(root), project).map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn open_workspace(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    root: Option<String>,
-    name: String,
-    app: tauri::AppHandle,
-) -> Result<Project, String> {
-    let root = match root.filter(|value| !value.trim().is_empty()) {
-        Some(root) => PathBuf::from(root),
-        None => app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("workspace"),
-    };
-    let paths = ProjectPaths::new(&root);
-    let project = if paths.database_file().exists() || paths.project_file().exists() {
-        load_project(&paths).map_err(|error| error.to_string())?
-    } else {
-        let project = Project::new(name);
-        save_project(&paths, &project).map_err(|error| error.to_string())?;
-        project
-    };
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    state.project = Some(project.clone());
-    state.root = Some(root);
-    Ok(project)
-}
-
-#[tauri::command]
-fn create_task(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    title: String,
-    chapter: Option<String>,
-) -> Result<String, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let AppState { project, root } = &mut *state;
-    let project = project.as_mut().ok_or("no project is open")?;
-    let task_id = project.add_task(title, chapter).id.clone();
-    save_current_project(root, project)?;
-    Ok(task_id)
-}
-
-#[tauri::command]
-fn save_ir(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    task_id: String,
-    ir: entwurf_core::KnowledgeIr,
-) -> Result<String, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let AppState { project, root } = &mut *state;
-    let project = project.as_mut().ok_or("no project is open")?;
-    let version = project
-        .save_version(&task_id, ir, VersionReason::UserEdited)
-        .map_err(|error| error.to_string())?;
-    save_current_project(root, project)?;
-    Ok(version)
-}
-
-#[tauri::command]
-fn update_nodes(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    task_id: String,
-    nodes: Vec<NodeEdit>,
-) -> Result<String, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let AppState { project, root } = &mut *state;
-    let project = project.as_mut().ok_or("no project is open")?;
-    let mut ir = project
-        .current_ir(&task_id)
-        .cloned()
-        .ok_or("task has no current IR")?;
-    for edit in nodes {
-        let node = ir
-            .node_mut(&edit.id)
-            .ok_or_else(|| format!("unknown node {}", edit.id))?;
-        node.title = edit.title;
-        node.body = edit.body;
-        node.latex = edit.latex;
-        node.origin = entwurf_core::NodeOrigin::UserEdit;
-    }
-    ir.touch();
-    let version = project
-        .save_version(&task_id, ir, VersionReason::UserEdited)
-        .map_err(|error| error.to_string())?;
-    save_current_project(root, project)?;
-    Ok(version)
-}
-
-#[tauri::command]
-fn export_current(
-    state: State<'_, std::sync::Mutex<AppState>>,
-    task_id: String,
-    output_dir: String,
-) -> Result<ExportResult, String> {
-    let mut state = state.lock().map_err(|error| error.to_string())?;
-    let AppState { project, root } = &mut *state;
-    let project = project.as_mut().ok_or("no project is open")?;
-    let artifacts = project
-        .compile_current(&task_id, &CompileOptions::new(output_dir))
-        .map_err(|error| error.to_string())?;
-    save_current_project(root, project)?;
-    let task = project
-        .task(&task_id)
-        .ok_or_else(|| format!("task not found: {task_id}"))?;
-    let version_id = task
-        .current_version
-        .as_deref()
-        .ok_or("task has no current version")?;
-    let validation = task
-        .versions
-        .iter()
-        .find(|version| version.id == version_id)
-        .and_then(|version| version.validation.clone())
-        .ok_or("compile did not attach validation")?;
-    let blocking_findings = validation
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == entwurf_core::Severity::Blocking)
-        .map(|finding| finding.message.clone())
-        .collect();
-    Ok(ExportResult {
-        artifacts,
-        validation_passed: validation.is_passing(),
-        blocking_findings,
     })
 }
-
+#[tauri::command]
+async fn import_sources(
+    app: tauri::AppHandle,
+    task_id: String,
+    paths: Vec<String>,
+) -> Result<WorkspaceSnapshot, String> {
+    let options = ingestion_options(&app)?;
+    workspace_call(app, move |ws| {
+        ws.import_sources(
+            &task_id,
+            &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
+            &options,
+        )
+    })
+    .await
+}
+#[tauri::command]
+async fn reimport_source(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    source_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    let options = ingestion_options(&app)?;
+    workspace_call(app, move |ws| {
+        ws.reimport_source(&task_id, &base_version_id, &source_id, &options)
+    })
+    .await
+}
+#[tauri::command]
+async fn update_nodes(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    edits: Vec<NodeEdit>,
+    node_order: Option<Vec<String>>,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.update_nodes(&task_id, &base_version_id, edits, node_order)
+    })
+    .await
+}
+#[tauri::command]
+async fn rollback_version(
+    app: tauri::AppHandle,
+    task_id: String,
+    version_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.rollback_version(&task_id, &version_id)).await
+}
+#[tauri::command]
+async fn revert_correction(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    correction_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.revert_correction(&task_id, &base_version_id, &correction_id)
+    })
+    .await
+}
+#[tauri::command]
+async fn resolve_review(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    item_id: String,
+    note: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.resolve_review(&task_id, &base_version_id, &item_id, &note)
+    })
+    .await
+}
+#[tauri::command]
+async fn import_style_images(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.import_style_images(&paths.into_iter().map(PathBuf::from).collect::<Vec<_>>())
+    })
+    .await
+}
+#[tauri::command]
+async fn save_settings(
+    app: tauri::AppHandle,
+    ocr_languages: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.save_settings(&ocr_languages)).await
+}
+#[tauri::command]
+async fn save_style(app: tauri::AppHandle, style: StyleSpec) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.save_style(style)).await
+}
+#[tauri::command]
+async fn prepare_handoff(
+    app: tauri::AppHandle,
+    task_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.prepare_handoff(&task_id)).await
+}
+#[tauri::command]
+async fn import_result(
+    app: tauri::AppHandle,
+    task_id: String,
+    json: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.import_result(&task_id, &json)).await
+}
+#[tauri::command]
+async fn validate_current(
+    app: tauri::AppHandle,
+    task_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.preview_current(&task_id)).await
+}
+#[tauri::command]
+async fn preview_current(
+    app: tauri::AppHandle,
+    task_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| ws.preview_current(&task_id)).await
+}
+#[tauri::command]
+async fn export_current(
+    app: tauri::AppHandle,
+    task_id: String,
+    output_dir: Option<String>,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.export_current(&task_id, output_dir.map(PathBuf::from))
+    })
+    .await
+}
+#[tauri::command]
+async fn choose_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .blocking_pick_folder()
+            .map(|p| {
+                p.into_path()
+                    .map(|p| p.display().to_string())
+                    .map_err(|e| e.to_string())
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn choose_sources(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter(
+                "Sources",
+                &[
+                    "pdf", "md", "markdown", "tex", "latex", "png", "jpg", "jpeg", "bmp", "tif",
+                    "tiff", "webp",
+                ],
+            )
+            .blocking_pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                p.into_path()
+                    .map(|p| p.display().to_string())
+                    .map_err(|e| e.to_string())
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn choose_result_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(p) = app
+            .dialog()
+            .file()
+            .add_filter("ResultEnvelope JSON", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = p.into_path().map_err(|e| e.to_string())?;
+        if std::fs::metadata(&path).map_err(|e| e.to_string())?.len() > 16 * 1024 * 1024 {
+            return Err("Result file exceeds 16 MiB".into());
+        }
+        std::fs::read_to_string(path)
+            .map(Some)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn copy_prompt(app: tauri::AppHandle, task_id: String) -> Result<(), String> {
+    let app2 = app.clone();
+    workspace_call(app, move |ws| {
+        let snapshot = ws.snapshot(Some(&task_id))?;
+        let text = snapshot
+            .handoff
+            .as_ref()
+            .ok_or_else(|| {
+                entwurf_core::EntwurfError::InvalidInput("prepare a prompt first".into())
+            })?
+            .markdown
+            .clone();
+        app2.clipboard()
+            .write_text(text)
+            .map_err(|e| entwurf_core::EntwurfError::InvalidInput(e.to_string()))?;
+        Ok(snapshot)
+    })
+    .await
+    .map(|_| ())
+}
+#[tauri::command]
+async fn open_export(
+    app: tauri::AppHandle,
+    task_id: String,
+    kind: String,
+    index: Option<usize>,
+) -> Result<(), String> {
+    let app2 = app.clone();
+    workspace_call(app, move |ws| {
+        let path = ws.artifact_path(&task_id, &kind, index.unwrap_or(0))?;
+        app2.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| entwurf_core::EntwurfError::InvalidInput(e.to_string()))?;
+        ws.snapshot(Some(&task_id))
+    })
+    .await
+    .map(|_| ())
+}
+#[tauri::command]
+async fn open_chatgpt() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(||{use std::os::windows::process::CommandExt;let output=std::process::Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command","[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $apps=@(Get-StartApps | Where-Object { ($_.Name -eq 'ChatGPT') -and ($_.AppID -match '^OpenAI[.]ChatGPT(-Desktop)?_2p2nqsd0c76g0!') }); if($apps.Count -ne 1){exit 3}; $apps[0].AppID"]).creation_flags(0x08000000).output().map_err(|e|e.to_string())?;let id=String::from_utf8_lossy(&output.stdout).trim().to_owned();if !output.status.success()||id.is_empty(){return Err("ChatGPT desktop app was not uniquely found. Open it manually from Windows Start.".into());}std::process::Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{id}")).spawn().map_err(|e|e.to_string())?;Ok(())}).await.map_err(|e|e.to_string())?
+    }
+    #[cfg(not(windows))]
+    {
+        Err("ChatGPT desktop launch is available on Windows. Open ChatGPT manually.".into())
+    }
+}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(std::sync::Mutex::new(AppState::default()))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(AppState::new(None))
         .invoke_handler(tauri::generate_handler![
             bootstrap,
+            open_workspace,
             create_project,
             load_existing_project,
-            import_sources,
-            compile_current,
-            default_style,
-            open_workspace,
+            workspace_snapshot,
             create_task,
-            save_ir,
+            import_sources,
+            reimport_source,
             update_nodes,
-            export_current
+            rollback_version,
+            revert_correction,
+            resolve_review,
+            save_style,
+            import_style_images,
+            save_settings,
+            prepare_handoff,
+            import_result,
+            validate_current,
+            preview_current,
+            export_current,
+            choose_directory,
+            choose_sources,
+            choose_result_file,
+            copy_prompt,
+            open_export,
+            open_chatgpt
         ])
         .run(tauri::generate_context!())
         .expect("error while running Entwurf");

@@ -8,13 +8,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Push-Location $root
 try {
     & (Join-Path $PSScriptRoot 'prepare-pdfium.ps1')
+    & (Join-Path $PSScriptRoot 'prepare-gpt-bridge.ps1')
     Push-Location (Join-Path $root 'apps\desktop')
     try {
         Invoke-CheckedNative 'pnpm' @('install', '--frozen-lockfile')
         Invoke-CheckedNative 'pnpm' @('build')
     } finally { Pop-Location }
     Invoke-CheckedNative 'cargo' @('build', '--locked', '--workspace', '--release', '--target', 'x86_64-pc-windows-msvc')
-    Invoke-CheckedNative 'dotnet' @('publish', 'sidecars/gpt-bridge/Entwurf.Bridge/Entwurf.Bridge.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $root 'artifacts\gpt-bridge'))
     Push-Location (Join-Path $root 'apps\desktop')
     try {
         $tauriArguments = @('tauri', 'build', '--target', 'x86_64-pc-windows-msvc')
@@ -22,5 +22,5 @@ try {
         $tauriArguments += @('--', '--locked')
         Invoke-CheckedNative 'pnpm' $tauriArguments
     } finally { Pop-Location }
-    Write-Output 'Build completed. The sidecar is published separately under artifacts/gpt-bridge; packaging integration is a separate release gate.'
+    Write-Output 'Build completed with the self-contained GPT bridge bundled as resources. ChatGPT automation remains disabled pending all four real acceptance gates.'
 } finally { Pop-Location }

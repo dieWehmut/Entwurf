@@ -4,10 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::Result;
-use crate::ir::{Id, KnowledgeIr, KnowledgeNode, NodeKind, StyleSpec};
+use crate::ir::{Id, KnowledgeIr, NodeKind, StyleSpec};
 use crate::model::{
     mm_to_pt, LayoutDocument, LayoutPage, PlacedEdge, PlacedGroup, PlacedNode, Point, Rect,
-    TextLine,
 };
 
 #[derive(Debug, Clone)]
@@ -53,118 +52,151 @@ pub fn layout(
     let width_pt = mm_to_pt(style.paper.width_mm);
     let height_pt = mm_to_pt(style.paper.height_mm);
     let margin_pt = mm_to_pt(style.paper.margin_mm);
+    if ![
+        width_pt,
+        height_pt,
+        margin_pt,
+        options.column_gap_pt,
+        options.node_gap_pt,
+        options.card_padding_pt,
+        options.min_font_pt,
+        options.max_font_pt,
+        style.typography.body_pt,
+        style.typography.line_height,
+    ]
+    .iter()
+    .all(|v| v.is_finite() && *v >= 0.0)
+        || options.max_pages == 0
+        || options.column_gap_pt < 8.0
+        || options.min_font_pt < 8.0
+        || options.max_font_pt < options.min_font_pt
+        || options.preferred_columns == 0
+        || options.preferred_columns > 12
+        || width_pt <= 2.0 * margin_pt
+        || height_pt <= 2.0 * margin_pt + 100.0
+    {
+        return Err(crate::error::EntwurfError::Render(
+            "invalid canvas or layout options".into(),
+        ));
+    }
     let content = Rect::new(
         margin_pt,
-        margin_pt,
-        width_pt - margin_pt * 2.0,
-        height_pt - margin_pt * 2.0,
+        margin_pt + 72.0,
+        width_pt - 2.0 * margin_pt,
+        height_pt - 2.0 * margin_pt - 88.0,
     );
-
-    let title_height = 58.0;
-    let column_count = options.preferred_columns.max(1);
-    let columns = column_rects(content, column_count, options.column_gap_pt);
-    let mut pages: Vec<LayoutPage> = Vec::new();
+    let columns = column_rects(content, options.preferred_columns, options.column_gap_pt);
+    let card_width = columns[0].width;
+    let inner_width = card_width - options.card_padding_pt * 2.0;
+    if inner_width < 32.0 {
+        return Err(crate::error::EntwurfError::Render(
+            "columns leave no readable card width".into(),
+        ));
+    }
+    let mut pages = Vec::new();
     let mut current = new_page(1, width_pt, height_pt, margin_pt);
-    let mut column_heights = vec![title_height + 14.0; column_count];
-    let mut group_map: BTreeMap<String, PlacedGroup> = BTreeMap::new();
-    let mut diagnostics = Vec::new();
-
+    let mut heights = vec![0.0; columns.len()];
+    // Groups are kept in stable chapter order. Each page/column fragment owns
+    // its own group geometry, avoiding stale cross-page rectangles.
     for group in build_groups(ir) {
+        let mut group_column = None;
         for node_id in group.node_ids {
-            let Some(node) = ir.node(&node_id) else {
-                continue;
-            };
-            let estimated = measure_node(node, columns[0].width - 16.0, style, options).1;
-            let column_index = choose_column(
-                &column_heights,
-                estimated + 34.0,
-                content.height - title_height - 24.0,
-            );
-            let column_index = match column_index {
-                Some(index) => index,
-                None if current.nodes.is_empty() => {
-                    diagnostics.push(format!("node {} cannot fit within one A3 page", node.title));
-                    0
-                }
-                None => {
-                    finalize_page(&mut current, ir, &mut group_map);
-                    let next_index = pages.len() as u16 + 2;
-                    pages.push(std::mem::replace(
-                        &mut current,
-                        new_page(next_index, width_pt, height_pt, margin_pt),
-                    ));
-                    column_heights = vec![title_height + 14.0; column_count];
-                    0
-                }
-            };
-            let column = columns[column_index];
-            let top = content.y + column_heights[column_index];
-            let card_width = column.width - 18.0;
-            let card_height = measure_node(node, card_width, style, options).1;
-            let padding = 10.0;
-            let group_key = group.id.clone();
-            let existing = group_map.get(&group_key).cloned();
-            let group_top = existing
-                .as_ref()
-                .and_then(|placed| {
-                    if placed.page == current.index {
-                        Some(placed.rect.y)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(top);
-            let node_rect = Rect::new(column.x + 9.0, top + 24.0, card_width, card_height);
-            let placed = place_node(node, node_rect, current.index, style, options)?;
-            let new_group_rect = match existing {
-                Some(mut placed_group) => {
-                    placed_group.rect.height = (placed.rect.bottom() + padding
-                        - placed_group.rect.y)
-                        .max(placed_group.rect.height);
-                    group_map.insert(group_key.clone(), placed_group);
-                    None
-                }
-                None => Some(Rect::new(
-                    column.x,
-                    group_top,
-                    column.width,
-                    placed.rect.bottom() + padding - group_top,
-                )),
-            };
-            if let Some(rect) = new_group_rect {
-                group_map.insert(
-                    group_key,
-                    PlacedGroup {
-                        id: group.id.clone(),
-                        title: group.title.clone(),
-                        page: current.index,
-                        rect,
-                    },
-                );
+            let node = ir.node(&node_id).expect("group ids come from IR");
+            let card = crate::rendering::measure_card(
+                &crate::rendering::display_node(ir, node),
+                inner_width,
+                style,
+                options,
+            )?;
+            let card_height = card.height + 2.0 * options.card_padding_pt;
+            if card_height > content.height {
+                return Err(crate::error::EntwurfError::Render(format!(
+                    "node {} cannot fit on one page at readable size",
+                    node.id
+                )));
             }
-            current.nodes.push(placed);
-            column_heights[column_index] =
-                (node_rect.bottom() + options.node_gap_pt + padding) - content.y;
+            let selected = group_column
+                .filter(|&index| heights[index] + card_height <= content.height)
+                .or_else(|| choose_column(&heights, card_height, content.height));
+            let index = match selected {
+                Some(index) => index,
+                None => {
+                    current.edges = route_edges(ir, &current, current.index);
+                    pages.push(current);
+                    if pages.len() >= options.max_pages as usize {
+                        return Err(crate::error::EntwurfError::Render(format!(
+                            "page budget {} exceeded; all content must be preserved",
+                            options.max_pages
+                        )));
+                    }
+                    current = new_page(pages.len() as u16 + 1, width_pt, height_pt, margin_pt);
+                    heights.fill(0.0);
+                    0
+                }
+            };
+            group_column = Some(index);
+            let rect = Rect::new(
+                columns[index].x,
+                content.y + heights[index],
+                card_width,
+                card_height,
+            );
+            let dx = rect.x + options.card_padding_pt;
+            let dy = rect.y + options.card_padding_pt;
+            let lines = card
+                .lines
+                .iter()
+                .cloned()
+                .map(|mut line| {
+                    line.x += dx;
+                    line.baseline += dy;
+                    line
+                })
+                .collect();
+            current.nodes.push(PlacedNode {
+                node_id: node.id.clone(),
+                kind: node.kind.clone(),
+                title: node.title.clone(),
+                body: node.body.clone(),
+                latex: node.latex.clone(),
+                page: current.index,
+                rect,
+                title_lines: Vec::new(),
+                body_lines: lines,
+                latex_lines: Vec::new(),
+                text_clipped: false,
+                measured_content_rect: Some(Rect::new(
+                    dx + card.bounds.x,
+                    dy + card.bounds.y,
+                    card.bounds.width,
+                    card.bounds.height,
+                )),
+                measured_font_pt: Some(card.minimum_font),
+            });
+            let key = format!("{}:p{}:c{}", group.id, current.index, index);
+            if let Some(fragment) = current.groups.iter_mut().find(|g| g.id == key) {
+                fragment.rect.height = rect.bottom() - fragment.rect.y;
+            } else {
+                current.groups.push(PlacedGroup {
+                    id: key,
+                    title: group.title.clone(),
+                    page: current.index,
+                    rect,
+                });
+            }
+            heights[index] += card_height + options.node_gap_pt;
         }
     }
     if !current.nodes.is_empty() || pages.is_empty() {
-        finalize_page(&mut current, ir, &mut group_map);
+        current.edges = route_edges(ir, &current, current.index);
         pages.push(current);
-    }
-
-    if pages.len() as u16 > options.max_pages {
-        diagnostics.push(format!(
-            "page budget {} exceeded; {} pages are required",
-            options.max_pages,
-            pages.len()
-        ));
     }
     Ok(LayoutDocument {
         width_pt,
         height_pt,
         margin_pt,
         pages,
-        diagnostics,
+        diagnostics: Vec::new(),
     })
 }
 
@@ -193,27 +225,6 @@ fn choose_column(heights: &[f32], needed: f32, max_height: f32) -> Option<usize>
     candidates.first().copied()
 }
 
-fn finalize_page(
-    page: &mut LayoutPage,
-    ir: &KnowledgeIr,
-    group_map: &mut BTreeMap<String, PlacedGroup>,
-) {
-    page.groups = group_map.values().cloned().collect();
-    page.groups.sort_by(|left, right| {
-        left.rect
-            .y
-            .partial_cmp(&right.rect.y)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                left.rect
-                    .x
-                    .partial_cmp(&right.rect.x)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    });
-    page.edges = route_edges(ir, page, page.index);
-}
-
 #[derive(Debug, Clone)]
 struct Group {
     id: Id,
@@ -223,181 +234,30 @@ struct Group {
 
 fn build_groups(ir: &KnowledgeIr) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
-    let chapter_ids: BTreeSet<&str> = ir
-        .nodes
-        .iter()
-        .filter(|node| matches!(node.kind, NodeKind::Chapter | NodeKind::Section))
-        .map(|node| node.id.as_str())
-        .collect();
     for node in &ir.nodes {
-        if node.kind == NodeKind::Chapter {
-            groups.push(Group {
-                id: format!("group:{}", node.id),
-                title: node.title.clone(),
-                node_ids: vec![node.id.clone()],
-            });
+        let mut root = node;
+        let mut seen = BTreeSet::new();
+        while !matches!(root.kind, NodeKind::Chapter | NodeKind::Section) {
+            if !seen.insert(root.id.as_str()) {
+                break;
+            }
+            let Some(parent) = root.parent_id.as_deref().and_then(|id| ir.node(id)) else {
+                break;
+            };
+            root = parent;
         }
-    }
-    for node in &ir.nodes {
-        if node.kind == NodeKind::Chapter {
-            continue;
-        }
-        let group_index = match &node.parent_id {
-            Some(parent) if chapter_ids.contains(parent.as_str()) => groups
-                .iter()
-                .position(|group| group.node_ids.first() == Some(parent)),
-            _ => None,
-        };
-        if let Some(index) = group_index {
-            groups[index].node_ids.push(node.id.clone());
+        let id = format!("group:{}", root.id);
+        if let Some(group) = groups.iter_mut().find(|g| g.id == id) {
+            group.node_ids.push(node.id.clone());
         } else {
             groups.push(Group {
-                id: format!("group:{}", node.id),
-                title: node.title.clone(),
+                id,
+                title: root.title.clone(),
                 node_ids: vec![node.id.clone()],
             });
         }
     }
-    if groups.is_empty() {
-        groups.push(Group {
-            id: "group:all".to_string(),
-            title: ir.title.clone(),
-            node_ids: ir.nodes.iter().map(|node| node.id.clone()).collect(),
-        });
-    }
     groups
-}
-
-fn measure_node(
-    node: &KnowledgeNode,
-    width: f32,
-    style: &StyleSpec,
-    options: &LayoutOptions,
-) -> (f32, f32) {
-    let title_size = (style.typography.body_pt * 1.24).clamp(9.0, options.max_font_pt + 2.0);
-    let body_size = style
-        .typography
-        .body_pt
-        .clamp(options.min_font_pt, options.max_font_pt);
-    let title_lines = wrap_text(
-        &node.title,
-        width - options.card_padding_pt * 2.0,
-        title_size,
-    );
-    let body_lines = wrap_text(&node.body, width - options.card_padding_pt * 2.0, body_size);
-    let latex_lines = node
-        .latex
-        .as_deref()
-        .map(|latex| wrap_text(latex, width - options.card_padding_pt * 2.0, body_size))
-        .unwrap_or_default();
-    let line_gap = body_size * style.typography.line_height;
-    let height = options.card_padding_pt * 2.0
-        + title_lines.len() as f32 * title_size * 1.28
-        + body_lines.len() as f32 * line_gap
-        + latex_lines.len() as f32 * line_gap
-        + 12.0;
-    (width, height.max(42.0))
-}
-
-fn place_node(
-    node: &KnowledgeNode,
-    rect: Rect,
-    page: u16,
-    style: &StyleSpec,
-    options: &LayoutOptions,
-) -> Result<PlacedNode> {
-    let title_size = (style.typography.body_pt * 1.24).clamp(9.0, options.max_font_pt + 2.0);
-    let body_size = style
-        .typography
-        .body_pt
-        .clamp(options.min_font_pt, options.max_font_pt);
-    let line_gap = body_size * style.typography.line_height;
-    let inner_width = rect.width - options.card_padding_pt * 2.0;
-    let title_lines = positioned_lines(
-        &node.title,
-        rect.x + options.card_padding_pt,
-        rect.y + options.card_padding_pt + title_size,
-        inner_width,
-        title_size,
-        line_gap,
-        true,
-    );
-    let body_top =
-        rect.y + options.card_padding_pt + title_lines.len() as f32 * title_size * 1.28 + 6.0;
-    let body_lines = positioned_lines(
-        &node.body,
-        rect.x + options.card_padding_pt,
-        body_top + body_size,
-        inner_width,
-        body_size,
-        line_gap,
-        false,
-    );
-    let latex_top = body_top + body_lines.len() as f32 * line_gap + 4.0;
-    let latex_lines = node
-        .latex
-        .as_deref()
-        .map(|latex| {
-            positioned_lines(
-                latex,
-                rect.x + options.card_padding_pt,
-                latex_top + body_size,
-                inner_width,
-                body_size,
-                line_gap,
-                false,
-            )
-        })
-        .unwrap_or_default();
-    let text_bottom = latex_lines
-        .last()
-        .map(|line| line.baseline + line_gap * 0.35)
-        .or_else(|| {
-            body_lines
-                .last()
-                .map(|line| line.baseline + line_gap * 0.35)
-        })
-        .unwrap_or(body_top);
-    Ok(PlacedNode {
-        node_id: node.id.clone(),
-        kind: node.kind.clone(),
-        title: node.title.clone(),
-        body: node.body.clone(),
-        latex: node.latex.clone(),
-        page,
-        rect: Rect::new(
-            rect.x,
-            rect.y,
-            rect.width,
-            (text_bottom - rect.y + options.card_padding_pt).max(42.0),
-        ),
-        title_lines,
-        body_lines,
-        latex_lines,
-        text_clipped: false,
-    })
-}
-
-fn positioned_lines(
-    text: &str,
-    x: f32,
-    first_baseline: f32,
-    width: f32,
-    font_size: f32,
-    line_gap: f32,
-    bold: bool,
-) -> Vec<TextLine> {
-    wrap_text(text, width, font_size)
-        .into_iter()
-        .enumerate()
-        .map(|(index, text)| TextLine {
-            text,
-            x,
-            baseline: first_baseline + index as f32 * line_gap,
-            font_size,
-            bold,
-        })
-        .collect()
 }
 
 pub fn wrap_text(text: &str, width: f32, font_size: f32) -> Vec<String> {
@@ -456,32 +316,57 @@ fn column_rects(content: Rect, count: usize, gap: f32) -> Vec<Rect> {
 }
 
 fn route_edges(ir: &KnowledgeIr, page: &LayoutPage, page_number: u16) -> Vec<PlacedEdge> {
-    let mut positions = BTreeMap::new();
-    for node in &page.nodes {
-        positions.insert(node.node_id.clone(), node.rect);
-    }
+    let positions: BTreeMap<_, _> = page
+        .nodes
+        .iter()
+        .map(|n| (n.node_id.as_str(), n.rect))
+        .collect();
     let mut edges = Vec::new();
     for edge in &ir.edges {
-        let (Some(from), Some(to)) = (positions.get(&edge.from), positions.get(&edge.to)) else {
+        let (Some(from), Some(to)) = (
+            positions.get(edge.from.as_str()),
+            positions.get(edge.to.as_str()),
+        ) else {
             continue;
         };
-        let start = Point::new(
-            from.right(),
-            (from.y + from.height * 0.5).min(from.bottom() - 6.0),
-        );
-        let end = Point::new(to.x, (to.y + to.height * 0.5).min(to.bottom() - 6.0));
-        let mid_x = (start.x + end.x) * 0.5;
+        let sy = from.y + from.height / 2.0;
+        let ty = to.y + to.height / 2.0;
+        let lane = 4.0;
+        let points = if (from.x - to.x).abs() < 0.1 {
+            let x = from.right() + lane;
+            vec![
+                Point::new(from.right(), sy),
+                Point::new(x, sy),
+                Point::new(x, ty),
+                Point::new(to.right(), ty),
+            ]
+        } else {
+            let (sx, tx) = if from.x < to.x {
+                (from.right(), to.x)
+            } else {
+                (from.x, to.right())
+            };
+            let sign = if from.x < to.x { 1.0 } else { -1.0 };
+            let x1 = sx + sign * lane;
+            let x2 = tx - sign * lane;
+            // All columns share x extents. Their outer lanes are free of
+            // cards; the band above the first card connects distant columns.
+            let y = page.margin_pt + 64.0;
+            vec![
+                Point::new(sx, sy),
+                Point::new(x1, sy),
+                Point::new(x1, y),
+                Point::new(x2, y),
+                Point::new(x2, ty),
+                Point::new(tx, ty),
+            ]
+        };
         edges.push(PlacedEdge {
             edge_id: edge.id.clone(),
             from_node: edge.from.clone(),
             to_node: edge.to.clone(),
             page: page_number,
-            points: vec![
-                start,
-                Point::new(mid_x, start.y),
-                Point::new(mid_x, end.y),
-                end,
-            ],
+            points,
             label: edge.label.clone(),
         });
     }
@@ -491,7 +376,9 @@ fn route_edges(ir: &KnowledgeIr, page: &LayoutPage, page_number: u16) -> Vec<Pla
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Importance, NodeOrigin, SourceAnchor, SourceFile, SourceKind, StyleSpec};
+    use crate::ir::{
+        Importance, KnowledgeNode, NodeOrigin, SourceAnchor, SourceFile, SourceKind, StyleSpec,
+    };
 
     fn ir_with_nodes() -> KnowledgeIr {
         let mut ir = KnowledgeIr::empty("p", "t", "Probability");

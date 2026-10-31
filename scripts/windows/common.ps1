@@ -39,13 +39,15 @@ function Get-RequirementResults {
     if ($Snapshot.NodeVersion -match 'v?(\d+\.\d+\.\d+)') { $node = [version]$Matches[1] }
     $pnpm = [version]'0.0'
     if ($Snapshot.PnpmVersion -match '^10\.\d+\.\d+$') { $pnpm = [version]$Snapshot.PnpmVersion }
+    $rust = [version]'0.0'
+    if ($Snapshot.RustVersion -match '^\d+\.\d+\.\d+$') { $rust = [version]$Snapshot.RustVersion }
     $webview = [version]'0.0'
     if ($Snapshot.WebViewVersion -match '^\d+(\.\d+)+$') { $webview = [version]$Snapshot.WebViewVersion }
     $specs = @(
         ,@('Windows x64', ($Snapshot.WindowsVersion.Major -eq 10 -and $Snapshot.WindowsVersion.Build -ge 10240 -and $Snapshot.Architecture -eq 'AMD64'), $true, 'Windows 10/11 x64; ARM64 and WSL builds are not supported.')
         ,@('Node.js', ($node -ge [version]'22.12.0'), $true, 'Install Node.js 22.12+ (LTS recommended) and reopen the terminal.')
         ,@('pnpm', ($pnpm.Major -eq 10), $true, 'Install supported pnpm 10: npm install --global pnpm@10.34.9')
-        ,@('Rust MSVC', ($Snapshot.RustHost -eq 'x86_64-pc-windows-msvc' -and $Snapshot.RustTargets -contains 'x86_64-pc-windows-msvc' -and -not [string]::IsNullOrWhiteSpace($Snapshot.CargoVersion)), $true, 'Install rustup; rustup default stable-x86_64-pc-windows-msvc; rustup target add x86_64-pc-windows-msvc')
+        ,@('Rust MSVC', ($rust -ge [version]'1.92.0' -and $Snapshot.RustHost -eq 'x86_64-pc-windows-msvc' -and $Snapshot.RustTargets -contains 'x86_64-pc-windows-msvc' -and -not [string]::IsNullOrWhiteSpace($Snapshot.CargoVersion)), $true, 'Install Rust 1.92+ for the pinned Typst renderer; rustup update stable; rustup default stable-x86_64-pc-windows-msvc; rustup target add x86_64-pc-windows-msvc')
         ,@('MSVC C++ tools', [bool]$Snapshot.MsvcAvailable, $true, 'Install Visual Studio 2022 Build Tools with Desktop development with C++.')
         ,@('Windows SDK', [bool]$Snapshot.WindowsSdkAvailable, $true, 'Install a Windows 10/11 SDK with headers and x64 libraries through Visual Studio Installer.')
         ,@('.NET 10 SDK', (@($Snapshot.DotnetSdks | Where-Object { $_ -match '^10\.' }).Count -gt 0), $true, 'Install the x64 .NET 10 SDK; a runtime alone is insufficient.')
@@ -63,6 +65,8 @@ function Get-PrerequisiteSnapshot {
     $rustInfo = Get-ToolOutput 'rustc' @('-vV')
     $rustHost = ''
     if ($rustInfo -match '(?m)^host:\s*(\S+)') { $rustHost = $Matches[1] }
+    $rustVersion = ''
+    if ($rustInfo -match '(?m)^release:\s*(\S+)') { $rustVersion = $Matches[1] }
     $rustTargets = @( (Get-ToolOutput 'rustup' @('target', 'list', '--installed')) -split '\r?\n' )
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $msvc = $false
@@ -95,7 +99,7 @@ function Get-PrerequisiteSnapshot {
     return @{
         WindowsVersion = [Environment]::OSVersion.Version; Architecture = $architecture
         NodeVersion = Get-ToolOutput 'node' @('--version'); PnpmVersion = Get-ToolOutput 'pnpm' @('--version')
-        CargoVersion = Get-ToolOutput 'cargo' @('--version'); RustHost = $rustHost; RustTargets = $rustTargets
+        CargoVersion = Get-ToolOutput 'cargo' @('--version'); RustVersion = $rustVersion; RustHost = $rustHost; RustTargets = $rustTargets
         DotnetSdks = @((Get-ToolOutput 'dotnet' @('--list-sdks')) -split '\r?\n')
         MsvcAvailable = $msvc; WindowsSdkAvailable = $sdk; WebViewVersion = $webview
         TesseractVersion = Get-ToolOutput 'tesseract' @('--version')

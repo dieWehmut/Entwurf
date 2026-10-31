@@ -38,7 +38,10 @@
     },
     "resources": [
       "../../../packages/contracts/schemas/*",
-      "resources/pdfium/**/*"
+      "resources/pdfium/**/*",
+      "../../../assets/fonts/OFL.txt",
+      "../../../assets/fonts/Typst-NOTICE.txt",
+      "resources/gpt-bridge/**/*"
     ],
     "icon": [
       "icons/icon.png",

@@ -48,3 +48,8 @@ Desktop.ini
 
 # Local implementation evidence is retained separately from product source.
 /.superpowers/
+
+# Generated self-contained Windows bridge resources (prepared before packaging).
+/apps/desktop/src-tauri/resources/gpt-bridge/*
+!/apps/desktop/src-tauri/resources/gpt-bridge/.gitignore
+!/apps/desktop/src-tauri/resources/gpt-bridge/README.md

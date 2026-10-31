@@ -16,6 +16,9 @@ availability without reading conversation text, account details, or edit values.
 1. Parent creates an inheritable anonymous pipe and a cryptographically random
    32-byte token (64 hex characters); choose `entwurf-bridge-<32 lowercase hex>`.
 2. Spawn `Entwurf.Bridge.exe --bootstrap-handle <inherited read handle>`.
+   The Rust desktop parent instead uses `--bootstrap-stdin` with redirected piped
+   stdin. This is the same single framed bootstrap, not an interactive/public CLI;
+   interactive stdin is refused.
    Never place the token on the command line, in environment variables, or logs.
 3. Write a length-prefixed UTF-8 JSON bootstrap object into the anonymous pipe:
    `{"pipe_name":"entwurf-bridge-...","token":"...","artifact_directories":[]}`.
@@ -119,3 +122,26 @@ one-time authentication, pause/cancel, task ordering, foreground/lock/structure
 protection, file timeout/ambiguity/hash, and an actual inherited-bootstrap child
 process + named-pipe exchange. The child-process test performs read-only package
 and UIA discovery if ChatGPT is installed; it never sends or reads conversations.
+
+## Desktop parent integration
+
+The Tauri bootstrap launches the packaged executable from
+`resources/gpt-bridge/Entwurf.Bridge.exe`, transfers fresh randomness over inherited
+stdin, authenticates once over the current-user named pipe, reads `detect_app`,
+and closes the connection. The client uses identification-level security QOS to
+prevent server impersonation. One probe runs at a time; the parent deadline is
+15 seconds plus bounded cleanup (two seconds grace, two seconds forced cleanup).
+Dropping an in-flight parent future kills the owned child. Pipe responses must
+have the exact request ID, valid framing no larger than 1 MiB, and all four gate
+booleans consistent with the reported automation flag. Missing binaries, failed
+authentication, timeouts, or protocol errors yield manual fallback with a fixed
+non-sensitive error code. This parent exposes no mutating bridge RPC.
+
+`prepare-gpt-bridge.ps1` publishes the self-contained runtime into ignored Tauri
+resources; `build.ps1` calls it before the desktop build. A successful discovery
+report is labelled `ready_manual`, never proof of an automated connection.
+
+Native Rust tests in `apps/desktop/src-tauri/src/bridge.rs` include an actual
+self-contained child handshake, token replay, empty stdout/stderr, bounded parent
+timeout and process cleanup. Run with `ENTWURF_BRIDGE_TEST_EXE` set to the prepared
+executable and `cargo test -p entwurf-desktop bridge::tests -- --include-ignored`.

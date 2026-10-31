@@ -252,12 +252,140 @@ impl ResultWarning {
     }
 }
 
+fn correction_value(node: &KnowledgeNode, field: &CorrectionField) -> Result<String> {
+    Ok(match field {
+        CorrectionField::Title => node.title.clone(),
+        CorrectionField::Body => node.body.clone(),
+        CorrectionField::Latex => node.latex.clone().unwrap_or_default(),
+        CorrectionField::Anchors => serde_json::to_string(&node.anchors)
+            .map_err(|e| EntwurfError::Contract(e.to_string()))?,
+    })
+}
+
+fn validate_safe_changes(baseline: &KnowledgeIr, result: &ResultEnvelope) -> Result<()> {
+    let mut ids: BTreeSet<&str> = baseline.nodes.iter().map(|n| n.id.as_str()).collect();
+    for node in &result.ir_patch.add_nodes {
+        if node.id.trim().is_empty() || !ids.insert(&node.id) {
+            return Err(EntwurfError::Contract(format!(
+                "duplicate or empty added node {}",
+                node.id
+            )));
+        }
+    }
+    for id in &result.ir_patch.remove_node_ids {
+        let node = baseline.node(id).ok_or_else(|| {
+            EntwurfError::Contract("cannot remove an unknown baseline node".into())
+        })?;
+        if node.origin == NodeOrigin::Source {
+            return Err(EntwurfError::Contract(
+                "GPT cannot delete source baseline knowledge; use an explicit manual version edit"
+                    .into(),
+            ));
+        }
+    }
+    let sources: BTreeSet<&str> = baseline.sources.iter().map(|s| s.id.as_str()).collect();
+    let mut corrected = BTreeSet::new();
+    for proposal in &result.corrections {
+        let node = baseline.node(&proposal.node_id).ok_or_else(|| {
+            EntwurfError::Contract(format!(
+                "correction references unknown baseline node {}",
+                proposal.node_id
+            ))
+        })?;
+        if node.origin == NodeOrigin::UserEdit {
+            continue;
+        }
+        let field = format!("{:?}", proposal.field);
+        if !corrected.insert((proposal.node_id.as_str(), field))
+            || correction_value(node, &proposal.field)? != proposal.before
+            || proposal.reason.trim().is_empty()
+            || !proposal.anchors.iter().any(|a| anchors_match(a, &sources))
+        {
+            return Err(EntwurfError::Contract(
+                "correction needs exact before text, a unique field, reason and source anchors"
+                    .into(),
+            ));
+        }
+        if proposal.field == CorrectionField::Anchors {
+            let _: Vec<SourceAnchor> = serde_json::from_str(&proposal.after)
+                .map_err(|e| EntwurfError::Contract(format!("invalid corrected anchors: {e}")))?;
+        }
+        if result.ir_patch.remove_node_ids.contains(&proposal.node_id) {
+            return Err(EntwurfError::Contract(
+                "cannot correct and delete the same node".into(),
+            ));
+        }
+    }
+    let mut patched = BTreeSet::new();
+    for patch in &result.ir_patch.update_nodes {
+        if !patched.insert(patch.id.as_str()) || !ids.contains(patch.id.as_str()) {
+            return Err(EntwurfError::Contract(
+                "duplicate or unknown patched node".into(),
+            ));
+        }
+        let Some(node) = baseline.node(&patch.id) else {
+            continue;
+        };
+        if node.origin == NodeOrigin::UserEdit {
+            continue;
+        }
+        if let Some(after) = &patch.latex {
+            if node.latex.as_deref() != Some(after.as_str())
+                && !result.corrections.iter().any(|c| {
+                    c.node_id == node.id && c.field == CorrectionField::Latex && c.after == *after
+                })
+            {
+                return Err(EntwurfError::Contract(
+                    "formula changes require an explicit audited correction".into(),
+                ));
+            }
+        }
+        let math_text = crate::math_text::contains_math;
+        for (field, before, after) in [
+            (CorrectionField::Title, &node.title, patch.title.as_ref()),
+            (CorrectionField::Body, &node.body, patch.body.as_ref()),
+        ] {
+            if let Some(after) = after {
+                let formula_bearing = node.latex.is_some()
+                    || node.tags.iter().any(|t| t == "formula_candidate")
+                    || math_text(before)
+                    || math_text(after);
+                if after != before
+                    && formula_bearing
+                    && !result
+                        .corrections
+                        .iter()
+                        .any(|c| c.node_id == node.id && c.field == field && c.after == *after)
+                {
+                    return Err(EntwurfError::Contract(
+                        "formula-bearing text changes require an audited correction".into(),
+                    ));
+                }
+            }
+        }
+        for c in result.corrections.iter().filter(|c| c.node_id == patch.id) {
+            let overlap = match c.field {
+                CorrectionField::Title => patch.title.as_ref(),
+                CorrectionField::Body => patch.body.as_ref(),
+                _ => None,
+            };
+            if overlap.is_some_and(|value| *value != c.after) {
+                return Err(EntwurfError::Contract(
+                    "patch conflicts with correction".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Merge a validated result into the baseline. User edits are never overwritten:
 /// GPT patches only replace fields on nodes whose origin is still GPT/source.
 pub fn apply_result(
     baseline: &KnowledgeIr,
     result: &ResultEnvelope,
 ) -> Result<(KnowledgeIr, Vec<Correction>)> {
+    validate_safe_changes(baseline, result)?;
     let mut ir = baseline.clone();
     ir.schema_version = crate::ir::IR_SCHEMA_VERSION;
 
@@ -269,6 +397,19 @@ pub fn apply_result(
             node.origin = NodeOrigin::GptCandidate;
             if node.verified {
                 node.verified = false;
+            }
+            if node.kind == crate::ir::NodeKind::Formula
+                || node.latex.is_some()
+                || crate::math_text::contains_math(&node.title)
+                || crate::math_text::contains_math(&node.body)
+            {
+                ir.unverified.push(crate::ir::UnverifiedItem {
+                    id: new_id(),
+                    node_id: Some(node.id.clone()),
+                    kind: crate::ir::UnverifiedKind::Formula,
+                    text: node.latex.clone().unwrap_or_else(|| node.body.clone()),
+                    reason: "Confirm GPT formula against its exact source".into(),
+                });
             }
             ir.nodes.push(node);
         }
@@ -285,9 +426,9 @@ pub fn apply_result(
             if let Some(body) = &patch.body {
                 node.body = body.clone();
             }
-            if let Some(latex) = &patch.latex {
-                node.latex = Some(latex.clone());
-            }
+            // Formula replacements are applied only by the audited correction below.
+            // A matching proposal is required by validate_safe_changes.
+
             if let Some(importance) = &patch.importance {
                 node.importance = importance.clone();
             }
@@ -297,6 +438,19 @@ pub fn apply_result(
 
     for edge in &result.ir_patch.add_edges {
         if ir.edges.iter().all(|existing| existing.id != edge.id) {
+            if edge
+                .label
+                .as_deref()
+                .is_some_and(crate::math_text::contains_math)
+            {
+                ir.unverified.push(crate::ir::UnverifiedItem {
+                    id: new_id(),
+                    node_id: Some(edge.from.clone()),
+                    kind: crate::ir::UnverifiedKind::Formula,
+                    text: edge.label.clone().unwrap_or_default(),
+                    reason: "Confirm GPT relation formula against its source".into(),
+                });
+            }
             ir.edges.push(edge.clone());
         }
     }
@@ -306,6 +460,8 @@ pub fn apply_result(
                 ir.nodes.retain(|candidate| candidate.id != *node_id);
                 ir.edges
                     .retain(|edge| edge.from != *node_id && edge.to != *node_id);
+                ir.unverified
+                    .retain(|item| item.node_id.as_ref() != Some(node_id));
             }
         }
     }
@@ -315,12 +471,10 @@ pub fn apply_result(
         let Some(node) = ir.node(&proposal.node_id) else {
             continue;
         };
-        let before = match proposal.field {
-            CorrectionField::Title => node.title.clone(),
-            CorrectionField::Body => node.body.clone(),
-            CorrectionField::Latex => node.latex.clone().unwrap_or_default(),
-            CorrectionField::Anchors => format!("{} anchors", node.anchors.len()),
-        };
+        if node.origin == NodeOrigin::UserEdit {
+            continue;
+        }
+        let before = proposal.before.clone();
         let correction = Correction {
             id: new_id(),
             node_id: proposal.node_id.clone(),
@@ -349,7 +503,11 @@ pub fn apply_correction(ir: &mut KnowledgeIr, correction: &Correction) {
         CorrectionField::Title => node.title = correction.after.clone(),
         CorrectionField::Body => node.body = correction.after.clone(),
         CorrectionField::Latex => node.latex = Some(correction.after.clone()),
-        CorrectionField::Anchors => {}
+        CorrectionField::Anchors => {
+            if let Ok(anchors) = serde_json::from_str(&correction.after) {
+                node.anchors = anchors;
+            }
+        }
     }
     node.verified = false;
 }
@@ -374,12 +532,27 @@ pub fn revert_correction(ir: &mut KnowledgeIr, correction_id: &str) -> Result<()
             correction.node_id
         )));
     };
+    if correction_value(node, &correction.field)? != correction.after {
+        return Err(EntwurfError::Contract(
+            "correction has been superseded; undo later changes first".into(),
+        ));
+    }
     match correction.field {
         CorrectionField::Title => node.title = correction.before.clone(),
         CorrectionField::Body => node.body = correction.before.clone(),
-        CorrectionField::Latex => node.latex = Some(correction.before.clone()),
-        CorrectionField::Anchors => {}
+        CorrectionField::Latex => {
+            node.latex = if correction.before.is_empty() {
+                None
+            } else {
+                Some(correction.before.clone())
+            }
+        }
+        CorrectionField::Anchors => {
+            node.anchors = serde_json::from_str(&correction.before)
+                .map_err(|e| EntwurfError::Contract(e.to_string()))?
+        }
     }
+    node.origin = NodeOrigin::UserEdit;
     node.verified = false;
     ir.corrections[index].reverted = true;
     ir.touch();

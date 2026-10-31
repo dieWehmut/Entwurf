@@ -176,6 +176,7 @@ pub fn validate_ir(ir: &KnowledgeIr, options: &ValidationOptions) -> Result<Vali
             );
         }
     }
+    crate::provenance::validate_provenance(ir, &mut report);
     report.metrics.insert("nodes".into(), ir.nodes.len() as f64);
     report
         .metrics
@@ -243,6 +244,44 @@ pub fn validate_layout(
                     format!("node {} extends beyond page {}", node.title, page.index),
                 );
             }
+            if node.text_clipped {
+                ir_report.push(
+                    "text_clipping",
+                    Severity::Blocking,
+                    format!("node {} reports clipped content", node.title),
+                );
+            }
+            if let Some(bounds) = node.measured_content_rect {
+                if ![bounds.x, bounds.y, bounds.width, bounds.height]
+                    .iter()
+                    .all(|v| v.is_finite())
+                    || bounds.width < 0.0
+                    || bounds.height < 0.0
+                    || bounds.x < rect.x - 0.5
+                    || bounds.y < rect.y - 0.5
+                    || bounds.right() > rect.right() + 0.5
+                    || bounds.bottom() > rect.bottom() + 0.5
+                {
+                    ir_report.push(
+                        "text_clipping",
+                        Severity::Blocking,
+                        format!("shaped glyph bounds exceed node {}", node.title),
+                    );
+                }
+                if node
+                    .measured_font_pt
+                    .is_none_or(|size| !size.is_finite() || size < options.minimum_font_pt)
+                {
+                    ir_report.push(
+                        "font_too_small",
+                        Severity::Blocking,
+                        format!(
+                            "node {} has invalid or too-small measured glyphs",
+                            node.title
+                        ),
+                    );
+                }
+            }
             for line in node
                 .title_lines
                 .iter()
@@ -265,7 +304,9 @@ pub fn validate_layout(
                     .map(|character| if character.is_ascii() { 0.56 } else { 1.0 })
                     .sum::<f32>()
                     * line.font_size;
-                if line.x + estimated_width > rect.right() + line.font_size {
+                if node.measured_content_rect.is_none()
+                    && line.x + estimated_width > rect.right() + line.font_size
+                {
                     ir_report.push(
                         "text_clipping",
                         Severity::Blocking,
@@ -411,53 +452,22 @@ pub fn source_coverage(ir: &KnowledgeIr) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{
-        Importance, KnowledgeNode, NodeKind, NodeOrigin, SourceAnchor, SourceFile, SourceKind,
-        StyleSpec,
-    };
+    use crate::ir::StyleSpec;
     use crate::layout::{layout, LayoutOptions};
 
-    fn sample() -> KnowledgeIr {
-        let mut ir = KnowledgeIr::empty("p", "t", "Test");
-        ir.sources.push(SourceFile {
-            id: "s".into(),
-            original_name: "s.md".into(),
-            kind: SourceKind::Markdown,
-            content_hash: "h".into(),
-            stored_path: "s.md".into(),
-            byte_len: 1,
-            imported_at: chrono::Utc::now(),
-            notes: vec![],
-        });
-        ir.nodes.push(KnowledgeNode {
-            id: "n".into(),
-            kind: NodeKind::Concept,
-            title: "Concept".into(),
-            body: "Body".into(),
-            latex: None,
-            anchors: vec![SourceAnchor {
-                region: None,
-                source_id: "s".into(),
-                page: None,
-                line: Some(1),
-                char_start: None,
-                char_end: None,
-                quote_hash: None,
-                label: "s:1".into(),
-            }],
-            importance: Importance::Critical,
-            origin: NodeOrigin::Source,
-            parent_id: None,
-            tags: vec![],
-            verified: false,
-            review_note: None,
-        });
-        ir
+    fn sample() -> (tempfile::TempDir, KnowledgeIr) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.md");
+        std::fs::write(&path, "# Concept\n\nBody").unwrap();
+        let ir = crate::ingest::ingest_paths(&[path], &crate::ingest::IngestOptions::standard())
+            .unwrap()
+            .into_ir("p", "t", "Test");
+        (dir, ir)
     }
 
     #[test]
     fn critical_nodes_without_anchor_are_blocking() {
-        let mut ir = sample();
+        let (_dir, mut ir) = sample();
         ir.nodes[0].anchors.clear();
         let report = validate_ir(&ir, &ValidationOptions::default()).unwrap();
         assert!(report
@@ -475,7 +485,7 @@ mod tests {
 
     #[test]
     fn layout_for_sample_passes_content_gate() {
-        let ir = sample();
+        let (_dir, ir) = sample();
         let style = StyleSpec::default();
         let doc = layout(&ir, &style, &LayoutOptions::from_style(&style)).unwrap();
         let mut report = validate_ir(&ir, &ValidationOptions::default()).unwrap();

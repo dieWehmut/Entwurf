@@ -220,6 +220,29 @@
         },
         "text_clipped": {
           "type": "boolean"
+        },
+        "measured_content_rect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact bounds of shaped glyph ink and math rules in page points.",
+          "x-rust-default": true,
+          "x-rust-skip-none": true
+        },
+        "measured_font_pt": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Smallest actual glyph size, including math scripts.",
+          "x-rust-default": true,
+          "x-rust-skip-none": true
         }
       },
       "x-rust-name": "PlacedNode",

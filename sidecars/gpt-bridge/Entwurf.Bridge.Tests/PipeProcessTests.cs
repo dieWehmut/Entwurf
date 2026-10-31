@@ -10,8 +10,10 @@ namespace Entwurf.Bridge.Tests;
 
 public sealed class PipeProcessTests(ITestOutputHelper output)
 {
-    [Fact]
-    public async Task Child_bootstrap_authentication_detection_and_pause_use_framed_named_pipe()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Child_bootstrap_authentication_detection_and_pause_use_framed_named_pipe(bool standardInputBootstrap)
     {
         var directory = Path.Combine(Path.GetTempPath(), "entwurf-pipe-test-" + Guid.NewGuid());
         Directory.CreateDirectory(directory);
@@ -20,16 +22,16 @@ public sealed class PipeProcessTests(ITestOutputHelper output)
         var pipeName = "entwurf-bridge-" + Guid.NewGuid().ToString("N");
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "Entwurf.Bridge.exe"))
-        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        info.ArgumentList.Add("--bootstrap-handle");
-        info.ArgumentList.Add(bootstrap.GetClientHandleAsString());
+        { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = standardInputBootstrap };
+        info.ArgumentList.Add(standardInputBootstrap ? "--bootstrap-stdin" : "--bootstrap-handle");
+        if (!standardInputBootstrap) info.ArgumentList.Add(bootstrap.GetClientHandleAsString());
         // Native dotnet was installed for the current user; apphost needs its runtime path.
         info.Environment["DOTNET_ROOT"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
         using var child = Process.Start(info)!;
         try
         {
             bootstrap.DisposeLocalCopyOfClientHandle();
-            await FrameCodec.WriteAsync(bootstrap, JsonSerializer.SerializeToUtf8Bytes(new
+            await FrameCodec.WriteAsync(standardInputBootstrap ? child.StandardInput.BaseStream : bootstrap, JsonSerializer.SerializeToUtf8Bytes(new
             { pipe_name = pipeName, token = secret, artifact_directories = new[] { directory } }), deadline.Token);
             using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await pipe.ConnectAsync(deadline.Token);

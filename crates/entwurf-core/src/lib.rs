@@ -18,3 +18,10 @@ pub use ir::*;
 
 /// The single source of truth for the in-memory version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+mod rendering;
+mod scene;
+
+pub mod math_text;
+pub mod provenance;
+pub mod workspace;

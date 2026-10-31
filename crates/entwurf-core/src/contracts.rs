@@ -344,6 +344,8 @@ mod tests {
                     body_lines: vec![],
                     latex_lines: vec![],
                     text_clipped: false,
+                    measured_content_rect: None,
+                    measured_font_pt: None,
                 }],
                 edges: vec![PlacedEdge {
                     edge_id: "edge-identity".into(),

@@ -24,3 +24,11 @@ walkdir.workspace = true
 pulldown-cmark = "0.13"
 pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe", "image_025"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff", "bmp", "webp"] }
+
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-svg = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-assets = {version = "=0.15.1", features = ["fonts"]}
+mitex = "=0.2.4"
+png = "=0.18.1"

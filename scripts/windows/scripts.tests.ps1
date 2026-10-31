@@ -8,7 +8,7 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 $snapshot = @{
     WindowsVersion = [version]'10.0.19045'; Architecture = 'AMD64'
-    NodeVersion = 'v22.12.0'; PnpmVersion = '10.0.0'; CargoVersion = 'cargo 1.90.0'
+    NodeVersion = 'v22.12.0'; PnpmVersion = '10.0.0'; CargoVersion = 'cargo 1.99.1'; RustVersion = '1.99.1'
     RustHost = 'x86_64-pc-windows-msvc'; RustTargets = @('x86_64-pc-windows-msvc')
     DotnetSdks = @('10.0.100 [C:\sdk]'); MsvcAvailable = $true; WindowsSdkAvailable = $true
     WebViewVersion = '130.0.0.0'; TesseractVersion = ''; OcrLanguages = @()
@@ -16,6 +16,13 @@ $snapshot = @{
 $results = @(Get-RequirementResults $snapshot)
 Assert-True (@($results | Where-Object { $_.Required -and -not $_.Available }).Count -eq 0) 'valid Windows build prerequisites are accepted'
 Assert-True (-not ($results | Where-Object Name -eq 'Tesseract').Available) 'missing OCR is reported without blocking builds'
+foreach ($version in @('1.91.1', '1.80.0', '', 'invalid')) {
+    $snapshot.RustVersion = $version
+    Assert-True (-not (Get-RequirementResults $snapshot | Where-Object Name -eq 'Rust MSVC').Available) "Rust $version is rejected before compiling the pinned renderer"
+}
+$snapshot.RustVersion = '1.92.0'
+Assert-True ((Get-RequirementResults $snapshot | Where-Object Name -eq 'Rust MSVC').Available) 'the pinned renderer minimum Rust 1.92 is accepted'
+$snapshot.RustVersion = '1.99.1'
 foreach ($version in @('8.15.0', '9.15.0', '11.0.0', 'invalid', '10.34.9-rc.1')) {
     $snapshot.PnpmVersion = $version
     $results = @(Get-RequirementResults $snapshot)
