@@ -68,11 +68,19 @@ export class ChatGptPage {
   checkConversation(run) {
     const path = this.window.location.pathname;
     if (path !== run.path) {
-      if (run.path === '/' && /^\/c\/[A-Za-z0-9_-]+$/.test(path) && !run.boundConversation) {
-        run.path = path; run.boundConversation = true;
-      } else throw new Error('conversation_changed');
+      if (!(run.path === '/' && /^\/c\/[A-Za-z0-9_-]+$/.test(path) && !run.boundConversation)) throw new Error('conversation_changed');
     }
-    if (this.document.querySelectorAll('[data-message-author-role="user"]').length > run.userCount + 1) throw new Error('conversation_changed');
+    const users = this.document.querySelectorAll('[data-message-author-role="user"]');
+    if (users.length > run.userCount + 1 || users.length < run.userCount) throw new Error('conversation_changed');
+    const user = users[run.userCount];
+    if (run.user && run.user !== user) throw new Error('conversation_changed');
+    if (!user) return false;
+    // Inspect only this new turn, never prior conversation text. A route change
+    // alone cannot bind an existing conversation's image to this submission.
+    if (normalize(user.innerText ?? user.textContent ?? '') !== run.prompt) throw new Error('submitted_prompt_mismatch');
+    run.user = user;
+    if (path !== run.path) { run.path = path; run.boundConversation = true; }
+    return true;
   }
   downloadButton(response) {
     const buttons = [...response.querySelectorAll('button,a[download]')].filter(button => {
@@ -85,12 +93,12 @@ export class ChatGptPage {
   observe(run_id) {
     const run = this.requireRun(run_id);
     if (!run.submitted) throw new Error('not_submitted');
-    this.checkConversation(run);
     if (this.now() - run.started > 10 * 60 * 1000) throw new Error('generation_timeout');
+    if (!this.checkConversation(run)) return { phase: 'generating' };
     const responses = [...this.document.querySelectorAll('[data-message-author-role="assistant"]')];
     if (!run.response) run.response = responses[run.assistantCount] ?? null;
     if (!run.response) return { phase: 'generating' };
-    if (!run.response.isConnected) throw new Error('response_changed');
+    if (!run.response.isConnected || !(run.user.compareDocumentPosition(run.response) & this.window.Node.DOCUMENT_POSITION_FOLLOWING)) throw new Error('response_changed');
     if ([...this.document.querySelectorAll(stopSelector)].some(e => this.visible(e)) || run.response.querySelector('[aria-busy="true"]')) {
       run.stable = null; return { phase: 'generating' };
     }

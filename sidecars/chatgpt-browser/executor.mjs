@@ -62,7 +62,7 @@ export class RunExecutor {
       if (record.phase === 'completed') return this.report(record);
       try { await this.transport.cancel(record.target, run_id); } catch { /* The tab may already be closed. */ }
       record.phase = 'cancelled'; delete record.detail;
-      this.active = null;
+      if (this.active === run_id) this.active = null;
       await this.report(record);
       this.emit({ type: 'status', run_id, phase: 'cancelled', external_generation_stopped: false });
       return record;
@@ -71,7 +71,8 @@ export class RunExecutor {
   accept(run_id) { return this.exclusive(async () => {
     const record = await this.store.get(run_id);
     if (!record || !['awaiting_import', 'completed'].includes(record.phase)) throw new Error('invalid_acknowledgement');
-    record.phase = 'completed'; this.active = null;
+    record.phase = 'completed';
+    if (this.active === run_id) this.active = null;
     await this.report(record);
     await this.artifactStore?.remove(run_id);
     return record;
@@ -116,6 +117,7 @@ export class RunExecutor {
       if (this.cancelled.has(run.run_id)) throw new Error('cancelled');
       record.phase = 'submit_intent';
       await this.report(record);
+      if (this.cancelled.has(run.run_id)) throw new Error('cancelled');
       await this.transport.submit(record.target, run);
       record.phase = 'submitted';
       delete record.detail;

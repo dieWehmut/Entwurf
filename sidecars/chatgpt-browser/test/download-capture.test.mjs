@@ -33,3 +33,13 @@ test('a blob download with no referrer must match the exact scoped download anch
   assert.equal(result, 'original');
   assert.deepEqual(read, ['blob:https://chatgpt.com/exact-download']);
 });
+
+test('a known download anchor rejects a different image from the same conversation', async () => {
+  const event = events(), read = [];
+  await assert.rejects(captureDownload({ onCreated: event }, 'https://chatgpt.com/c/task', async () => {
+    event.fire({ id: 1, referrer: 'https://chatgpt.com/c/task', url: 'blob:https://chatgpt.com/unrelated' });
+  }, async url => { read.push(url); return 'wrong-image'; },
+  { settleMs: 1, timeoutMs: 20, expectedUrl: 'blob:https://chatgpt.com/exact-download' }), /download_timeout/);
+  assert.deepEqual(read, []);
+  assert.equal(event.count(), 0);
+});

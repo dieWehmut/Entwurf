@@ -58,6 +58,8 @@ retain `submit_intent`, `submitted` and `submission_uncertain`; these map to
 is permanently bound to its task, base version and prompt hash. Submit intent is
 persisted in `chrome.storage.local` before the only click. Recovery never repeats
 an ambiguous submission. Prompts are not persisted in the run records.
+Cancellation received while intent is being persisted prevents the click.
+Late acknowledgement or cancellation for an earlier run cannot release a newer run.
 
 One run may be active. Cancellation stops local observation and import; it
 reports `external_generation_stopped:false`. A failed/paused result never means
@@ -69,7 +71,9 @@ hash. It must not respond with acceptance merely because bytes reached staging.
 ## Completion and original image capture
 
 The content adapter rejects a nonempty composer and changes made before submit.
-It observes only the new assistant response after the run's baseline. Completion
+It verifies the new user turn matches the submitted prompt and binds only the
+assistant response following that turn; replacing the bound turn is rejected.
+This check reads only the new turn, without collecting prior conversation text. Completion
 requires a loaded image, a scoped download action, no visible generation control,
 and stable image identity/dimensions for 1.5 seconds. A missing Stop button or an
 old image does not satisfy completion. Navigation, multiple images/downloads,
@@ -77,7 +81,7 @@ unsupported controls and a ten-minute deadline yield bounded failure reasons.
 
 The extension registers a browser download listener before clicking that
 response's Download action. The download must name the exact conversation in its
-referrer or match the exact URL of the response's Download anchor (Chrome omits
+referrer when no anchor URL is available, or match the exact URL of the response's Download anchor (Chrome omits
 referrers for some blob downloads). It fetches the URL emitted by that browser download (including a
 same-origin blob), not a model-returned URL or filesystem path. The fetched image
 must decode as PNG/JPEG/WebP, remain within 32 MiB and 64 million pixels, and have

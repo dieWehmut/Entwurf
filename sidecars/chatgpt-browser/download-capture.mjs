@@ -12,7 +12,7 @@ export async function captureDownload(downloads, conversationUrl, click, read, {
         try { referrer = new URL(item.referrer); } catch { /* Blob downloads may omit referrer. */ }
         const exactLink = expectedUrl && item.url === expectedUrl;
         const sameConversation = referrer?.origin === conversation.origin && referrer?.pathname === conversation.pathname;
-        if ((!exactLink && !sameConversation) || pending.has(item.id)) return;
+        if (!(expectedUrl ? exactLink : sameConversation) || pending.has(item.id)) return;
         const url = item.finalUrl || item.url;
         if (!allowedImageUrl(url)) { reject(new Error('image_origin_rejected')); return; }
         // Start consuming a short-lived browser blob immediately. No local download paths are read.

@@ -75,3 +75,47 @@ test('cancellation releases the run without claiming ChatGPT stopped generating'
   await h.executor.start({ ...request, run_id: 'run-2' });
   assert.equal(h.records.get('run-2').phase, 'submitted');
 });
+
+test('cancellation during durable intent persistence prevents the submit click', async () => {
+  const h = harness();
+  let intentReached, finishWrite;
+  const reached = new Promise(resolve => { intentReached = resolve; });
+  const pendingWrite = new Promise(resolve => { finishWrite = resolve; });
+  const put = h.executor.store.put;
+  h.executor.store.put = async record => {
+    await put(record);
+    if (record.phase === 'submit_intent') { intentReached(); await pendingWrite; }
+  };
+  const start = h.executor.start(request);
+  await reached;
+  const cancel = h.executor.cancel(request.run_id);
+  finishWrite();
+  await Promise.all([start, cancel]);
+  assert.equal(h.actions.filter(action => action[0] === 'submit').length, 0);
+  assert.equal(h.records.get(request.run_id).phase, 'cancelled');
+});
+
+test('duplicate acknowledgement for a completed run preserves the next active run', async () => {
+  const h = harness();
+  h.executor.transport.observe = async () => ({ phase: 'image_ready' });
+  h.executor.transport.capture = async () => ({ mime_type: 'image/png', bytes_base64: 'aW1hZ2U=',
+    sha256: createHash('sha256').update('image').digest('hex') });
+  await h.executor.start(request);
+  await h.executor.tick(request.run_id);
+  await h.executor.accept(request.run_id);
+  await h.executor.start({ ...request, run_id: 'run-2' });
+  await h.executor.accept(request.run_id);
+  assert.equal(h.executor.active, 'run-2');
+  await h.executor.tick(h.executor.active);
+  assert.equal(h.records.get('run-2').phase, 'awaiting_import');
+});
+
+test('repeated cancellation of an old run preserves the next active run', async () => {
+  const h = harness();
+  await h.executor.start(request);
+  await h.executor.cancel(request.run_id);
+  await h.executor.start({ ...request, run_id: 'run-2' });
+  await h.executor.cancel(request.run_id);
+  assert.equal(h.executor.active, 'run-2');
+  assert.equal(h.records.get('run-2').phase, 'submitted');
+});

@@ -13,6 +13,7 @@ function fixture() {
   const advance = ms => { now += ms; };
   function response() {
     const user = win.document.createElement('div'); user.dataset.messageAuthorRole = 'user';
+    user.textContent = prompt;
     win.document.querySelector('main').append(user);
     const message = win.document.createElement('div'); message.dataset.messageAuthorRole = 'assistant';
     message.innerHTML = '<img id="generated" src="blob:https://chatgpt.com/original"><button aria-label="Download image">Download</button>';
@@ -72,4 +73,45 @@ test('a successful run permits one submission only', () => {
   adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
   assert.throws(() => adapter.submit('r'), /already_submitted/);
   assert.equal(clicks, 1);
+});
+
+test('an old conversation reached after submit cannot provide the generated response', () => {
+  const { win, adapter, response } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  win.history.pushState({}, '', '/c/previous-conversation');
+  response();
+  win.document.querySelector('[data-message-author-role="user"]').textContent = 'An unrelated earlier prompt';
+  assert.throws(() => adapter.observe('r'), /submitted_prompt_mismatch/);
+});
+
+test('an image cannot complete before the submitted user turn appears', () => {
+  const { win, adapter, advance, response } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  response();
+  win.document.querySelector('[data-message-author-role="user"]').remove();
+  assert.equal(adapter.observe('r').phase, 'generating');
+  advance(1600);
+  assert.equal(adapter.observe('r').phase, 'generating');
+});
+
+test('the bound response must follow the exact submitted user turn', () => {
+  const { win, adapter, response } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  const message = response();
+  const user = win.document.querySelector('[data-message-author-role="user"]');
+  user.before(message);
+  assert.throws(() => adapter.observe('r'), /response_changed/);
+});
+
+test('new conversation routing preserves binding and replacing its user turn is rejected', () => {
+  const { win, adapter, advance, response } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  win.history.pushState({}, '', '/c/new-conversation');
+  response();
+  assert.equal(adapter.observe('r').phase, 'generating');
+  advance(1600);
+  assert.equal(adapter.observe('r').phase, 'image_ready');
+  const user = win.document.querySelector('[data-message-author-role="user"]');
+  user.replaceWith(user.cloneNode(true));
+  assert.throws(() => adapter.observe('r'), /conversation_changed/);
 });
