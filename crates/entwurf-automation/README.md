@@ -69,6 +69,11 @@ an application import. Only the matching acknowledgement persists `completed`
 and sends `artifact_accepted` to the extension. Repeated same-hash artifacts after
 completion receive the acknowledgement again, allowing recovery from a lost ACK.
 
+A failed durable write while processing an extension message sends the bounded
+error and closes that WebSocket. The companion reconnects and restores its retained
+artifact bytes; no prompt is replayed, and only the eventual owner database ACK
+completes the run.
+
 State updates publish to memory only after atomic persistence succeeds. State and
 image files use private creation permissions where supported; state credentials
 remain local to this application directory. No real ChatGPT requests occur in
