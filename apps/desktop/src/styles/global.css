@@ -544,3 +544,7 @@ summary { cursor: pointer; }
 .bridge-discovery { margin-top: 18px; }
 .bridge-discovery > p { margin-top: 8px; }
 .bridge-gates { list-style: none; margin: 14px 0 0; padding: 0; }
+
+.generated-image { display: block; max-width: 100%; max-height: 640px; object-fit: contain; border-radius: 8px; margin: 12px 0; }
+
+.audit-list { overflow-wrap: anywhere; }

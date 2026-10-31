@@ -1,7 +1,7 @@
 import type { Commands, WorkspaceClient, WorkspaceSnapshot } from "./workspace";
 import { chooseFiles, chooseJson, download, sourceAccept } from "./web-files";
 
-type Request = { type: "call"; command: string; args?: unknown; cleanupPaths?: string[] } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact"; args: unknown };
+type Request = { type: "call"; command: string; args?: unknown; cleanupPaths?: string[] } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact" | "generated_image"; args: unknown };
 export function createBrowserClient(): WorkspaceClient {
   const worker = new Worker(new URL("./browser-worker.ts", import.meta.url), { type: "module" });
   let sequence = 0;
@@ -26,6 +26,14 @@ export function createBrowserClient(): WorkspaceClient {
   const invoke = <T,>(command: string, args?: unknown) => request<T>({ type: "call", command, args });
   async function call(command: keyof Commands, args: unknown): Promise<unknown> {
     switch (command) {
+      case "open_automation_setup": window.open("http://127.0.0.1:48123/pair.html", "_blank", "noopener,noreferrer"); return null;
+      case "import_generated_image": {
+        const { bytes, ...metadata } = args as Commands["import_generated_image"][0];
+        const path = `/uploads/${crypto.randomUUID()}/generated-image`;
+        await request({ type: "upload", files: [{ path, bytes: new Uint8Array(bytes) }] });
+        return invoke(command, { ...metadata, path });
+      }
+      case "generated_image_bytes": return Array.from(await request<Uint8Array>({ type: "generated_image", args }));
       case "bootstrap": {
         await invoke("list_projects");
         return { version: "0.1.0", platform: "浏览器 / WebAssembly", runtime: "browser", storage: "indexeddb", tesseract_available: true, ocr_languages: ["chi_sim", "eng"], automation_enabled: false, bridge_status: "not_connected", bridge_detail: "项目与资料保存在此浏览器。PDF 解析及中英文 OCR 由页面随附组件在本机执行；ChatGPT 自动化尚未连接。" };

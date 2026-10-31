@@ -47,3 +47,11 @@ pnpm exec playwright test --config playwright.web.config.ts --workers 1
 `.github/workflows/pages.yml` 在 `feat/v0.1` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。仓库 Pages 的发布来源需设为 GitHub Actions。部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许发布分支。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
 
 本工作流只发布静态应用与引擎资源，不运行用户任务、不上传本地资料，也不连接 ChatGPT 账号。
+
+## 图片自动化
+
+任务页保留人工 TaskEnvelope/ResultEnvelope 流程，同时提供独立的图片生成提示和单次启动按钮。网页通过本机配对窗口取得范围受限的访问凭据；仅接受指定本机来源与当前配对窗口的消息。桌面与本机 HTTP 页面通过各自工作区命令取得访问凭据。
+
+启动请求携带唯一运行 ID、任务 ID 和当前知识版本 ID。状态轮询和页面刷新只读取已有运行，不重复提交。停止观察不会撤回已经发送的 ChatGPT 请求。图片就绪后可继续导入：校验下载哈希、提交项目存储，再确认自动化服务；数据库提交失败时不发送确认。若确认请求中断，重试使用项目中已经保存的匹配图片，不重复创建图片记录。
+
+生成图片显示在任务页与结果页，标明 ChatGPT 来源、运行、基础知识版本和文件哈希，可下载原始字节。生成图片不修改知识节点、来源锚点或知识版本。仓库自动化 UI 测试使用本地响应夹具配合真实 WASM/IndexedDB，验证单次提交、刷新续接、保存后确认及原图下载，不调用真实 ChatGPT。

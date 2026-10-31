@@ -30,6 +30,15 @@ export function createHttpClient(initial: Capabilities & { session_token: string
   };
   async function call(name: keyof Commands, args: unknown): Promise<unknown> {
     switch (name) {
+      case "open_automation_setup": window.open("http://127.0.0.1:48123/pair.html", "_blank", "noopener,noreferrer"); return null;
+      case "import_generated_image": {
+        const { bytes, ...metadata } = args as Commands["import_generated_image"][0];
+        const body = new FormData();
+        body.append("files", new Blob([new Uint8Array(bytes)], { type: metadata.mimeType }), "generated-image");
+        const uploaded = await request("/api/uploads", { method: "POST", body }) as { path: string }[];
+        if (!uploaded[0]?.path) throw new Error("生成图片暂存失败，请重试导入。");
+        return command(name, { ...metadata, path: uploaded[0].path });
+      }
       case "bootstrap": return request("/api/bootstrap");
       case "choose_directory": return `/projects/${crypto.randomUUID()}`;
       case "choose_ir_file": case "choose_result_file": return chooseJson();

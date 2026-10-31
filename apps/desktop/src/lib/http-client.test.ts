@@ -34,3 +34,14 @@ it("restores only project selection into the new server session", async () => {
   await restoreHttpSelection({ call } as never);
   expect(call.mock.calls).toEqual([["load_existing_project", { root: "/projects/p" }], ["workspace_snapshot", { taskId: "task-a" }]]);
 });
+
+it("stages generated image bytes before the domain import and forwards the opaque handle", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([{ path: "/uploads/opaque", name: "generated-image" }]))).mockResolvedValueOnce(new Response(JSON.stringify({ project: {} })));
+  vi.stubGlobal("fetch", fetcher);
+  await createHttpClient({ session_token: "secret" } as never).call("import_generated_image", { taskId: "t", baseVersionId: "v", runId: "r", promptSha256: "p", bytes: [1,2], expectedSha256: "s", mimeType: "image/png" });
+  expect(fetcher.mock.calls[0][0]).toBe("/api/uploads");
+  expect(fetcher.mock.calls[0][1].body).toBeInstanceOf(FormData);
+  const command = JSON.parse(fetcher.mock.calls[1][1].body);
+  expect(command.args.path).toBe("/uploads/opaque");
+  expect(command.args.bytes).toBeUndefined();
+});
