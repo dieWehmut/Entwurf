@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');
+const api=require('../pkg-node/entwurf_wasm.js');const call=(c,a={})=>JSON.parse(api.browser_call(c,JSON.stringify(a)));
+const bytes=fs.readFileSync(path.join(__dirname,'../../../fixtures/public/ingestion/bilingual.png'));const hash=crypto.createHash('sha256').update(bytes).digest('hex');
+api.browser_reset();call('create_project',{root:'/projects/images',name:'Generated images'});let s=call('create_task',{title:'Image source'});const taskId=s.selected_task_id;
+api.browser_put_file('/uploads/source.md',new TextEncoder().encode('# Evidence\n\nA source statement.'));
+s=call('import_sources',{taskId,paths:['/uploads/source.md']});const baseVersionId=s.current_version.id;const original=s.current_version;
+api.browser_put_file('/uploads/generated.png',bytes);const args={taskId,baseVersionId,runId:'run-image',promptSha256:'a'.repeat(64),path:'/uploads/generated.png',expectedSha256:hash,mimeType:'image/png'};
+s=call('import_generated_image',args);assert.deepEqual(s.current_version,original);assert.equal(s.project.generated_images.length,1);const record=s.project.generated_images[0];assert.equal(record.origin,'chatgpt_ui');
+const audit=s.project.audit.length;assert.equal(call('import_generated_image',args).project.audit.length,audit);
+const files=JSON.parse(api.browser_list_files()).map(p=>[p,api.browser_get_file(p)]);api.browser_reset();for(const [p,b]of files)api.browser_put_file(p,b);s=call('load_existing_project',{root:'/projects/images'});
+assert.equal(s.project.generated_images[0].id,record.id);const imagePath=call('generated_image_path',{taskId,imageId:record.id});assert.deepEqual(Buffer.from(api.browser_get_file(imagePath)),bytes);
+call('rollback_version',{taskId,versionId:baseVersionId});assert.equal(call('import_generated_image',args).project.generated_images.length,1,'exact retry after version changed is idempotent');
+assert.throws(()=>call('import_generated_image',{...args,runId:'conflict'}),/identity/);
+api.browser_put_file(imagePath,new Uint8Array([1,2,3]));assert.throws(()=>call('generated_image_path',{taskId,imageId:record.id}),/size|SHA/);
+console.log('WASM generated image exact bytes, no knowledge rewrite, restart, retry and tamper guard PASS');

@@ -169,6 +169,26 @@ pub fn browser_call(command: &str, args_json: &str) -> Result<String, JsValue> {
         let ws = state
             .as_mut()
             .ok_or_else(|| EntwurfError::InvalidInput("no project is open".into()))?;
+        if command == "generated_image_path" {
+            return Ok(json!(ws.generated_image_path(
+                &required::<String>(&args, "taskId")?,
+                &required::<String>(&args, "imageId")?
+            )?));
+        }
+        if command == "import_generated_image" {
+            let path: String = required(&args, "path")?;
+            let bytes = files::read(&path).map_err(|e| EntwurfError::read(&path, e))?;
+            return serde_json::to_value(ws.import_generated_image(
+                &required::<String>(&args, "taskId")?,
+                &required::<String>(&args, "baseVersionId")?,
+                &required::<String>(&args, "runId")?,
+                &required::<String>(&args, "promptSha256")?,
+                &bytes,
+                &required::<String>(&args, "expectedSha256")?,
+                &required::<String>(&args, "mimeType")?,
+            )?)
+            .map_err(|e| EntwurfError::InvalidInput(e.to_string()));
+        }
         if command == "artifact_path" {
             return Ok(json!(ws.artifact_path(
                 &required::<String>(&args, "taskId")?,

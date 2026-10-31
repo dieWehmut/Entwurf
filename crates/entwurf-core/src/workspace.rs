@@ -1241,3 +1241,6 @@ impl Workspace {
         }
     }
 }
+
+#[path = "workspace_generated_images.rs"]
+mod generated_images;

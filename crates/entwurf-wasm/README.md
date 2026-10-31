@@ -50,3 +50,14 @@ Build with an installed `wasm32-unknown-unknown` target and wasm-bindgen CLI mat
 Cargo.lock's version: `scripts/build-wasm.sh --test`. The test executes actual WASM
 Markdown/TeX import, review, SVG/PNG/PDF export, reopen, integrity rejection and
 binary-extraction binding. Web output goes to `apps/desktop/public/wasm/`.
+
+Generated images are separate project assets, never fake knowledge versions.
+`import_generated_image` accepts `{taskId, baseVersionId, runId, promptSha256,
+path, expectedSha256, mimeType}`; `path` refers to registered VFS bytes, not JSON
+encoded bytes. `generated_image_path({taskId, imageId})` verifies owned retained
+bytes before returning the download path. Project `generated_images` is optional
+for legacy snapshots and append-only once populated. Exact delivery retries are
+idempotent even after a newer knowledge version exists; changed run/hash metadata
+is rejected. New deliveries require the current base version. Accepted images are
+fully decoded PNG/JPEG/WebP, at most 32 MiB and 64 megapixels, stored beneath the
+project's `generated/<sha256>` directory with `origin: "chatgpt_ui"`.

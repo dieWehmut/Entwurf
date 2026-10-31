@@ -190,6 +190,24 @@ fn validate_project(project: &Project) -> Result<()> {
             return Err(EntwurfError::Contract("current version is missing".into()));
         }
     }
+    let mut image_ids = HashSet::new();
+    let mut image_runs = HashSet::new();
+    let mut image_hashes = HashSet::new();
+    for image in project.generated_images.as_deref().unwrap_or_default() {
+        component(&image.id)?;
+        if !image_ids.insert(&image.id)
+            || !image_runs.insert(&image.run_id)
+            || !image_hashes.insert(&image.sha256)
+            || u64::from(image.width) * u64::from(image.height) > 64_000_000
+            || !project
+                .task(&image.task_id)
+                .is_some_and(|t| t.versions.iter().any(|v| v.id == image.base_version_id))
+        {
+            return Err(EntwurfError::Contract(
+                "invalid generated image ownership or duplicate identity".into(),
+            ));
+        }
+    }
     let mut audit_ids = HashSet::new();
     for event in &project.audit {
         if event.id.is_empty()
@@ -228,6 +246,13 @@ fn validate_history(old: &Project, project: &Project) -> Result<()> {
     if old.id != project.id || old.created_at != project.created_at {
         return Err(EntwurfError::Contract(
             "project identity is immutable".into(),
+        ));
+    }
+    let old_images = old.generated_images.as_deref().unwrap_or_default();
+    let next_images = project.generated_images.as_deref().unwrap_or_default();
+    if next_images.len() < old_images.len() || next_images[..old_images.len()] != *old_images {
+        return Err(EntwurfError::Contract(
+            "generated image history is immutable and append-only".into(),
         ));
     }
     // Audits and saved knowledge history may never disappear or be rewritten.
