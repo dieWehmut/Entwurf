@@ -9,5 +9,8 @@
 - Windows PowerShell prerequisite detection, test and build entry points; local Tauri CLI dependency.
 - SQLite WAL project storage, immutable IR snapshots, recovery mirrors and verified source deduplication.
 - Embedded offline schemas and schema-generated TypeScript contracts with drift checks; generated Rust remains pending.
+- Current-user named-pipe JSON-RPC bridge with one-time bootstrap authentication,
+  package-aware read-only discovery, responsive cancellation and artifact watching;
+  real ChatGPT automation remains unavailable.
 
 No production release or complete native end-to-end acceptance is asserted by this changelog. Track remaining work and release criteria in [the v0.1 plan](docs/plans/entwurf-v0.1.md).

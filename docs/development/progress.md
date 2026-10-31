@@ -9,7 +9,7 @@ Existing prototype code and green smoke tests do not establish release readiness
 | --- | --- | --- |
 | 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native checkout created; prerequisite checks, PowerShell tests and native Tauri check pass; full repository build pending |
 | 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | SQLite, snapshots/recovery and embedded schemas implemented; generated TS checked; generated Rust, state-machine hardening and import integration still pending |
-| 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Implementation under review; no verified ChatGPT window, automation remains unavailable |
+| 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Transport/discovery implemented and reviewed; 40 native tests pass; no verified ChatGPT window, automation remains unavailable; parent integration pending |
 | 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Pending; prototype parsing does not satisfy these requirements |
 | 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Pending; prototype export exists but Chinese/math output is not reliable |
 | 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Pending; partial checks exist, but passing tests do not establish full content integrity |
@@ -43,6 +43,8 @@ test commands, artifacts and commit evidence as each stage is verified.
 
 - `c6a3ddf`: foundation documentation, supplied plan, ignore rules and Windows
   scripts; pushed to `origin/feat/v0.1` after review and native PowerShell tests.
+- `3517957`: native desktop scaffold and SQLite/contracts baseline; `9c3f42a`
+  adds `/sample/` to ignore private local acceptance images. Both pushed.
 - Native Windows `cargo test --locked -p entwurf-core -p entwurf-cli --target
   x86_64-pc-windows-msvc`: 35 core and 3 acceptance tests pass after storage review
   fixes, including recovery from an empty migrated database and immutable history.
@@ -53,3 +55,14 @@ test commands, artifacts and commit evidence as each stage is verified.
 - `node packages/contracts/generate.mjs --check` and workspace Rust formatting
   checks pass. Schemas also validate from a relocated core executable without
   opening schema files from the development checkout.
+- Native checkout `pnpm tauri build --debug --no-bundle --target
+  x86_64-pc-windows-msvc -- --locked` builds the desktop executable with embedded
+  frontend assets. This is a development build, not an installer acceptance.
+- Bridge native tests: 40 passed, zero failed or skipped, after review fixes for
+  cancellable shared discovery and watcher setup cleanup. Self-contained Windows
+  x64 Release publishing passes; actual ChatGPT input/capture remains unavailable.
+
+The supplied private sample directory currently contains two PNG references.
+The user confirmed no original probability chapter PDF/Markdown/LaTeX is
+available. Use those images for style/OCR checks; real-chapter acceptance remains
+unverified and must not be inferred from synthetic or generated content.
