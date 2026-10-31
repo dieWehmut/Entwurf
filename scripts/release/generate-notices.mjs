@@ -59,6 +59,13 @@ function add(p, files, provenance = []) {
   p.notice_sources = [...new Set(provenance)].sort();
   packages.push(p);
 }
+function addUpstreamNotices(key, files, provenance) {
+  for (const o of overrides[key] ?? []) {
+    const file = path.join(upstream, o.file);
+    if (digest(fs.readFileSync(file)) !== o.sha256) throw new Error(`upstream notice hash mismatch: ${o.file}`);
+    files.push(file); provenance.push(o.source);
+  }
+}
 const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--offline', '--locked', '--format-version', '1', '--filter-platform', 'x86_64-pc-windows-msvc'], { cwd: root, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }));
 const nodes = new Map(metadata.resolve.nodes.map(n => [n.id, n]));
 const start = metadata.packages.find(p => p.name === 'entwurf-desktop');
@@ -76,11 +83,8 @@ for (const p of metadata.packages.filter(p => p.source && reachable.has(p.id))) 
   if (p.license_file && fs.existsSync(path.resolve(dir, p.license_file))) files.push(path.resolve(dir, p.license_file));
   const source = `https://crates.io/crates/${p.name}/${p.version}`;
   const provenance = files.map(f => `${source}#${posix(path.relative(dir, f))}`);
-  for (const o of overrides[`${p.name}@${p.version}`] ?? []) {
-    const file = path.join(upstream, o.file);
-    if (digest(fs.readFileSync(file)) !== o.sha256) throw new Error(`upstream notice hash mismatch: ${o.file}`);
-    files.push(file); provenance.push(o.source);
-  }
+  // Retain the original Cargo keys; other ecosystems use an explicit namespace.
+  addUpstreamNotices(`${p.name}@${p.version}`, files, provenance);
   add({ ecosystem: 'cargo', name: p.name, version: p.version, license: p.license ?? 'UNKNOWN', source }, files, provenance);
 }
 // Resolve only installed production dependencies, following pnpm's real package symlinks.
@@ -99,7 +103,9 @@ function npm(dir) {
   npmSeen.add(id);
   const files = licenseFiles(dir);
   const source = `https://www.npmjs.com/package/${p.name}/v/${p.version}`;
-  add({ ecosystem: 'npm', name: p.name, version: p.version, license: typeof p.license === 'string' ? p.license : p.license?.type ?? 'UNKNOWN', source }, files, files.map(f => `${source}#${posix(path.relative(dir, f))}`));
+  const provenance = files.map(f => `${source}#${posix(path.relative(dir, f))}`);
+  addUpstreamNotices(`npm:${id}`, files, provenance);
+  add({ ecosystem: 'npm', name: p.name, version: p.version, license: typeof p.license === 'string' ? p.license : p.license?.type ?? 'UNKNOWN', source }, files, provenance);
   for (const name of Object.keys(p.dependencies ?? {})) npm(resolvePackage(dir, name));
 }
 const desktop = path.join(root, 'apps/desktop');
@@ -135,8 +141,10 @@ const inventory = {
     'SeaHash 4.1.0 declares MIT but omits the text. The original maintainer ticki/tfs workspace contains SeaHash and its MIT notice; that notice is pinned by commit. The current GitLab source host was unavailable during capture.',
     'For fxhash/glidesort/selectors, original source license declarations accompany the official Apache-2.0/MPL-2.0 texts.',
     'pnpm is build tooling and is not distributed. Only the production npm dependency closure is included.',
+    'tr46 0.0.3 omits the MIT text. Its published source revision is the parent of the pinned, license-only commit by the original maintainer that supplies the verbatim MIT notice.',
+    '@tesseract.js-data/eng and @tesseract.js-data/chi_sim 1.0.0 publish MIT package declarations but omit full MIT notices. Those declarations are preserved separately from their 4.0.0 traineddata, which matches tesseract-ocr/tessdata 4.0.0 byte-for-byte after decompression and is covered by its pinned COPYING and Apache-2.0 text. The accompanying Entwurf provenance note is not an upstream license or an invented copyright notice.',
     'PDFium freetype.txt uses ISO-8859-1. Its copyright character is losslessly transcoded to UTF-8 in the consolidated text; the hash references original bytes, also shipped verbatim in PDFium resources.',
-    'Tesseract, ChatGPT and WebView2 are detected external applications/runtimes and are not included in this inventory.',
+    'Native Tesseract, ChatGPT and WebView2 are detected external applications/runtimes and are not included in this inventory. Bundled tesseract.js, its core and traineddata packages are included in the production npm closure.',
   ],
   input_hash_normalization: 'UTF-8, CRLF normalized to LF for identical Windows and Unix checkouts',
   inputs: Object.fromEntries(['Cargo.lock', 'apps/desktop/pnpm-lock.yaml', 'apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json'].map(p => [p, digest(read(path.join(root, p)).replace(/\r\n/g, '\n'))])),

@@ -1,0 +1,62 @@
+Entwurf provenance note for supplemental npm notices
+This explanatory note was written for Entwurf; it is not an upstream license.
+The upstream license texts and package declarations listed below are separate,
+verbatim captures. No copyright holder or copyright notice has been inferred.
+
+tr46 0.0.3
+
+The package declares MIT. Its published source revision is
+  a8009f9ce80ff5dbe71dd71e203afe4e4c878d28
+  https://raw.githubusercontent.com/jsdom/tr46/a8009f9ce80ff5dbe71dd71e203afe4e4c878d28/package.json
+The original repository was Sebmaster/tr46.js (now jsdom/tr46). The published
+revision contains no license file. Its immediate child is
+  3a6f29721e7063b9ffd421e461a54beae6170001
+  https://github.com/jsdom/tr46/commit/3a6f29721e7063b9ffd421e461a54beae6170001
+That commit, authored by the original maintainer Sebastian Mayr, adds only
+LICENSE.md, with the message "Add MIT license". The included MIT notice is the
+verbatim file from that license-only commit, not a notice from another project:
+  https://raw.githubusercontent.com/jsdom/tr46/3a6f29721e7063b9ffd421e461a54beae6170001/LICENSE.md
+
+@tesseract.js-data/eng 1.0.0 and @tesseract.js-data/chi_sim 1.0.0
+
+The npm package wrappers declare MIT in their published package.json files.
+Their archives omit a full MIT license/copyright notice, and the package source
+revision b86746569320a6103cea84cc2b8d9ee74f0f45d3 has no license file. The included
+package.json files reproduce the published declarations verbatim; they do not
+supply missing MIT terms or change the underlying traineddata license.
+
+The declarations were extracted from these versioned npm archives and matched
+against the installed packages. Each archive was verified against its registry
+SHA512 integrity value before extraction:
+  https://registry.npmjs.org/@tesseract.js-data/eng/-/eng-1.0.0.tgz#package/package.json
+  sha512-mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg==
+  https://registry.npmjs.org/@tesseract.js-data/chi_sim/-/chi_sim-1.0.0.tgz#package/package.json
+  sha512-iuErURkPbECDUazgsLn/r3c+tU2y5o5S/w14d0A/YiagfsjYyZKgTo75RUpsGJ311qtu0dIX4hqnXAAjmqf2CA==
+
+Entwurf bundles the packages' 4.0.0/eng.traineddata.gz and
+4.0.0/chi_sim.traineddata.gz. The naptha/tessdata source documentation identifies
+4.0.0 as Tesseract's LSTM + Legacy dataset:
+  https://raw.githubusercontent.com/naptha/tessdata/806cd9adc8c6e8abc11c782db1818c990576bebc/README.md
+The files were independently verified: after gzip decompression, both match
+exactly the Git blobs in tesseract-ocr/tessdata tag 4.0.0, commit
+590567f20dc044f6948a8e2c61afc714c360ad0e. The Git blob hash includes the standard
+"blob <byte-length>\0" prefix; the SHA256 values below hash file bytes directly.
+
+eng.traineddata:
+  https://github.com/tesseract-ocr/tessdata/blob/590567f20dc044f6948a8e2c61afc714c360ad0e/eng.traineddata
+  Git blob SHA1: f4744c201359d02ced6914c77f0de68ee9bbdd74
+  Uncompressed SHA256: daa0c97d651c19fba3b25e81317cd697e9908c8208090c94c3905381c23fc047
+  Bundled gzip SHA256: ed350f3752f81ee8f38769edc14d92d997dababe23b565c59879372cc46a2468
+chi_sim.traineddata:
+  https://github.com/tesseract-ocr/tessdata/blob/590567f20dc044f6948a8e2c61afc714c360ad0e/chi_sim.traineddata
+  Git blob SHA1: eeb66cfbd9c02b170a6aeeece673910793d8d8c4
+  Uncompressed SHA256: fc05d89ab31d8b4e226910f16a8bcbf78e43bae3e2580bb5feefd052efdab363
+  Bundled gzip SHA256: 59388039851e4d1293d729c183fd8c1fa9bbbb959eed996e945024671e68c1d6
+
+The pinned dataset COPYING states that all data in the repository is licensed
+under Apache License 2.0. Its verbatim text and the full official Apache-2.0
+license are included alongside the npm declarations:
+  https://raw.githubusercontent.com/tesseract-ocr/tessdata/590567f20dc044f6948a8e2c61afc714c360ad0e/COPYING
+  https://www.apache.org/licenses/LICENSE-2.0.txt
+The inventory retains MIT as the published npm package declaration; the actual
+bundled traineddata's Apache-2.0 provenance is recorded here separately.

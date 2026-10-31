@@ -14,3 +14,4 @@
 /apps/desktop/public/fonts/DejaVu-LICENSE.txt -text -whitespace
 /apps/desktop/src-tauri/resources/pdfium/LICENSE -text -whitespace
 /apps/desktop/src-tauri/resources/pdfium/licenses/* -text -whitespace
+/docs/licenses/upstream/** -text -whitespace
