@@ -71,7 +71,7 @@ for (const scenario of ["success", "corrupt", "stale", "reject", "paused", "unkn
     await page.getByRole("navigation").getByRole("button", { name: /^结果/ }).click();
     await page.getByLabel("节点标题").fill("Newer knowledge version");
     await page.getByRole("button", {name: "保存节点修改"}).click();
-    await expect(page.getByRole("button", {name: "保存节点修改"})).toBeDisabled();
+    await expect(page.getByText("保存节点完成", {exact: true})).toBeVisible();
     await tasks(); ready = true;
     await expect(page.getByRole("button", {name: "继续导入图片"})).toBeVisible();
     const uploads = () => page.evaluate(async () => {

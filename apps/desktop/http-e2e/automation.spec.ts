@@ -63,7 +63,7 @@ test("real HTTP coordinator automatically persists a fixture extension image the
     await page.getByRole("navigation").getByRole("button",{name:/^结果/}).click();
     await page.getByLabel("节点标题").fill("Changed while fixture generation waits");
     await page.getByRole("button",{name:"保存节点修改"}).click();
-    await expect(page.getByRole("button",{name:"保存节点修改"})).toBeDisabled();
+    await expect(page.getByText("保存节点完成",{exact:true})).toBeVisible();
     const alternate = await readFile(fileURLToPath(new URL("../src-tauri/icons/icon.png", import.meta.url)));
     socket.send(JSON.stringify({type:"artifact",...heldRun!,mime_type:"image/png",sha256:createHash("sha256").update(alternate).digest("hex"),bytes_base64:alternate.toString("base64")}));
     await tasks();

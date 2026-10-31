@@ -34,6 +34,9 @@ test("real WASM project imports Markdown and survives reload with original sourc
   await expect(page.getByLabel("节点标题")).toBeVisible();
   await page.getByLabel("节点标题").fill("已保存的集合定义");
   await page.getByRole("button", { name: "保存节点修改" }).click();
+  // The input already contains the draft before the worker commits IndexedDB.
+  // Wait for the application's post-commit acknowledgement before navigating.
+  await expect(page.getByText("保存节点完成", { exact: true })).toBeVisible();
   await expect(page.getByLabel("节点标题")).toHaveValue("已保存的集合定义");
   await page.reload();
   await expect(page.getByLabel("当前任务")).toContainText("集合与映射");
@@ -115,7 +118,7 @@ test("a stale tab cannot overwrite a saved node and keeps its unsaved draft", as
   await other.getByLabel("节点标题").fill("保留但不能覆盖的草稿");
   await page.getByLabel("节点标题").fill("已提交的新标题");
   await page.getByRole("button", { name: "保存节点修改" }).click();
-  await expect(page.getByRole("button", { name: "保存节点修改" })).toBeDisabled();
+  await expect(page.getByText("保存节点完成", { exact: true })).toBeVisible();
   await other.getByRole("button", { name: "保存节点修改" }).click();
   await expect(other.getByRole("alert")).toBeVisible();
   await expect(other.getByLabel("节点标题")).toHaveValue("保留但不能覆盖的草稿");
