@@ -18,4 +18,5 @@ if [[ "${1:-}" == "--test" ]]; then
   "$vfs_test_binary"
   "$wasm_bindgen_bin" "$wasm_input" --target nodejs --out-dir crates/entwurf-wasm/pkg-node --out-name entwurf_wasm
   node crates/entwurf-wasm/tests/smoke.cjs
+  node crates/entwurf-wasm/tests/blank-pdf.cjs
 fi

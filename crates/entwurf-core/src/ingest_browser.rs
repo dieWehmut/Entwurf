@@ -125,16 +125,8 @@ fn extract(
     diagnostics.extend(extraction.diagnostics);
     let mut nodes = Vec::new();
     for page in extraction.pages {
-        if page.text.trim().is_empty() {
-            diagnostics.push(Diagnostic {
-                level: DiagnosticLevel::Warning,
-                code: "browser_empty_page".into(),
-                message: format!(
-                    "Page {:?} has no extracted text; confirm source completeness",
-                    page.page
-                ),
-            });
-        }
+        // A successful empty transcript is a blank page. Only extraction-engine
+        // diagnostics indicate failure; those remain ordinary source blockers.
         source.notes.push(format!("ingestion_transcript:{}",serde_json::json!({"page":page.page,"engine":page.engine,"text":page.text,"sha256":hash_bytes(page.text.as_bytes()),"offset_unit":"utf8_bytes"})));
         let start = nodes.len();
         chunks(
