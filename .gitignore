@@ -15,6 +15,9 @@
 *.nupkg
 *.snupkg
 *.tsbuildinfo
+/apps/desktop/public/vendor/
+/apps/desktop/public/wasm/
+/apps/desktop/dist-local/
 
 # Tool and editor caches.
 **/.vite/

@@ -1,0 +1,70 @@
+name: Build and deploy shared web app
+
+on:
+  push:
+    branches: [feat/v0.1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        run: pnpm --dir apps/desktop install --frozen-lockfile
+      - name: Install WASM target and matching bindings generator
+        run: |
+          rustup target add wasm32-unknown-unknown
+          version=$(python3 -c 'import tomllib; p=tomllib.load(open("Cargo.lock","rb"))["package"]; print(next(x["version"] for x in p if x["name"]=="wasm-bindgen"))')
+          cargo install wasm-bindgen-cli --version "$version" --locked
+      - name: Build and verify the real browser core
+        run: bash scripts/build-wasm.sh --test
+      - name: Test frontend
+        run: pnpm --dir apps/desktop test
+      - name: Prepare bundled PDF and OCR assets
+        run: pnpm --dir apps/desktop web:assets
+      - name: Build under the repository Pages path
+        working-directory: apps/desktop
+        run: |
+          pnpm exec tsc -b
+          pnpm exec vite build --base=/Entwurf/
+      - name: Install Chromium
+        run: pnpm --dir apps/desktop exec playwright install --with-deps chromium
+      - name: Verify browser persistence and rendering
+        working-directory: apps/desktop
+        run: pnpm exec playwright test --config playwright.web.config.ts --workers 1
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/desktop/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

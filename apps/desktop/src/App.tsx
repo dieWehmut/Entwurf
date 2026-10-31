@@ -25,6 +25,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
   const [projectName, setProjectName] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [chapter, setChapter] = useState("");
+  const [projects, setProjects] = useState<{ root: string; name: string; id: string }[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const task = snapshot?.project.tasks.find(t => t.id === snapshot.selected_task_id);
@@ -89,8 +90,12 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
     }, () => setDraft(null));
   }
   function openProject(create: boolean) {
+    if (!create && client.projects) {
+      void run("读取项目列表", async () => { setProjects(await client.projects!()); return null; });
+      return;
+    }
     void run(create ? "创建项目" : "打开项目", async () => {
-      const root = await client.call("choose_directory", undefined);
+      const root = await client.call("choose_directory", client.runtime && client.runtime !== "native" ? { purpose: create ? "create" : "open", name: projectName.trim() } : undefined);
       if (!root) return;
       return create ? client.call("create_project", { root, name: projectName.trim() }) : client.call("load_existing_project", { root });
     }, () => setActiveNodeId(null));
@@ -111,14 +116,16 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
         <button className="secondary-button" disabled={unavailable} onClick={() => { void run("刷新工作区", () => client.call("workspace_snapshot", { taskId: task?.id })); }}>刷新工作区</button>
       </div>}
       {page === "project" && <div className="workspace-stack">
-        <section className="panel"><h2>本地项目</h2><p className="muted path-text">{snapshot?.root ?? "选择本机目录，新建项目或打开已有项目。"}</p>
+        <section className="panel"><h2>{client.runtime === "browser" ? "浏览器项目" : "本地项目"}</h2><p className="muted path-text">{snapshot?.root ?? (client.runtime === "browser" ? "项目保存在此浏览器中，刷新或重新打开页面后可继续编辑。" : client.runtime === "local-http" ? "项目保存在本机服务的数据库中。" : "选择本机目录，新建项目或打开已有项目。")}</p>
           <div className="workspace-toolbar"><label className="field">项目名称<input disabled={locked} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="输入项目名称" /></label><button className="primary-button" disabled={locked || !projectName.trim()} onClick={() => openProject(true)}>新建项目</button><button className="secondary-button" disabled={locked} onClick={() => openProject(false)}>打开项目</button></div>
+          {projects && <section aria-label="选择项目"><h3>已保存项目</h3>{projects.length ? projects.map(project => <button className="secondary-button" disabled={locked} key={project.id} onClick={() => { void run("打开项目", () => client.call("load_existing_project", { root: project.root }), () => { setProjects(null); setActiveNodeId(null); }); }}>{project.name}</button>) : <p className="empty-note">此存储中还没有项目。</p>}<button className="text-button" onClick={() => setProjects(null)}>关闭项目列表</button></section>}
+          {client.runtime === "browser" && <p className="muted">清除网站数据会删除浏览器项目。请定期导出结果；不同浏览器与设备的数据分别保存。</p>}
         </section>
         {snapshot && <><section className="panel"><h2>章节与任务</h2><div className="workspace-toolbar"><label className="field">任务标题<input disabled={locked} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} /></label><label className="field">章节（可选）<input disabled={locked} value={chapter} onChange={e => setChapter(e.target.value)} /></label><button className="primary-button" disabled={locked || !taskTitle.trim()} onClick={() => { void run("创建任务", () => client.call("create_task", { title: taskTitle.trim(), chapter: chapter.trim() || undefined }), () => { setTaskTitle(""); setPage("sources"); }); }}>创建任务</button></div>
           <div className="task-board">{snapshot.project.tasks.map(t => <button key={t.id} className={`task-card ${task?.id === t.id ? "is-active" : ""}`} disabled={locked} onClick={() => { void run("选择任务", () => client.call("workspace_snapshot", { taskId: t.id }), () => setPage("tasks")); }}><strong>{t.title}</strong><span>{t.chapter} · {t.state} · {t.versions.length} 个版本</span></button>)}</div>{!snapshot.project.tasks.length && <p className="empty-note">创建第一个任务，然后导入知识资料。</p>}
         </section><section className="panel"><h2>当前任务概况</h2><div className="stat-strip"><div className="stat-item"><strong>{version?.ir.sources.length ?? 0}</strong><span>来源</span></div><div className="stat-item"><strong>{version?.ir.nodes.length ?? 0}</strong><span>知识节点</span></div><div className="stat-item"><strong>{version?.ir.unverified.length ?? 0}</strong><span>待确认</span></div><div className="stat-item"><strong>{version?.layout?.pages.length ?? 0}</strong><span>已编译页面</span></div></div><button className="secondary-button" disabled={unavailable} onClick={() => navigate("result")}>审阅结果</button></section></>}
       </div>}
-      {page === "sources" && (snapshot ? <SourcesPage key={snapshot.project.id} onCreateTask={() => navigate("project")} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先在项目页打开本地项目。</p>)}
+      {page === "sources" && (snapshot ? <SourcesPage key={snapshot.project.id} onCreateTask={() => navigate("project")} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先在项目页打开项目。</p>)}
       {page === "tasks" && (snapshot && task ? <TasksPage key={task.id} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先创建或选择一个任务。</p>)}
       {page === "result" && (snapshot && version ? <ResultPage key={task?.id} snapshot={snapshot} client={client} run={run} locked={locked} busy={unavailable} draft={draft} setDraft={setDraft} activeNodeId={activeNodeId} setActiveNodeId={setActiveNodeId} saveDraft={saveDraft} /> : <p className="empty-note">当前任务没有知识版本。导入资料后可编辑、校验和预览。</p>)}
       {page === "settings" && <SettingsPage snapshot={snapshot} capabilities={capabilities} client={client} run={run} locked={locked} theme={theme} toggleTheme={toggleTheme} refreshCapabilities={() => { void run("检测能力", async () => { setCapabilities(await client.call("bootstrap", undefined)); return null; }); }} />}

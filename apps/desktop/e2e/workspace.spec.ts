@@ -60,10 +60,10 @@ async function nativeFixture(page: Page, exportFailure = false, delayedStyle = f
   }, { snapshot, capabilities, exportFailure, delayedStyle, irVersion: fixture().current_version! });
 }
 const nav = (page: Page, label: string) => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${label}`) }).click();
-test('browser without IPC explicitly disables native workspace', async ({ page }) => {
+test('browser without IPC selects its own persistent workspace', async ({ page }) => {
   await page.goto('/'); await expect(page).toHaveTitle('Entwurf · 可验证知识图');
-  await expect(page.getByText(/浏览器预览：本地工作区不可用/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '打开项目' })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: '浏览器项目', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开项目' })).toBeEnabled();
 });
 test('five pages, themes, desktop sizes and zooms render without errors', async ({ page }) => {
   test.setTimeout(120_000);
