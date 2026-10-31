@@ -3,6 +3,7 @@ use std::path::PathBuf;
 /// Errors that callers can turn into actionable UI copy.
 #[derive(Debug, thiserror::Error)]
 pub enum EntwurfError {
+    #[cfg(feature = "native")]
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 

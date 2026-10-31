@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entwurf · ChatGPT 连接</title><link rel="stylesheet" href="options.css"></head>
+<body><main><h1>连接 Entwurf</h1><p>打开本机 Entwurf 服务，在连接设置中复制扩展配对信息。保留当前浏览器中已登录的 ChatGPT 标签页。</p>
+<form id="pair"><label for="settings">扩展配对信息</label><textarea id="settings" rows="5" required spellcheck="false" autocomplete="off" placeholder="粘贴本机服务提供的配对 JSON"></textarea><button>连接本机服务</button></form>
+<p id="status" role="status"></p><p class="note">只有在 Entwurf 中明确开始生成时，扩展才会提交提示。会在当前浏览器账户中新建聊天标签页；现有草稿保持不变。</p></main><script type="module" src="options.mjs"></script></body></html>

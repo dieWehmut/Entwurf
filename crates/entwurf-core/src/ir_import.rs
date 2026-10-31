@@ -1,5 +1,6 @@
 //! External KnowledgeIR has no filesystem authority. Bind source evidence to
 //! retained project originals before invoking any provenance/content validator.
+use crate::files as fs;
 use crate::{
     error::{EntwurfError, Result},
     ir::*,
@@ -9,7 +10,6 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     io::Read,
 };
 

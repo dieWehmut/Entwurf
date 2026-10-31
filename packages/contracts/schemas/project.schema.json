@@ -52,6 +52,13 @@
     },
     "settings": {
       "$ref": "#/$defs/settings"
+    },
+    "generated_images": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/generated_image"
+      },
+      "x-rust-skip-none": true
     }
   },
   "$defs": {
@@ -819,7 +826,8 @@
             "export_completed",
             "validation_failed",
             "automation_paused",
-            "error"
+            "error",
+            "image_imported"
           ],
           "x-rust-name": "AuditKind",
           "x-rust-module": "project",
@@ -1046,6 +1054,97 @@
       },
       "x-rust-name": "GptImportMetadata",
       "x-rust-module": "project"
+    },
+    "generated_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "run_id",
+        "task_id",
+        "base_version_id",
+        "prompt_sha256",
+        "sha256",
+        "mime_type",
+        "stored_path",
+        "byte_len",
+        "width",
+        "height",
+        "created_at",
+        "origin"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "base_version_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "prompt_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mime_type": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "stored_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byte_len": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 33554432,
+          "x-rust-type": "u64"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64000000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64000000
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "origin": {
+          "type": "string",
+          "const": "chatgpt_ui"
+        }
+      },
+      "x-rust-name": "GeneratedImage",
+      "x-rust-module": "project",
+      "x-rust-derives": [
+        "PartialEq",
+        "Eq"
+      ]
     }
   },
   "x-rust-name": "Project",

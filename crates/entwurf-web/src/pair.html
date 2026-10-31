@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>连接 ChatGPT · Entwurf</title>
+<style>
+:root{color-scheme:light dark;font:16px/1.65 system-ui,sans-serif;background:#111719;color:#e9eee9}*{box-sizing:border-box}body{max-width:700px;margin:8vh auto;padding:24px}h1{font-size:30px;line-height:1.2;letter-spacing:-.6px}h2{font-size:18px;margin:0 0 12px}.brand{color:#99b7a6;letter-spacing:3px}section{background:#1b2425;border:1px solid #354143;border-radius:16px;padding:24px;margin:24px 0}button,a{font:inherit}button{background:#b2d1bd;color:#14221a;border:0;border-radius:8px;padding:10px 18px;cursor:pointer}button:disabled{opacity:.5;cursor:default}a{color:#b2d1bd}code{overflow-wrap:anywhere}p{margin:12px 0}#status{min-height:28px;color:#d8c499}textarea{display:block;width:100%;min-height:130px;background:#111719;color:#e9eee9;border:1px solid #65736b;padding:12px;border-radius:8px;margin-top:16px;resize:vertical}small{color:#b7c1bb}
+</style>
+<style>[hidden]{display:none!important}.choices{display:flex;flex-wrap:wrap;gap:12px}button[aria-pressed="true"]{outline:2px solid #b2d1bd;outline-offset:3px}summary{cursor:pointer;color:#b2d1bd}#providerStatus{color:#b7c1bb}</style>
+<body>
+<div class="brand">ENTWURF</div>
+<h1>连接本机的 ChatGPT 会话</h1>
+<p>使用已登录的 ChatGPT 客户端或浏览器生成图片，完成后保存在 Entwurf 项目里。</p>
+<section id="pairSection" hidden>
+<h2>连接网页应用</h2>
+<p>将允许 <code id="origin"></code> 在本机发起图片任务，并读取这些任务的图片。</p>
+<p>连接不会提交提示词。你仍需在项目中点击“开始生成”。</p>
+<button id="pair" type="button">连接此网页</button>
+</section>
+<section aria-labelledby="providerTitle">
+<h2 id="providerTitle">选择连接方式</h2>
+<p id="providerStatus" role="status">正在读取连接设置…</p>
+<div class="choices">
+<button id="windows" type="button" aria-pressed="false" disabled>使用 ChatGPT 客户端</button>
+<button id="browser" type="button" aria-pressed="false" disabled>使用浏览器扩展</button>
+<button id="retryProvider" type="button" hidden>重试读取设置</button>
+</div>
+<p id="nativeUnavailable" hidden><small>当前安装未包含客户端连接组件，可使用浏览器扩展。</small></p>
+<p id="nativeHelp" hidden>客户端模式无需安装浏览器扩展。请打开已登录的 ChatGPT 客户端，切到 ChatGPT 模式并进入“图像”页面，保持 Windows 解锁。</p>
+<p><small>连接只检查当前状态。仅在项目中点击“启动一次图片生成”后，才会输入并提交图片提示。</small></p>
+</section>
+<section id="browserSection" hidden>
+<h2>浏览器扩展设置</h2>
+<details id="browserDetails">
+<summary>安装扩展与连接信息</summary>
+<ol>
+<li><a href="/companion/entwurf-chatgpt-browser.zip" download>下载 Entwurf ChatGPT Companion</a>，解压到一个固定文件夹。</li>
+<li>在已登录 ChatGPT 的 Chrome 或 Edge 扩展管理页面打开“开发者模式”，选择“加载已解压的扩展程序”，选择解压后的文件夹。</li>
+<li>保持 ChatGPT 网页打开，安装后刷新一次该网页。</li>
+<li>显示并复制下面的连接信息，粘贴到扩展弹窗中。</li>
+</ol>
+<button id="extension" type="button">显示扩展连接信息</button>
+<textarea id="credentials" readonly hidden aria-label="扩展连接信息"></textarea>
+<p><small>连接信息仅供本机扩展使用，请勿分享。</small></p>
+</details>
+</section>
+<p id="status" role="status" aria-live="polite"></p>
+<script>
+const origin = new URLSearchParams(location.search).get('origin');
+const status = document.querySelector('#status');
+let session, provider;
+async function request(path, body) {
+  if (!session) {
+    const response = await fetch('/api/bootstrap');
+    if (!response.ok) throw new Error('无法连接本机服务，请重试。');
+    session = (await response.json()).session_token;
+  }
+  const response = await fetch(path, {method: body ? 'POST' : 'GET', headers: {'X-Entwurf-Session': session, 'X-Entwurf-Client':'pairing-page', ...(body ? {'Content-Type':'application/json'} : {})}, ...(body ? {body:JSON.stringify(body)} : {})});
+  const result = await response.json();
+  if (!response.ok) { const error = new Error(result.error || '连接失败，请重试。'); error.status = response.status; throw error; }
+  return result;
+}
+function renderProvider() {
+  document.querySelector('#providerStatus').textContent = provider.provider === 'windows' ? '当前方式：ChatGPT 客户端' : '当前方式：浏览器扩展';
+  document.querySelector('#windows').disabled = !provider.native_available;
+  document.querySelector('#browser').disabled = false;
+  document.querySelector('#windows').setAttribute('aria-pressed', String(provider.provider === 'windows'));
+  document.querySelector('#browser').setAttribute('aria-pressed', String(provider.provider === 'browser'));
+  document.querySelector('#nativeUnavailable').hidden = provider.native_available;
+  document.querySelector('#nativeHelp').hidden = provider.provider !== 'windows';
+  document.querySelector('#browserSection').hidden = provider.provider !== 'browser';
+  if (provider.provider !== 'browser') {
+    document.querySelector('#browserDetails').open = false;
+    const field = document.querySelector('#credentials'); field.hidden = true; field.value = '';
+  }
+}
+async function loadProvider() {
+  document.querySelector('#retryProvider').hidden = true;
+  status.textContent = '';
+  try { provider = await request('/api/automation/provider'); renderProvider(); }
+  catch (error) {
+    document.querySelector('#providerStatus').textContent = '暂时无法读取连接方式。';
+    status.textContent = error.message;
+    document.querySelector('#retryProvider').hidden = false;
+  }
+}
+async function selectProvider(selected) {
+  if (!provider || provider.provider === selected) return;
+  document.querySelector('#windows').disabled = true;
+  document.querySelector('#browser').disabled = true;
+  try {
+    provider = await request('/api/automation/provider', {provider:selected});
+    status.textContent = '连接方式已保存，可返回项目查看连接状态。';
+  } catch (error) { status.textContent = error.status === 409 ? '还有运行正在观察，请先在项目中停止观察，再切换连接方式。' : error.message; }
+  finally { renderProvider(); }
+}
+document.querySelector('#windows').onclick = () => selectProvider('windows');
+document.querySelector('#browser').onclick = () => selectProvider('browser');
+document.querySelector('#retryProvider').onclick = () => loadProvider();
+void loadProvider();
+if (origin) {
+  document.querySelector('#pairSection').hidden = false;
+  document.querySelector('#origin').textContent = origin;
+}
+document.querySelector('#pair').onclick = async function () {
+  this.disabled = true;
+  try {
+    if (!window.opener) throw new Error('请从 Entwurf 网页中的连接按钮打开此页面。');
+    const access = await request('/api/automation/pair', {origin});
+    window.opener.postMessage({type:'entwurf:automation-paired', ...access}, origin);
+    status.textContent = '网页已连接，可以返回项目。';
+  } catch (error) { status.textContent = error.message; this.disabled = false; }
+};
+document.querySelector('#extension').onclick = async function () {
+  this.disabled = true;
+  try {
+    const info = await request('/api/automation/pairing');
+    const field = document.querySelector('#credentials');
+    field.hidden = false; field.value = JSON.stringify(info, null, 2); field.focus(); field.select();
+    status.textContent = '复制连接信息后，在浏览器扩展中粘贴并连接。';
+  } catch (error) { status.textContent = error.message; }
+  this.disabled = false;
+};
+</script>
+</body>
+</html>
