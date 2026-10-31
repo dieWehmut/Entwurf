@@ -63,6 +63,21 @@ pub fn validate_ir(ir: &KnowledgeIr, options: &ValidationOptions) -> Result<Vali
             "the knowledge IR has no nodes",
         );
     }
+    // Ingestion can preserve useful partial content while recording unresolved
+    // formulas, OCR uncertainty, or unreadable pages. Those explicit review
+    // items must block export until the caller records review by clearing them.
+    // Grounded source nodes default to verified=false; that flag alone is not
+    // an unresolved-review item and must not become a blanket source gate.
+    for item in &ir.unverified {
+        report.findings.push(crate::ir::Finding {
+            id: uuid::Uuid::new_v4().to_string(),
+            code: "unresolved_review".into(),
+            severity: Severity::Blocking,
+            message: item.reason.clone(),
+            node_id: item.node_id.clone(),
+            evidence: Some(item.text.clone()),
+        });
+    }
     for node in &ir.nodes {
         if node.title.trim().is_empty() {
             report.push(
@@ -421,6 +436,7 @@ mod tests {
             body: "Body".into(),
             latex: None,
             anchors: vec![SourceAnchor {
+                region: None,
                 source_id: "s".into(),
                 page: None,
                 line: Some(1),

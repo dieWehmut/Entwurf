@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use entwurf_core::compiler::{ArtifactSet, CompileOptions};
-use entwurf_core::ingest::{ingest_paths, IngestOptions};
+use entwurf_core::ingest::{ingest_project_paths, IngestOptions};
 use entwurf_core::project::{Project, VersionReason};
 use entwurf_core::storage::{load_project, save_project, ProjectPaths};
 use entwurf_core::StyleSpec;
@@ -61,23 +61,38 @@ fn load_existing_project(
 
 #[tauri::command]
 fn import_sources(
+    app: tauri::AppHandle,
     state: State<'_, std::sync::Mutex<AppState>>,
     task_id: String,
     paths: Vec<String>,
 ) -> Result<entwurf_core::KnowledgeIr, String> {
     let mut state = state.lock().map_err(|error| error.to_string())?;
+    let root = state.root.clone().ok_or("no project is open")?;
+    let project_paths = ProjectPaths::new(root);
     let project = state.project.as_mut().ok_or("no project is open")?;
-    let report = ingest_paths(
+    if !project.tasks.iter().any(|task| task.id == task_id) {
+        return Err("task does not belong to this project".into());
+    }
+    let options = IngestOptions {
+        pdfium_dir: Some(
+            app.path()
+                .resource_dir()
+                .map_err(|e| e.to_string())?
+                .join("resources/pdfium"),
+        ),
+        ..IngestOptions::standard()
+    };
+    let report = ingest_project_paths(
+        &project_paths,
         &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
-        &IngestOptions::standard(),
+        &options,
     )
     .map_err(|error| error.to_string())?;
-    let mut ir = report.into_ir(&project.id, &task_id, &project.name);
-    let version = project
+    let ir = report.into_ir(&project.id, &task_id, &project.name);
+    project
         .save_version(&task_id, ir.clone(), VersionReason::Ingested)
         .map_err(|error| error.to_string())?;
-    ir.task_id = task_id;
-    ir.id = version;
+    save_project(&project_paths, project).map_err(|error| error.to_string())?;
     Ok(ir)
 }
 

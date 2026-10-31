@@ -435,6 +435,7 @@ mod tests {
             body: "A function from outcomes to real numbers.".into(),
             latex: Some("X: \\Omega \\to \\mathbb{R}".into()),
             anchors: vec![SourceAnchor {
+                region: None,
                 source_id: "s1".into(),
                 page: Some(2),
                 line: None,

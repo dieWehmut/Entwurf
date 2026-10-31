@@ -37,7 +37,8 @@
       }
     },
     "resources": [
-      "../../../packages/contracts/schemas/*"
+      "../../../packages/contracts/schemas/*",
+      "resources/pdfium/**/*"
     ],
     "icon": [
       "icons/icon.png",

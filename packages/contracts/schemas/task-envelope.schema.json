@@ -4,29 +4,112 @@
   "title": "Entwurf Task Envelope",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "task_id", "project_id", "revision", "title", "locale", "source_excerpt", "baseline_ir", "style", "requested_artifact", "response_schema", "rules"],
+  "required": [
+    "schema_version",
+    "task_id",
+    "project_id",
+    "revision",
+    "title",
+    "locale",
+    "source_excerpt",
+    "baseline_ir",
+    "style",
+    "requested_artifact",
+    "response_schema",
+    "rules"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "task_version": { "type": ["string", "null"] },
-    "task_id": { "type": "string", "minLength": 1 },
-    "project_id": { "type": "string", "minLength": 1 },
-    "revision": { "type": "integer", "minimum": 1 },
-    "title": { "type": "string", "minLength": 1 },
-    "locale": { "type": "string" },
-    "source_excerpt": { "type": "string" },
-    "baseline_ir": { "$ref": "knowledge-ir.schema.json" },
-    "style": { "$ref": "style.schema.json" },
+    "schema_version": {
+      "const": 1
+    },
+    "task_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "x-rust-default": true
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "x-rust-type": "Id"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "x-rust-type": "Id"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "locale": {
+      "type": "string"
+    },
+    "source_excerpt": {
+      "type": "string"
+    },
+    "baseline_ir": {
+      "$ref": "knowledge-ir.schema.json"
+    },
+    "style": {
+      "$ref": "style.schema.json"
+    },
     "requested_artifact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "pages", "render_mode"],
+      "required": [
+        "kind",
+        "pages",
+        "render_mode"
+      ],
       "properties": {
-        "kind": { "const": "knowledge_sheet" },
-        "pages": { "type": "integer", "minimum": 1, "maximum": 3 },
-        "render_mode": { "enum": ["native_svg", "plan_plus_image"] }
-      }
+        "kind": {
+          "const": "knowledge_sheet",
+          "x-rust-name": "ArtifactKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "pages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "x-rust-type": "u16"
+        },
+        "render_mode": {
+          "enum": [
+            "native_svg",
+            "plan_plus_image"
+          ],
+          "x-rust-name": "RenderMode",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        }
+      },
+      "x-rust-name": "RequestedArtifact",
+      "x-rust-module": "ir"
     },
-    "response_schema": { "type": "string", "minLength": 2 },
-    "rules": { "type": "array", "items": { "type": "string" } }
-  }
+    "response_schema": {
+      "type": "string",
+      "minLength": 2
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "x-rust-name": "TaskEnvelope",
+  "x-rust-module": "ir"
 }

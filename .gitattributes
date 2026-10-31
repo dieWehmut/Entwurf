@@ -1,5 +1,15 @@
+# Contract byte hashes must survive Windows and WSL checkouts unchanged.
+/packages/contracts/** text eol=lf
+*.pdf binary
+*.png binary
+*.ico binary
+*.ttf binary
+*.dll binary
+
 # Preserve upstream license texts verbatim, including their original whitespace.
 /assets/fonts/OFL.txt -whitespace
 /assets/fonts/DejaVu-LICENSE.txt -whitespace
 /apps/desktop/public/fonts/OFL.txt -whitespace
 /apps/desktop/public/fonts/DejaVu-LICENSE.txt -whitespace
+/apps/desktop/src-tauri/resources/pdfium/LICENSE -whitespace
+/apps/desktop/src-tauri/resources/pdfium/licenses/* -whitespace

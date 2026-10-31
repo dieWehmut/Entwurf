@@ -7,6 +7,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Push-Location $root
 try {
+    & (Join-Path $PSScriptRoot 'prepare-pdfium.ps1')
     Push-Location (Join-Path $root 'apps\desktop')
     try {
         Invoke-CheckedNative 'pnpm' @('install', '--frozen-lockfile')

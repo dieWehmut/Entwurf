@@ -507,6 +507,7 @@ mod tests {
         };
         ir.sources.push(source);
         let anchor = SourceAnchor {
+            region: None,
             source_id: "s".into(),
             page: Some(1),
             line: Some(1),

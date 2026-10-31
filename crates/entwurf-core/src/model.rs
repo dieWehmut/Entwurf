@@ -1,27 +1,14 @@
 //! Shared geometry and artifact model used by layout, validation and export.
 
+// Wire declarations are generated from the canonical JSON Schemas.
+include!("../../../packages/contracts/generated/model.rs");
+
 use serde::{Deserialize, Serialize};
-
-use crate::ir::{Id, NodeKind};
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct Point {
-    pub x: f32,
-    pub y: f32,
-}
 
 impl Point {
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
 }
 
 impl Rect {
@@ -72,68 +59,6 @@ impl Rect {
 pub enum LineShape {
     Orthogonal,
     Straight,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextLine {
-    pub text: String,
-    pub x: f32,
-    pub baseline: f32,
-    pub font_size: f32,
-    pub bold: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlacedNode {
-    pub node_id: Id,
-    pub kind: NodeKind,
-    pub title: String,
-    pub body: String,
-    pub latex: Option<String>,
-    pub page: u16,
-    pub rect: Rect,
-    pub title_lines: Vec<TextLine>,
-    pub body_lines: Vec<TextLine>,
-    pub latex_lines: Vec<TextLine>,
-    pub text_clipped: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlacedEdge {
-    pub edge_id: Id,
-    pub from_node: Id,
-    pub to_node: Id,
-    pub page: u16,
-    pub points: Vec<Point>,
-    pub label: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlacedGroup {
-    pub id: Id,
-    pub title: String,
-    pub page: u16,
-    pub rect: Rect,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LayoutPage {
-    pub index: u16,
-    pub width_pt: f32,
-    pub height_pt: f32,
-    pub margin_pt: f32,
-    pub groups: Vec<PlacedGroup>,
-    pub nodes: Vec<PlacedNode>,
-    pub edges: Vec<PlacedEdge>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LayoutDocument {
-    pub width_pt: f32,
-    pub height_pt: f32,
-    pub margin_pt: f32,
-    pub pages: Vec<LayoutPage>,
-    pub diagnostics: Vec<String>,
 }
 
 impl LayoutDocument {

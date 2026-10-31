@@ -5,20 +5,47 @@ The application embeds these schemas at compile time and registers every local
 schema resource for offline reference resolution. Installed binaries do not read
 the source checkout and validation never fetches remote references.
 
-`node packages/contracts/generate.mjs` deterministically generates
-`packages/contracts/generated/types.ts` directly from these schemas. Run
-`node packages/contracts/generate.mjs --check` to reject drift. A Rust contract
-test also checks hashes of the embedded schema sources and generated TS against
-the generated manifest, so changing a schema without regeneration or editing
-only generated types fails core tests. The generator has no npm dependencies.
+`node packages/contracts/generate.mjs` deterministically generates TypeScript
+and Rust wire declarations directly from these schemas, with no npm dependencies.
+`generated/ir.rs`, `generated/model.rs`, and `generated/project.rs` are included by
+the corresponding core modules: these are the types used by ingestion, storage,
+prompting, layout, validation and export. Their constructors, state transitions
+and other behavioral implementations stay in the Rust modules. TypeScript
+consumers import `@entwurf/contracts` or `generated/types.ts`.
 
-Rust types remain hand-authored serde models because they contain behavioral
-implementations and existing compiler/state-machine contracts. Their serialized
-values are checked against the canonical schemas in contract and persistence
-tests; these are sampled compatibility checks rather than exhaustive Rust parity.
-Generated Rust from the plan remains pending. Moving to generated Rust models would
-require a separate model/behavior split. Typescript consumers can import the
-schema-derived types from `@entwurf/contracts` or the generated file.
+Run `node packages/contracts/generate.mjs --check` to reject drift in every output.
+The generated manifest hashes all schema sources, the generator itself, TS and
+each Rust file; the core contract tests verify those embedded hashes without
+requiring Node or a source checkout at runtime. `node --test
+packages/contracts/generate.test.mjs` additionally exercises schema mutation and
+checks rejection of edited/missing generated artifacts in a temporary directory.
+
+Schema annotations retain existing native APIs without copying field declarations:
+
+| Annotation | Meaning |
+| --- | --- |
+| `x-rust-name`, `x-rust-module` | Name and original core module for a generated struct, enum or alias. Repeated enum declarations must generate identically or generation fails. |
+| `x-rust-type` | Checked native scalar override: string `Id`/`String`, integer `u16`/`u32`/`u64`, or number `f32`/`f64`. Default integer and number mappings are `u32` and `f32`. |
+| `x-rust-derives` | Additional existing traits (`Copy`, equality/order traits or `Default`); all structs/enums derive Debug, Clone and serde traits. |
+| `x-rust-field` | Native field spelling, preserving the JSON key through serde rename (for example `type` → `edge_type`). |
+| `x-rust-default` | Existing serde default: `true` or a named local function. |
+| `x-rust-skip-none` | Omit an absent optional field on serialization; used only for the new anchor region so old immutable IR bytes remain stable. |
+
+Date-time strings become `chrono::DateTime<chrono::Utc>`, arrays become `Vec`,
+typed object maps become `BTreeMap`, and nullable or optional fields become
+`Option`. Enum variants use explicit serde names, including uppercase task states.
+Closed objects reject unknown fields during serde deserialization as well as
+schema validation. Unsupported unions or native types fail generation instead
+of degrading to untyped JSON.
+
+JSON Schema remains the import-validation authority for string patterns, ranges,
+required nullable fields and version constants. Serde retains the previous IR
+version default and absent-option behavior; raw JSON validation runs first so
+those defaults cannot hide an invalid imported document. Native integer widths
+also reject overflow. Existing JSON field names, enum values, IDs, timestamps,
+numeric precision and null serialization are preserved. The additive optional
+anchor `region` is absent in older files and deserializes as `None`; new serialized
+anchors omit an absent region, preserving pre-region immutable snapshot bytes.
 
 | Schema | Purpose | Stability |
 | --- | --- | --- |
@@ -31,6 +58,9 @@ schema-derived types from `@entwurf/contracts` or the generated file.
 ## Knowledge IR invariants
 
 - IDs are opaque stable strings. A node is never identified by its array index.
+- Source regions use a top-left origin, with `left`, `top`, `width`, and `height`
+  stored as unsigned integers. `pdf_millipoints` means thousandths of a PDF point;
+  `pixels` means source-image pixels. Anchors may omit `region`.
 - Every `critical` node and every chapter/section node must have an anchor with a
   source, page/line/character range or quote hash.
 - Formula changes are only legal through an auditable `Correction`. The original
@@ -80,16 +110,25 @@ jobs concurrently.
 
 ## Bridge protocol
 
-The Windows sidecar speaks one JSON object per line over stdin/stdout. It first
-returns a one-time session token from `detect_app`; every other call must attach
-with that token. It exposes `detect_app`, `attach`, `start_conversation`,
-`paste_prompt`, `submit`, `observe`, `capture_text`, `watch_artifact`, `pause`
-and `cancel`.
+The Windows .NET sidecar uses a current-user-only named pipe with JSON-RPC 2.0.
+Each UTF-8 JSON frame has a four-byte unsigned little-endian length prefix.
+The parent passes the random one-time session token through an inherited anonymous
+bootstrap pipe; it never appears in command-line arguments, environment variables
+or logs. `attach` consumes the token once and authorizes only that connection.
+Public `detect_app` returns a read-only capability report and never returns a token.
+
+The methods are `detect_app`, `attach`, `start_conversation`, `paste_prompt`,
+`submit`, `observe`, `capture_text`, `watch_artifact`, `pause` and `cancel`.
+Current production discovery verifies ChatGPT package identity and inspects UIA
+control capabilities. Real input, completion detection and text capture are
+unverified and remain disabled; simulated state-machine tests do not enable them.
+All four release gates must pass before automation can start. Authenticated manual
+artifact watching uses only parent-authorized directories and exact task/version
+filenames. See [the bridge contract](../../sidecars/gpt-bridge/README.md) for framing,
+limits, errors, bootstrap and recovery details.
 
 The bridge never reads cookies, calls private APIs, bypasses login/quota/checks,
-or clicks by screen coordinates. It may only drive observable UI controls. A
-failed discovery, reliable-input, completion-detection or capture gate keeps
-automation disabled and presents manual handoff.
+or clicks by screen coordinates. Unavailable automation presents manual handoff.
 
 ## Export contract
 

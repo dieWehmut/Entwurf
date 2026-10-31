@@ -1,10 +1,12 @@
 //! Local-first project state, immutable versions, audits and deterministic task
 //! transitions. All time stamps are explicit UTC values.
 
+// Wire declarations are generated from the canonical JSON Schemas.
+include!("../../../packages/contracts/generated/project.rs");
+
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 
 use crate::compiler::{ArtifactSet, CompileOptions};
 use crate::error::{EntwurfError, Result};
@@ -12,27 +14,6 @@ use crate::ir::{new_id, KnowledgeIr, StyleSpec, TaskState, ValidationReport};
 use crate::layout::{layout, LayoutOptions};
 use crate::model::LayoutDocument;
 use crate::validate::{validate_ir, ValidationOptions};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Project {
-    pub schema_version: u32,
-    pub id: String,
-    pub name: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub style: StyleSpec,
-    pub tasks: Vec<Task>,
-    pub audit: Vec<AuditEvent>,
-    pub settings: ProjectSettings,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectSettings {
-    pub automation_enabled: bool,
-    pub tesseract_available: bool,
-    pub ocr_languages: String,
-    pub locale: String,
-}
 
 impl Default for ProjectSettings {
     fn default() -> Self {
@@ -43,77 +24,6 @@ impl Default for ProjectSettings {
             locale: "zh-CN".to_string(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub schema_version: u32,
-    pub id: String,
-    pub title: String,
-    pub chapter: Option<String>,
-    pub state: TaskState,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub versions: Vec<TaskVersion>,
-    pub current_version: Option<String>,
-    pub paused_from: Option<TaskState>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskVersion {
-    pub id: String,
-    pub revision: u32,
-    pub created_at: DateTime<Utc>,
-    pub reason: VersionReason,
-    pub ir: KnowledgeIr,
-    pub layout: Option<LayoutDocument>,
-    pub validation: Option<ValidationReport>,
-    pub artifacts: Option<ArtifactPaths>,
-    pub source_prompt_hash: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum VersionReason {
-    Ingested,
-    GptImported,
-    UserEdited,
-    CorrectionReverted,
-    ManualSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactPaths {
-    pub svg: Vec<String>,
-    pub png: Vec<String>,
-    pub pdf: String,
-    pub manifest: String,
-    pub ir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEvent {
-    pub id: String,
-    pub at: DateTime<Utc>,
-    pub task_id: Option<String>,
-    pub kind: AuditKind,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AuditKind {
-    ProjectCreated,
-    SourceImported,
-    StateChanged,
-    VersionCreated,
-    CorrectionAdded,
-    CorrectionReverted,
-    ExportCompleted,
-    ValidationFailed,
-    AutomationPaused,
-    Error,
 }
 
 impl Project {

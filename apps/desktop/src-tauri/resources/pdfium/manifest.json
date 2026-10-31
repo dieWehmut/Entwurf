@@ -1,0 +1,12 @@
+{
+  "engine": "PDFium",
+  "version": "151.0.7881.0",
+  "binding": "pdfium-render 0.9.4 / pdfium_7881",
+  "source": "https://pdfium.googlesource.com/pdfium/+/refs/heads/chromium/7881",
+  "distributor": "https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F7881",
+  "windows_x64_archive": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7881/pdfium-win-x64.tgz",
+  "windows_x64_sha256": "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08",
+  "linux_x64_archive": "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7881/pdfium-linux-x64.tgz",
+  "linux_x64_sha256": "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d",
+  "license": "PDFium BSD-3-Clause (licenses/pdfium.txt); binary packaging MIT (LICENSE); bundled notices in licenses/"
+}

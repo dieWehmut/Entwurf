@@ -20,7 +20,8 @@
     },
     "task_id": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "x-rust-type": "Id"
     },
     "revision": {
       "type": "integer",
@@ -79,9 +80,19 @@
                   "normal",
                   "low",
                   null
+                ],
+                "x-rust-name": "Importance",
+                "x-rust-module": "ir",
+                "x-rust-derives": [
+                  "PartialEq",
+                  "Eq",
+                  "PartialOrd",
+                  "Ord"
                 ]
               }
-            }
+            },
+            "x-rust-name": "NodePatch",
+            "x-rust-module": "ir"
           }
         },
         "add_edges": {
@@ -94,10 +105,16 @@
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "x-rust-type": "Id"
           }
         }
-      }
+      },
+      "x-rust-name": "IrPatch",
+      "x-rust-module": "ir",
+      "x-rust-derives": [
+        "Default"
+      ]
     },
     "visual_plan": {
       "type": "object",
@@ -111,7 +128,8 @@
         "page_count": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 3
+          "maximum": 3,
+          "x-rust-type": "u16"
         },
         "groups": {
           "type": "array",
@@ -140,9 +158,12 @@
               "page": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 3
+                "maximum": 3,
+                "x-rust-type": "u16"
               }
-            }
+            },
+            "x-rust-name": "VisualGroup",
+            "x-rust-module": "ir"
           }
         },
         "notes": {
@@ -151,7 +172,9 @@
             "type": "string"
           }
         }
-      }
+      },
+      "x-rust-name": "VisualPlan",
+      "x-rust-module": "ir"
     },
     "corrections": {
       "type": "array",
@@ -176,6 +199,12 @@
               "body",
               "latex",
               "anchors"
+            ],
+            "x-rust-name": "CorrectionField",
+            "x-rust-module": "ir",
+            "x-rust-derives": [
+              "PartialEq",
+              "Eq"
             ]
           },
           "before": {
@@ -194,7 +223,9 @@
               "$ref": "knowledge-ir.schema.json#/$defs/anchor"
             }
           }
-        }
+        },
+        "x-rust-name": "CorrectionProposal",
+        "x-rust-module": "ir"
       }
     },
     "image_path": {
@@ -209,5 +240,7 @@
         "type": "string"
       }
     }
-  }
+  },
+  "x-rust-name": "ResultEnvelope",
+  "x-rust-module": "ir"
 }

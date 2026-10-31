@@ -5,5 +5,5 @@
   "type": "module",
   "types": "generated/types.ts",
   "exports": { ".": "./generated/types.ts" },
-  "scripts": { "generate": "node generate.mjs", "check": "node generate.mjs --check" }
+  "scripts": { "generate": "node generate.mjs", "check": "node generate.mjs --check", "test": "node --test generate.test.mjs" }
 }

@@ -4,113 +4,551 @@
   "title": "Entwurf Knowledge IR",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "project_id", "task_id", "title", "language", "sources", "nodes", "edges", "corrections", "unverified", "updated_at"],
+  "required": [
+    "schema_version",
+    "id",
+    "project_id",
+    "task_id",
+    "title",
+    "language",
+    "sources",
+    "nodes",
+    "edges",
+    "corrections",
+    "unverified",
+    "updated_at"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "id": { "$ref": "#/$defs/id" },
-    "project_id": { "$ref": "#/$defs/id" },
-    "task_id": { "$ref": "#/$defs/id" },
-    "title": { "type": "string", "minLength": 1 },
-    "subject": { "type": ["string", "null"] },
-    "language": { "type": "string", "minLength": 2 },
-    "sources": { "type": "array", "items": { "$ref": "#/$defs/source" } },
-    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
-    "corrections": { "type": "array", "items": { "$ref": "#/$defs/correction" } },
-    "unverified": { "type": "array", "items": { "$ref": "#/$defs/unverified" } },
-    "updated_at": { "type": "string", "format": "date-time" }
+    "schema_version": {
+      "const": 1,
+      "x-rust-default": "default_schema_version"
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "project_id": {
+      "$ref": "#/$defs/id"
+    },
+    "task_id": {
+      "$ref": "#/$defs/id"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 2
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/correction"
+      }
+    },
+    "unverified": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unverified"
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
   },
   "$defs": {
-    "id": { "type": "string", "minLength": 1 },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "x-rust-name": "Id",
+      "x-rust-module": "ir"
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "original_name", "kind", "content_hash", "stored_path", "byte_len", "imported_at", "notes"],
+      "required": [
+        "id",
+        "original_name",
+        "kind",
+        "content_hash",
+        "stored_path",
+        "byte_len",
+        "imported_at",
+        "notes"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "original_name": { "type": "string", "minLength": 1 },
-        "kind": { "enum": ["pdf", "markdown", "image", "latex"] },
-        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "stored_path": { "type": "string" },
-        "byte_len": { "type": "integer", "minimum": 0 },
-        "imported_at": { "type": "string", "format": "date-time" },
-        "notes": { "type": "array", "items": { "type": "string" } }
-      }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "original_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "pdf",
+            "markdown",
+            "image",
+            "latex"
+          ],
+          "x-rust-name": "SourceKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "stored_path": {
+          "type": "string"
+        },
+        "byte_len": {
+          "type": "integer",
+          "minimum": 0,
+          "x-rust-type": "u64"
+        },
+        "imported_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "x-rust-name": "SourceFile",
+      "x-rust-module": "ir",
+      "x-rust-derives": [
+        "PartialEq",
+        "Eq"
+      ]
     },
     "anchor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_id", "label"],
+      "required": [
+        "source_id",
+        "label"
+      ],
       "properties": {
-        "source_id": { "$ref": "#/$defs/id" },
-        "page": { "type": ["integer", "null"], "minimum": 1 },
-        "line": { "type": ["integer", "null"], "minimum": 1 },
-        "char_start": { "type": ["integer", "null"], "minimum": 0 },
-        "char_end": { "type": ["integer", "null"], "minimum": 0 },
-        "quote_hash": { "type": ["string", "null"] },
-        "label": { "type": "string" }
-      }
+        "source_id": {
+          "$ref": "#/$defs/id"
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "char_start": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "char_end": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "quote_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/region"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-rust-skip-none": true
+        }
+      },
+      "x-rust-name": "SourceAnchor",
+      "x-rust-module": "ir",
+      "x-rust-derives": [
+        "PartialEq",
+        "Eq"
+      ]
     },
     "node": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "title", "body", "latex", "anchors", "importance", "origin", "parent_id", "tags", "verified", "review_note"],
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "body",
+        "latex",
+        "anchors",
+        "importance",
+        "origin",
+        "parent_id",
+        "tags",
+        "verified",
+        "review_note"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "kind": { "enum": ["chapter", "section", "concept", "definition", "formula", "theorem", "example", "warning", "note"] },
-        "title": { "type": "string", "minLength": 1 },
-        "body": { "type": "string" },
-        "latex": { "type": ["string", "null"] },
-        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } },
-        "importance": { "enum": ["critical", "high", "normal", "low"] },
-        "origin": { "enum": ["source", "gpt_candidate", "user_edit", "gpt_correction"] },
-        "parent_id": { "type": ["string", "null"] },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "verified": { "type": "boolean" },
-        "review_note": { "type": ["string", "null"] }
-      }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "chapter",
+            "section",
+            "concept",
+            "definition",
+            "formula",
+            "theorem",
+            "example",
+            "warning",
+            "note"
+          ],
+          "x-rust-name": "NodeKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq",
+            "PartialOrd",
+            "Ord"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": "string"
+        },
+        "latex": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anchor"
+          }
+        },
+        "importance": {
+          "enum": [
+            "critical",
+            "high",
+            "normal",
+            "low"
+          ],
+          "x-rust-name": "Importance",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq",
+            "PartialOrd",
+            "Ord"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "source",
+            "gpt_candidate",
+            "user_edit",
+            "gpt_correction"
+          ],
+          "x-rust-name": "NodeOrigin",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-rust-type": "Id"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "review_note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "x-rust-name": "KnowledgeNode",
+      "x-rust-module": "ir"
     },
     "edge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "from", "to", "type", "label", "anchors"],
+      "required": [
+        "id",
+        "from",
+        "to",
+        "type",
+        "label",
+        "anchors"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "from": { "$ref": "#/$defs/id" },
-        "to": { "$ref": "#/$defs/id" },
-        "type": { "enum": ["contains", "depends_on", "related", "example_of", "contradicts"] },
-        "label": { "type": ["string", "null"] },
-        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } }
-      }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "contains",
+            "depends_on",
+            "related",
+            "example_of",
+            "contradicts"
+          ],
+          "x-rust-field": "edge_type",
+          "x-rust-name": "EdgeKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "anchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anchor"
+          }
+        }
+      },
+      "x-rust-name": "GraphEdge",
+      "x-rust-module": "ir"
     },
     "correction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "node_id", "field", "before", "after", "reason", "anchors", "accepted", "reverted", "created_at"],
+      "required": [
+        "id",
+        "node_id",
+        "field",
+        "before",
+        "after",
+        "reason",
+        "anchors",
+        "accepted",
+        "reverted",
+        "created_at"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "node_id": { "$ref": "#/$defs/id" },
-        "field": { "enum": ["title", "body", "latex", "anchors"] },
-        "before": { "type": "string" },
-        "after": { "type": "string" },
-        "reason": { "type": "string" },
-        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } },
-        "accepted": { "type": "boolean" },
-        "reverted": { "type": "boolean" },
-        "created_at": { "type": "string", "format": "date-time" }
-      }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "node_id": {
+          "$ref": "#/$defs/id"
+        },
+        "field": {
+          "enum": [
+            "title",
+            "body",
+            "latex",
+            "anchors"
+          ],
+          "x-rust-name": "CorrectionField",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "before": {
+          "type": "string"
+        },
+        "after": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "anchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/anchor"
+          }
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "reverted": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "x-rust-name": "Correction",
+      "x-rust-module": "ir"
     },
     "unverified": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "node_id", "kind", "text", "reason"],
+      "required": [
+        "id",
+        "node_id",
+        "kind",
+        "text",
+        "reason"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "node_id": { "type": ["string", "null"] },
-        "kind": { "enum": ["formula", "missing_anchor", "ocr", "contradiction"] },
-        "text": { "type": "string" },
-        "reason": { "type": "string" }
-      }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "node_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-rust-type": "Id"
+        },
+        "kind": {
+          "enum": [
+            "formula",
+            "missing_anchor",
+            "ocr",
+            "contradiction"
+          ],
+          "x-rust-name": "UnverifiedKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "x-rust-name": "UnverifiedItem",
+      "x-rust-module": "ir"
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left",
+        "top",
+        "width",
+        "height",
+        "unit"
+      ],
+      "properties": {
+        "left": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unit": {
+          "enum": [
+            "pdf_millipoints",
+            "pixels"
+          ],
+          "x-rust-name": "RegionUnit",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        }
+      },
+      "x-rust-name": "SourceRegion",
+      "x-rust-module": "ir",
+      "x-rust-derives": [
+        "PartialEq",
+        "Eq"
+      ],
+      "description": "Top-left source region in integer pixels or thousandths of a PDF point."
     }
-  }
+  },
+  "x-rust-name": "KnowledgeIr",
+  "x-rust-module": "ir"
 }

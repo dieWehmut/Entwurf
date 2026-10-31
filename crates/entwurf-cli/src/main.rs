@@ -6,7 +6,7 @@ use entwurf_core::compiler::{compile, CompileOptions};
 use entwurf_core::ingest::{ingest_paths, IngestOptions};
 use entwurf_core::project::{Project, VersionReason};
 use entwurf_core::prompt::build_prompt;
-use entwurf_core::storage::{save_ir, save_project, ProjectPaths};
+use entwurf_core::storage::{load_ir, save_ir, save_project, ProjectPaths};
 use entwurf_core::StyleSpec;
 
 fn main() -> ExitCode {
@@ -38,7 +38,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn compile_command(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut inputs = Vec::new();
     let mut output = PathBuf::from("entwurf-output");
-    let mut title = "Knowledge sheet".to_string();
+    let mut title = None;
+    let mut reviewed_ir = None;
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
@@ -48,28 +49,60 @@ fn compile_command(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--title" | "-t" => {
                 index += 1;
-                title = args.get(index).ok_or("--title needs text")?.clone();
+                title = Some(args.get(index).ok_or("--title needs text")?.clone());
             }
+            "--ir" => {
+                index += 1;
+                if reviewed_ir.is_some() {
+                    return Err("--ir accepts one snapshot".into());
+                }
+                reviewed_ir = Some(PathBuf::from(args.get(index).ok_or("--ir needs a path")?));
+            }
+            flag if flag.starts_with('-') => return Err(format!("unknown option: {flag}").into()),
             path => inputs.push(PathBuf::from(path)),
         }
         index += 1;
     }
-    if inputs.is_empty() {
-        return Err("compile needs at least one source file".into());
+    if reviewed_ir.is_some() && !inputs.is_empty() {
+        return Err("choose either --ir or source files".into());
     }
-    let project = Project::new(title.clone());
-    let report = ingest_paths(&inputs, &IngestOptions::standard())?;
-    let mut ir = report.into_ir(&project.id, "cli-task", &title);
+    if reviewed_ir.is_none() && inputs.is_empty() {
+        return Err("compile needs source files or --ir".into());
+    }
+    // The internal acceptance harness can consume an already reviewed snapshot.
+    // Loading never marks nodes verified or changes the unresolved review queue.
+    let imported = reviewed_ir.as_ref().map(|path| load_ir(path)).transpose()?;
+    let title = title.unwrap_or_else(|| {
+        imported
+            .as_ref()
+            .map(|ir| ir.title.clone())
+            .unwrap_or_else(|| "Knowledge sheet".into())
+    });
+    let mut project = Project::new(title.clone());
+    let task_id = project.add_task(title.clone(), None).id.clone();
+    let (ir, reason) = if let Some(mut ir) = imported {
+        // This is a new local project/task import. Bind identity once before
+        // compile so exports, manifests, prompt and persisted snapshots agree.
+        ir.id = entwurf_core::new_id();
+        ir.project_id = project.id.clone();
+        ir.task_id = task_id.clone();
+        ir.title = title;
+        ir.touch();
+        (ir, VersionReason::ManualSnapshot)
+    } else {
+        let report = ingest_paths(&inputs, &IngestOptions::standard())?;
+        (
+            report.into_ir(&project.id, &task_id, &title),
+            VersionReason::Ingested,
+        )
+    };
     let style = StyleSpec::default();
     let compile_options = CompileOptions::new(&output);
     let artifacts = compile(&ir, &style, &compile_options)?;
     save_ir(&ProjectPaths::new(&output), &ir.task_id, &ir)?;
     let prompt = build_prompt(&ir, &style, 1, "")?;
     std::fs::write(output.join("task-envelope.md"), prompt.markdown)?;
-    let mut project = project;
-    let task_id = project.add_task(title, None).id.clone();
-    ir.task_id = task_id.clone();
-    let version = project.save_version(&task_id, ir, VersionReason::Ingested)?;
+    let version = project.save_version(&task_id, ir, reason)?;
     let layout = entwurf_core::layout::layout(
         project.current_ir(&task_id).ok_or("missing IR")?,
         &style,
@@ -107,7 +140,11 @@ fn compile_command(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     save_project(&ProjectPaths::new(&output), &project)?;
     println!(
         "compiled {} -> {} ({} pages, SVG/PNG/PDF/manifest)",
-        inputs.len(),
+        if reviewed_ir.is_some() {
+            1
+        } else {
+            inputs.len()
+        },
         output.display(),
         artifacts.page_count
     );
@@ -125,7 +162,7 @@ fn prompt_command(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 fn usage() {
     println!(
         "entwurf {}\n\n\
-         Usage:\n  entwurf compile <source...> [--out DIR] [--title TEXT]\n  entwurf prompt <knowledge.ir.json>\n  entwurf --version\n\n\
+         Usage:\n  entwurf compile <source...> [--out DIR] [--title TEXT]\n  entwurf compile --ir <knowledge.ir.json> [--out DIR] [--title TEXT]\n  entwurf prompt <knowledge.ir.json>\n  entwurf --version\n\n\
          This CLI is a local acceptance harness; the desktop UI remains the primary product surface.",
         entwurf_core::VERSION
     );

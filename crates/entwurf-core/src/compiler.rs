@@ -554,6 +554,7 @@ mod tests {
             body: "Probability of an event given another event.".into(),
             latex: Some("P(A \\mid B) = \\frac{P(A \\cap B)}{P(B)}".into()),
             anchors: vec![SourceAnchor {
+                region: None,
                 source_id: "s".into(),
                 page: Some(1),
                 line: Some(1),

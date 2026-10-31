@@ -69,7 +69,13 @@
         "y": {
           "type": "number"
         }
-      }
+      },
+      "x-rust-name": "Point",
+      "x-rust-module": "model",
+      "x-rust-derives": [
+        "Copy",
+        "PartialEq"
+      ]
     },
     "rect": {
       "type": "object",
@@ -93,7 +99,13 @@
         "height": {
           "type": "number"
         }
-      }
+      },
+      "x-rust-name": "Rect",
+      "x-rust-module": "model",
+      "x-rust-derives": [
+        "Copy",
+        "PartialEq"
+      ]
     },
     "textLine": {
       "type": "object",
@@ -121,7 +133,9 @@
         "bold": {
           "type": "boolean"
         }
-      }
+      },
+      "x-rust-name": "TextLine",
+      "x-rust-module": "model"
     },
     "placedNode": {
       "type": "object",
@@ -142,7 +156,8 @@
       "properties": {
         "node_id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "kind": {
           "enum": [
@@ -155,6 +170,14 @@
             "example",
             "warning",
             "note"
+          ],
+          "x-rust-name": "NodeKind",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq",
+            "PartialOrd",
+            "Ord"
           ]
         },
         "title": {
@@ -171,7 +194,8 @@
         },
         "page": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "x-rust-type": "u16"
         },
         "rect": {
           "$ref": "#/$defs/rect"
@@ -197,7 +221,9 @@
         "text_clipped": {
           "type": "boolean"
         }
-      }
+      },
+      "x-rust-name": "PlacedNode",
+      "x-rust-module": "model"
     },
     "placedEdge": {
       "type": "object",
@@ -213,19 +239,23 @@
       "properties": {
         "edge_id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "from_node": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "to_node": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "page": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "x-rust-type": "u16"
         },
         "points": {
           "type": "array",
@@ -239,7 +269,9 @@
             "null"
           ]
         }
-      }
+      },
+      "x-rust-name": "PlacedEdge",
+      "x-rust-module": "model"
     },
     "placedGroup": {
       "type": "object",
@@ -253,19 +285,23 @@
       "properties": {
         "id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "title": {
           "type": "string"
         },
         "page": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "x-rust-type": "u16"
         },
         "rect": {
           "$ref": "#/$defs/rect"
         }
-      }
+      },
+      "x-rust-name": "PlacedGroup",
+      "x-rust-module": "model"
     },
     "layoutPage": {
       "type": "object",
@@ -282,7 +318,8 @@
       "properties": {
         "index": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "x-rust-type": "u16"
         },
         "width_pt": {
           "type": "number"
@@ -311,7 +348,9 @@
             "$ref": "#/$defs/placedEdge"
           }
         }
-      }
+      },
+      "x-rust-name": "LayoutPage",
+      "x-rust-module": "model"
     },
     "layout": {
       "type": "object",
@@ -345,7 +384,9 @@
             "type": "string"
           }
         }
-      }
+      },
+      "x-rust-name": "LayoutDocument",
+      "x-rust-module": "model"
     },
     "finding": {
       "type": "object",
@@ -361,7 +402,8 @@
       "properties": {
         "id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "x-rust-type": "Id"
         },
         "code": {
           "type": "string"
@@ -371,6 +413,12 @@
             "blocking",
             "warning",
             "info"
+          ],
+          "x-rust-name": "Severity",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
           ]
         },
         "message": {
@@ -380,7 +428,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-rust-type": "Id"
         },
         "evidence": {
           "type": [
@@ -388,7 +437,9 @@
             "null"
           ]
         }
-      }
+      },
+      "x-rust-name": "Finding",
+      "x-rust-module": "ir"
     },
     "validation": {
       "type": "object",
@@ -416,10 +467,13 @@
         "metrics": {
           "type": "object",
           "additionalProperties": {
-            "type": "number"
+            "type": "number",
+            "x-rust-type": "f64"
           }
         }
-      }
+      },
+      "x-rust-name": "ValidationReport",
+      "x-rust-module": "ir"
     },
     "artifacts": {
       "type": "object",
@@ -453,7 +507,9 @@
         "ir": {
           "type": "string"
         }
-      }
+      },
+      "x-rust-name": "ArtifactPaths",
+      "x-rust-module": "project"
     },
     "taskVersion": {
       "type": "object",
@@ -489,6 +545,12 @@
             "user_edited",
             "correction_reverted",
             "manual_snapshot"
+          ],
+          "x-rust-name": "VersionReason",
+          "x-rust-module": "project",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
           ]
         },
         "ir": {
@@ -530,7 +592,9 @@
             "null"
           ]
         }
-      }
+      },
+      "x-rust-name": "TaskVersion",
+      "x-rust-module": "project"
     },
     "task": {
       "type": "object",
@@ -583,6 +647,12 @@
             "PAUSED",
             "FAILED",
             "CANCELLED"
+          ],
+          "x-rust-name": "TaskState",
+          "x-rust-module": "ir",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
           ]
         },
         "created_at": {
@@ -624,6 +694,12 @@
                 "PAUSED",
                 "FAILED",
                 "CANCELLED"
+              ],
+              "x-rust-name": "TaskState",
+              "x-rust-module": "ir",
+              "x-rust-derives": [
+                "PartialEq",
+                "Eq"
               ]
             },
             {
@@ -637,7 +713,9 @@
             "null"
           ]
         }
-      }
+      },
+      "x-rust-name": "Task",
+      "x-rust-module": "project"
     },
     "audit": {
       "type": "object",
@@ -676,12 +754,20 @@
             "validation_failed",
             "automation_paused",
             "error"
+          ],
+          "x-rust-name": "AuditKind",
+          "x-rust-module": "project",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
           ]
         },
         "detail": {
           "type": "string"
         }
-      }
+      },
+      "x-rust-name": "AuditEvent",
+      "x-rust-module": "project"
     },
     "settings": {
       "type": "object",
@@ -705,7 +791,11 @@
         "locale": {
           "type": "string"
         }
-      }
+      },
+      "x-rust-name": "ProjectSettings",
+      "x-rust-module": "project"
     }
-  }
+  },
+  "x-rust-name": "Project",
+  "x-rust-module": "project"
 }
