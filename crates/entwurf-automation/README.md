@@ -96,6 +96,15 @@ error and closes that WebSocket. The companion reconnects and restores its retai
 artifact bytes; no prompt is replayed, and only the eventual owner database ACK
 completes the run.
 
+Hosts call `shutdown() -> Result<()>` before stopping their native child and HTTP
+listener. Shutdown is idempotent and local to this process: it drops the active
+peer and interrupts every WebSocket session, including unauthenticated sockets
+waiting for their first frame. Later authentication and new run submissions are
+rejected (`server_shutting_down`, HTTP 503 for submissions); duplicate submissions
+can still read their original state. Shutdown does not write the database, remove
+images, change run phases or replay a prompt, and works when storage is unwritable.
+Reopening the database uses the normal restart recovery rules.
+
 State updates publish to memory only after atomic persistence succeeds. State and
 image files use private creation permissions where supported; state credentials
 remain local to this application directory. No real ChatGPT requests occur in

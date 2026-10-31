@@ -965,7 +965,7 @@ async fn closed_without_start(socket: &mut Socket) {
             closed,
             Ok(None) | Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_)))
         ),
-        "provider switch must disconnect the old peer without start: {closed:?}"
+        "connection must close without start: {closed:?}"
     );
 }
 
@@ -1139,4 +1139,108 @@ fn unsupported_provider_never_changes_persistent_state() {
     assert!(
         matches!(AutomationState::new(dir.path(), 48123), Err(e) if e.0 == "invalid_automation_state")
     );
+}
+
+#[tokio::test]
+async fn shutdown_closes_peer_without_changing_pending_image_or_submission_history() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    let (bytes, _, artifact) = image();
+    socket
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    let database = f.dir.path().join("automation.json");
+    let before = std::fs::read(&database).unwrap();
+    f.state.shutdown().unwrap();
+    f.state.shutdown().unwrap();
+    closed_without_start(&mut socket).await;
+    assert_eq!(f.state.status().unwrap()["connected"], false);
+    assert_eq!(f.state.status().unwrap()["available"], false);
+    assert_eq!(f.state.status().unwrap()["reason"], "server_shutting_down");
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+    assert_eq!(
+        std::fs::read(f.dir.path().join("images/run-1.image")).unwrap(),
+        bytes
+    );
+    let duplicate = f
+        .http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(duplicate.0, StatusCode::OK);
+    assert_eq!(duplicate.1["phase"], "awaiting_import");
+    let mut next = start_request();
+    next["run_id"] = json!("run-after-shutdown");
+    let rejected = f.http("POST", "/api/automation/runs", &f.token, next).await;
+    assert_eq!(rejected.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(rejected.1["error"], "server_shutting_down");
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+    // Shutdown is process state only; restart retains the pending import and pairing.
+    let reopened = AutomationState::new(f.dir.path(), f.port).unwrap();
+    assert_eq!(
+        reopened.status().unwrap()["reason"],
+        "extension_disconnected"
+    );
+    assert_eq!(
+        reopened.pairing_info().extension_token,
+        f.state.pairing_info().extension_token
+    );
+    assert_eq!(std::fs::read(&database).unwrap(), before);
+}
+
+#[tokio::test]
+async fn shutdown_interrupts_unauthed_socket_and_rejects_delayed_or_new_authentication() {
+    let f = Fixture::new().await;
+    let mut waiting = f.socket().await;
+    let mut delayed = f.socket().await;
+    f.state.shutdown().unwrap();
+    // No first frame arrives on this socket: stop must interrupt the 10-second auth wait.
+    closed_without_start(&mut waiting).await;
+    let _ = delayed
+        .send(Message::Text(
+            json!({"type":"authenticate","token":f.state.pairing_info().extension_token})
+                .to_string()
+                .into(),
+        ))
+        .await;
+    closed_without_start(&mut delayed).await;
+    if let Ok((mut later, _)) = connect_async(f.state.pairing_info().websocket_url).await {
+        let _ = later
+            .send(Message::Text(
+                json!({"type":"authenticate","token":f.state.pairing_info().extension_token})
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+        closed_without_start(&mut later).await;
+    }
+    assert_eq!(f.state.status().unwrap()["connected"], false);
+}
+
+#[tokio::test]
+async fn shutdown_is_bounded_even_when_persistent_storage_is_unwritable() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(read(&mut socket).await["type"], "start");
+    let database = f.dir.path().join("automation.json");
+    let backup = f.dir.path().join("saved-automation.json");
+    std::fs::rename(&database, &backup).unwrap();
+    std::fs::create_dir(&database).unwrap();
+    f.state.shutdown().unwrap();
+    closed_without_start(&mut socket).await;
+    assert_eq!(
+        f.http("GET", "/api/automation/runs/run-1", &f.token, json!(null))
+            .await
+            .1["phase"],
+        "queued"
+    );
+    std::fs::remove_dir(&database).unwrap();
+    std::fs::rename(&backup, &database).unwrap();
 }

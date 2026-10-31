@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 pub const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 type Result<T> = std::result::Result<T, AutomationError>;
@@ -23,6 +23,7 @@ struct Shared {
     directory: PathBuf,
     port: u16,
     inner: Mutex<Inner>,
+    shutdown: watch::Sender<bool>,
 }
 struct Inner {
     database: Database,
@@ -175,6 +176,7 @@ impl AutomationState {
         let state = Self(Arc::new(Shared {
             directory,
             port,
+            shutdown: watch::channel(false).0,
             inner: Mutex::new(Inner {
                 database,
                 peer: None,
@@ -196,6 +198,17 @@ impl AutomationState {
     }
     pub fn router(&self) -> axum::Router {
         router::router(self.clone())
+    }
+    /// Stop this process's transport without changing durable run or image state.
+    pub fn shutdown(&self) -> Result<()> {
+        let mut inner = self.lock()?;
+        inner.peer = None;
+        inner.available = false;
+        inner.reason = "server_shutting_down".into();
+        // The same lock serializes this flag with authentication and new starts.
+        // Wake complete sessions, including ones blocked on authentication or I/O.
+        self.0.shutdown.send_replace(true);
+        Ok(())
     }
     pub fn provider(&self) -> Result<String> {
         Ok(self.lock()?.database.provider.clone())
@@ -365,6 +378,9 @@ impl AutomationState {
                 return Err(AutomationError("run_conflict"));
             }
             return Ok((false, old.view.clone()));
+        }
+        if *self.0.shutdown.borrow() {
+            return Err(AutomationError("server_shutting_down"));
         }
         if i.database.runs.values().any(|r| active(&r.view.phase)) {
             return Err(AutomationError("run_active"));
