@@ -12,6 +12,23 @@ const read = p => fs.readFileSync(p, 'utf8');
 const json = p => JSON.parse(read(p).replace(/^\uFEFF/, ''));
 const digest = data => createHash('sha256').update(data).digest('hex');
 const posix = p => p.split(path.sep).join('/');
+// Git attributes do not refresh bytes left behind by an older Windows checkout.
+// Pin the reviewed source bytes; never normalize third-party notice text here.
+const fontNotices = [
+  { file: 'assets/fonts/OFL.txt', sha256: '1a25e35da1031c6c3436fde545bb9cb5aca954e9873afe510c834b8b79bd21a0', publicCopy: 'apps/desktop/public/fonts/OFL.txt' },
+  { file: 'assets/fonts/DejaVu-LICENSE.txt', sha256: '7a083b136e64d064794c3419751e5c7dd10d2f64c108fe5ba161eae5e5958a93', publicCopy: 'apps/desktop/public/fonts/DejaVu-LICENSE.txt' },
+  { file: 'assets/fonts/Typst-NOTICE.txt', sha256: '80ac46fb7d70f1c30bf0c14d3408e6a6f0f9cc9997a00b592aa0d2c8a5243a9d' },
+];
+function fontByteMismatch(file, expected) {
+  throw new Error(`font notice byte mismatch: ${file}; expected ${expected}. Back up intentional edits, then refresh the affected checkout files from canonical Git bytes with the current .gitattributes. Do not normalize notice text.`);
+}
+for (const notice of fontNotices) {
+  const bytes = fs.readFileSync(path.join(root, notice.file));
+  if (digest(bytes) !== notice.sha256) fontByteMismatch(notice.file, `SHA256 ${notice.sha256}`);
+  if (notice.publicCopy && !fs.readFileSync(path.join(root, notice.publicCopy)).equals(bytes)) {
+    fontByteMismatch(notice.publicCopy, `bytes identical to ${notice.file}`);
+  }
+}
 const args = process.argv.slice(2);
 const check = args.includes('--check');
 const output = path.join(root, 'apps/desktop/src-tauri/resources/licenses');
