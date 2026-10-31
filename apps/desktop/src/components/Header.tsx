@@ -35,9 +35,10 @@ interface HeaderProps {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   onOpenCommand: () => void;
+  navigationDisabled?: boolean;
 }
 
-export function Header({ page, projectName, theme, onToggleTheme, onOpenCommand }: HeaderProps) {
+export function Header({ page, projectName, theme, onToggleTheme, onOpenCommand, navigationDisabled }: HeaderProps) {
   const content = titles[page];
   return (
     <header className="page-header">
@@ -51,8 +52,8 @@ export function Header({ page, projectName, theme, onToggleTheme, onOpenCommand 
           <p>{content.description}</p>
         </div>
         <div className="header-actions">
-          <button className="command-trigger" onClick={onOpenCommand}>
-            <Icons.search size={15} /><span>搜索项目</span><kbd>⌘ K</kbd>
+          <button className="command-trigger" disabled={navigationDisabled} onClick={onOpenCommand}>
+            <Icons.search size={15} /><span>快速跳转</span><kbd>Ctrl K</kbd>
           </button>
           <button className="icon-button bordered" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}>
             {theme === "dark" ? <Icons.sun size={16} /> : <Icons.moon size={16} />}

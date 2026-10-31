@@ -1,136 +1,128 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
-import { capabilities, demoFindings, demoProject, demoTasks } from "./lib/demo-data";
-import type { KnowledgeNode, PageId, ProjectData, SourceFile, Task, Theme, Version } from "./lib/types";
-import { ProjectPage } from "./pages/ProjectPage";
-import { ResultPage } from "./pages/ResultPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { SourcesPage } from "./pages/SourcesPage";
-import { TasksPage } from "./pages/TasksPage";
+import { ResultPage, type Draft } from "./pages/ResultPage";
+import { SourcesPage, SettingsPage, TasksPage } from "./pages/WorkspacePages";
+import type { PageId, Theme } from "./lib/types";
+import { errorMessage, nativeClient, nodeChanges, type Capabilities, type WorkspaceClient, type WorkspaceSnapshot } from "./lib/workspace";
 
-const themeKey = "entwurf.theme";
-const pageKey = "entwurf.page";
-
+export type Run = (label: string, action: () => Promise<WorkspaceSnapshot | null | void>, success?: () => void, checkOutcome?: (snapshot: WorkspaceSnapshot | null) => string | null) => Promise<boolean>;
 function readTheme(): Theme {
-  const stored = localStorage.getItem(themeKey);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  const stored = localStorage.getItem("entwurf.theme");
+  return stored === "light" || stored === "dark" ? stored : "dark";
 }
-
-function readPage(): PageId {
-  const stored = localStorage.getItem(pageKey);
-  return (["project", "sources", "tasks", "result", "settings"] as PageId[]).includes(stored as PageId) ? (stored as PageId) : "project";
-}
-
-export default function App() {
+export default function App({ client = nativeClient }: { client?: WorkspaceClient }) {
   const [theme, setTheme] = useState<Theme>(readTheme);
-  const [page, setPage] = useState<PageId>(readPage);
-  const [project, setProject] = useState<ProjectData>(() => ({ ...demoProject, tasks: demoTasks }));
-  const [tasks, setTasks] = useState<Task[]>(demoTasks);
-  const [activeNodeId, setActiveNodeId] = useState<string | null>("n-cond");
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [automationEnabled, setAutomationEnabled] = useState(false);
-  const [ocrLanguages, setOcrLanguages] = useState("chi_sim+eng");
-  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [page, setPage] = useState<PageId>("project");
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [busy, setBusy] = useState<string | null>(client.available ? "连接本地工作区…" : null);
+  const working = useRef(false);
+  const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const versions = useMemo<Version[]>(() => tasks.flatMap((task) => task.versions).slice(0, 4), [tasks]);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [chapter, setChapter] = useState("");
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+  const task = snapshot?.project.tasks.find(t => t.id === snapshot.selected_task_id);
+  const version = snapshot?.current_version;
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem(themeKey, theme);
-  }, [theme]);
-
+    if (!client.available) return;
+    let alive = true;
+    Promise.allSettled([client.call("bootstrap", undefined), client.call("workspace_snapshot", {})]).then(([caps, workspace]) => {
+      if (!alive) return;
+      if (caps.status === "fulfilled") setCapabilities(caps.value);
+      else setError(errorMessage(caps.reason));
+      if (workspace.status === "fulfilled") setSnapshot(workspace.value);
+      else if (!/no.*workspace|no project is open|workspace.*not.*open|尚未|未打开/i.test(errorMessage(workspace.reason))) setError(errorMessage(workspace.reason));
+      setBusy(null);
+    });
+    return () => { alive = false; };
+  }, [client]);
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("entwurf.theme", theme); }, [theme]);
   useEffect(() => {
-    localStorage.setItem(pageKey, page);
-  }, [page]);
-
-  useEffect(() => {
-    function onKey(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandOpen((open) => !open);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const onKey = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); if (!working.current) setCommandOpen(o => !o); } };
+    window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
   }, []);
-
-  function navigate(next: PageId) {
-    setPage(next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  useEffect(() => {
+    if (!draft) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, [draft]);
+  const navigate = (next: PageId) => { if (!working.current && !busy) setPage(next); };
+  const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
+  const run: Run = async (label, action, success, checkOutcome) => {
+    if (working.current || !client.available) return false;
+    working.current = true; setBusy(label); setError(null); setNotice(null);
+    try {
+      const next = await action();
+      if (next === undefined) return false;
+      if (next) setSnapshot(next);
+      const outcomeError = checkOutcome?.(next);
+      if (outcomeError) { setError(outcomeError); return false; }
+      success?.(); setNotice(`${label}完成`); return true;
+    } catch (cause) {
+      setError(errorMessage(cause));
+      // Failed import/compile may still persist a rejection counter or validation report.
+      if (snapshot) {
+        try { setSnapshot(await client.call("workspace_snapshot", { taskId: snapshot.selected_task_id ?? undefined })); }
+        catch { /* Keep last snapshot and unsaved edits available; original error stays visible. */ }
+      }
+      return false;
+    } finally { working.current = false; setBusy(null); }
+  };
+  const unavailable = !client.available || !!busy;
+  const locked = unavailable || !!draft;
+  async function saveDraft() {
+    if (!draft || !task) return;
+    await run("保存节点", async () => {
+      const nodes = draft.nodes.map(node => {
+        const anchors: unknown = JSON.parse(draft.anchorText[node.id] ?? JSON.stringify(node.anchors));
+        if (!Array.isArray(anchors)) throw new Error("来源锚点必须是 JSON 数组；原字段将完整交给本地校验。");
+        return { ...node, anchors } as typeof node;
+      });
+      return client.call("update_nodes", { taskId: task.id, baseVersionId: draft.baseVersionId, edits: nodeChanges(draft.baseNodes, nodes), nodeOrder: nodes.map(n => n.id) });
+    }, () => setDraft(null));
   }
-
-  function toggleTheme() {
-    setTheme((current) => (current === "dark" ? "light" : "dark"));
+  function openProject(create: boolean) {
+    void run(create ? "创建项目" : "打开项目", async () => {
+      const root = await client.call("choose_directory", undefined);
+      if (!root) return;
+      return create ? client.call("create_project", { root, name: projectName.trim() }) : client.call("load_existing_project", { root });
+    }, () => setActiveNodeId(null));
   }
-
-  function editNode(node: KnowledgeNode) {
-    setProject((current) => ({ ...current, nodes: current.nodes.map((item) => (item.id === node.id ? { ...node, origin: "user_edit" } : item)) }));
-    setNotice("已更新节点草稿；点击导出前会重新校验内容门禁。");
-  }
-
-  function addSource(source: SourceFile) {
-    setProject((current) => ({ ...current, sources: [...current.sources, source] }));
-    setNotice(`已加入 ${source.name}；等待本地解析与哈希确认。`);
-  }
-
-  function startTask(task: Task) {
-    setTasks((current) => current.map((item) => (item.id === task.id ? { ...item, state: "PAUSED", automation: "paused", updatedAt: "刚刚" } : item)));
-    setNotice("自动运行未通过可访问性门禁，任务已安全暂停并保留草稿。");
-  }
-
-  function pauseTask(task: Task) {
-    setTasks((current) => current.map((item) => (item.id === task.id ? { ...item, state: "PAUSED", automation: "manual", updatedAt: "刚刚" } : item)));
-    setNotice("任务已暂停，未保存的输入不会丢失。");
-  }
-
-  function rollback(task: Task, version: Version) {
-    setTasks((current) => current.map((item) => {
-      if (item.id !== task.id) return item;
-      const revision = item.revision + 1;
-      return {
-        ...item,
-        revision,
-        versions: [{ id: `v-${revision}`, revision, reason: "manual_snapshot", createdAt: "刚刚", approved: false, summary: `从 r${version.revision} 创建可审阅快照` }, ...item.versions],
-      };
-    }));
-    setNotice(`已从 r${version.revision} 创建新快照；旧版本保持不变。`);
-  }
-
-  function exportArtifacts() {
-    setExportNotice("已准备 ArtifactSet：2 个 SVG、2 个 300 DPI PNG、1 个 A3 PDF、manifest.json 与可重载 IR。");
-    window.setTimeout(() => setExportNotice(null), 5000);
-  }
-
-  function selectTask(task: Task) {
-    setTasks((current) => current.map((item) => (item.id === task.id ? item : item)));
-    navigate("tasks");
-  }
-
-  return (
-    <div className="app-shell">
-      <Sidebar
-        page={page}
-        theme={theme}
-        projectName={project.name}
-        taskCount={tasks.length}
-        onNavigate={navigate}
-        onToggleTheme={toggleTheme}
-        onOpenSettings={() => navigate("settings")}
-      />
-      <main className="main-column">
-        <Header page={page} projectName={project.name} theme={theme} onToggleTheme={toggleTheme} onOpenCommand={() => setCommandOpen(true)} />
-        {notice && <div className="toast page-toast" role="status"><span>{notice}</span><button className="icon-button" onClick={() => setNotice(null)} aria-label="关闭提示">×</button></div>}
-        {page === "project" && <ProjectPage project={project} tasks={tasks} activeNodeId={activeNodeId} onSelectNode={setActiveNodeId} onNavigate={navigate} onSelectTask={selectTask} />}
-        {page === "sources" && <SourcesPage project={project} activeNodeId={activeNodeId} onSelectNode={setActiveNodeId} onAddSource={addSource} />}
-        {page === "tasks" && <TasksPage tasks={tasks} onStartTask={startTask} onPauseTask={pauseTask} onRollback={rollback} />}
-        {page === "result" && <ResultPage project={project} findings={demoFindings} activeNodeId={activeNodeId} onSelectNode={setActiveNodeId} onEditNode={editNode} versions={versions} onExport={exportArtifacts} exportNotice={exportNotice} />}
-        {page === "settings" && <SettingsPage theme={theme} capabilities={capabilities} automationEnabled={automationEnabled} ocrLanguages={ocrLanguages} onToggleAutomation={setAutomationEnabled} onSetOcrLanguages={setOcrLanguages} onToggleTheme={toggleTheme} />}
-        <footer className="app-footer"><span>Entwurf v0.1 · 本地优先</span><span>无遥测 · 无账号 · 源资料可追溯</span><span>Apache-2.0</span></footer>
-      </main>
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} onNavigate={navigate} />
-    </div>
-  );
+  return <div className="app-shell">
+    <Sidebar page={page} theme={theme} projectName={snapshot?.project.name ?? "未打开项目"} taskCount={snapshot?.project.tasks.length ?? 0} onNavigate={navigate} onToggleTheme={toggleTheme} onOpenSettings={() => navigate("settings")} navigationDisabled={!!busy} />
+    <main className="main-column" aria-busy={!!busy}>
+      <Header page={page} projectName={snapshot?.project.name ?? "本地工作区"} theme={theme} onToggleTheme={toggleTheme} onOpenCommand={() => setCommandOpen(true)} navigationDisabled={!!busy} />
+      {!client.available && <div className="callout warn" role="status">浏览器预览：本地工作区不可用。请启动 Windows 桌面应用以创建项目、导入和导出文件。</div>}
+      {busy && <div className="toast page-toast" role="status">{busy}</div>}
+      {error && <div className="callout warn" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="关闭错误">×</button></div>}
+      {notice && <div className="toast page-toast" role="status">{notice}</div>}
+      {draft && <div className="callout warn">节点有未保存修改。保存或放弃后才能切换任务、修改来源、导出或回滚。{version?.id !== draft.baseVersionId && <strong>当前版本已改变，草稿已过期；保留内容供复制，放弃草稿后重新编辑。</strong>}<button className="text-button" disabled={unavailable} onClick={() => navigate("result")}>查看草稿</button></div>}
+      {snapshot && <div className="workspace-toolbar">
+        <label>当前任务<select aria-label="当前任务" disabled={locked} value={snapshot.selected_task_id ?? ""} onChange={e => { void run("切换任务", () => client.call("workspace_snapshot", { taskId: e.target.value }), () => setActiveNodeId(null)); }}>
+          <option value="" disabled>请选择任务</option>{snapshot.project.tasks.map(t => <option key={t.id} value={t.id}>{t.chapter ? `${t.chapter} / ` : ""}{t.title}</option>)}
+        </select></label><span>{task?.state ?? "没有任务"} · {version ? `r${version.revision}` : "尚无知识版本"}</span>
+        <button className="secondary-button" disabled={unavailable} onClick={() => { void run("刷新工作区", () => client.call("workspace_snapshot", { taskId: task?.id })); }}>刷新工作区</button>
+      </div>}
+      {page === "project" && <div className="workspace-stack">
+        <section className="panel"><h2>本地项目</h2><p className="muted path-text">{snapshot?.root ?? "选择本机目录，新建项目或打开已有项目。"}</p>
+          <div className="workspace-toolbar"><label className="field">项目名称<input disabled={locked} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="输入项目名称" /></label><button className="primary-button" disabled={locked || !projectName.trim()} onClick={() => openProject(true)}>新建项目</button><button className="secondary-button" disabled={locked} onClick={() => openProject(false)}>打开项目</button></div>
+        </section>
+        {snapshot && <><section className="panel"><h2>章节与任务</h2><div className="workspace-toolbar"><label className="field">任务标题<input disabled={locked} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} /></label><label className="field">章节（可选）<input disabled={locked} value={chapter} onChange={e => setChapter(e.target.value)} /></label><button className="primary-button" disabled={locked || !taskTitle.trim()} onClick={() => { void run("创建任务", () => client.call("create_task", { title: taskTitle.trim(), chapter: chapter.trim() || undefined }), () => { setTaskTitle(""); setPage("sources"); }); }}>创建任务</button></div>
+          <div className="task-board">{snapshot.project.tasks.map(t => <button key={t.id} className={`task-card ${task?.id === t.id ? "is-active" : ""}`} disabled={locked} onClick={() => { void run("选择任务", () => client.call("workspace_snapshot", { taskId: t.id }), () => setPage("tasks")); }}><strong>{t.title}</strong><span>{t.chapter} · {t.state} · {t.versions.length} 个版本</span></button>)}</div>{!snapshot.project.tasks.length && <p className="empty-note">创建第一个任务，然后导入知识资料。</p>}
+        </section><section className="panel"><h2>当前任务概况</h2><div className="stat-strip"><div className="stat-item"><strong>{version?.ir.sources.length ?? 0}</strong><span>来源</span></div><div className="stat-item"><strong>{version?.ir.nodes.length ?? 0}</strong><span>知识节点</span></div><div className="stat-item"><strong>{version?.ir.unverified.length ?? 0}</strong><span>待确认</span></div><div className="stat-item"><strong>{version?.layout?.pages.length ?? 0}</strong><span>已编译页面</span></div></div><button className="secondary-button" disabled={unavailable} onClick={() => navigate("result")}>审阅结果</button></section></>}
+      </div>}
+      {page === "sources" && (snapshot ? <SourcesPage key={snapshot.project.id} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先在项目页打开本地项目。</p>)}
+      {page === "tasks" && (snapshot && task ? <TasksPage key={task.id} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先创建或选择一个任务。</p>)}
+      {page === "result" && (snapshot && version ? <ResultPage key={task?.id} snapshot={snapshot} client={client} run={run} locked={locked} busy={unavailable} draft={draft} setDraft={setDraft} activeNodeId={activeNodeId} setActiveNodeId={setActiveNodeId} saveDraft={saveDraft} /> : <p className="empty-note">当前任务没有知识版本。导入资料后可编辑、校验和预览。</p>)}
+      {page === "settings" && <SettingsPage snapshot={snapshot} capabilities={capabilities} client={client} run={run} locked={locked} theme={theme} toggleTheme={toggleTheme} refreshCapabilities={() => { void run("检测能力", async () => { setCapabilities(await client.call("bootstrap", undefined)); return null; }); }} />}
+      <footer className="app-footer"><span>Entwurf v0.1 · 本地优先</span><span>无遥测 · 源资料可追溯</span><span>Apache-2.0</span></footer>
+    </main><CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} onNavigate={navigate} />
+  </div>;
 }

@@ -19,10 +19,13 @@ const items: { page: PageId; label: string; detail: string }[] = [
 export function CommandPalette({ open, onClose, onNavigate }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) {
+      const previous = document.activeElement as HTMLElement | null;
       setQuery("");
-      requestAnimationFrame(() => inputRef.current?.focus());
+      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => { cancelAnimationFrame(frame); previous?.focus(); };
     }
   }, [open]);
   useEffect(() => {
@@ -36,8 +39,17 @@ export function CommandPalette({ open, onClose, onNavigate }: CommandPaletteProp
   if (!open) return null;
   return (
     <div className="palette-backdrop" onMouseDown={onClose}>
-      <div className="palette" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="命令面板">
-        <div className="palette-input-row"><Icons.search size={17} /><input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="跳转到页面或功能…" /></div>
+      <div ref={dialogRef} onKeyDown={event => {
+        if (event.key === "Tab") {
+          const controls = dialogRef.current?.querySelectorAll<HTMLElement>("input, button");
+          if (!controls?.length) return;
+          const first = controls[0]; const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+        if (event.key === "Enter" && event.target === inputRef.current && filtered[0]) { onNavigate(filtered[0].page); onClose(); }
+      }} className="palette" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="命令面板">
+        <div className="palette-input-row"><Icons.search size={17} /><input aria-label="搜索页面" ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="跳转到页面或功能…" /></div>
         <div className="palette-list">
           {filtered.map((item, index) => (
             <button key={item.page} className={index === 0 ? "is-highlighted" : ""} onClick={() => { onNavigate(item.page); onClose(); }}>

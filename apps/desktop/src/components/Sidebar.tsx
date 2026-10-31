@@ -9,6 +9,7 @@ interface SidebarProps {
   onNavigate: (page: PageId) => void;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
+  navigationDisabled?: boolean;
 }
 
 const navigation: { id: PageId; label: string; icon: IconComponent; hint: string }[] = [
@@ -26,6 +27,7 @@ export function Sidebar({
   onNavigate,
   onToggleTheme,
   onOpenSettings,
+  navigationDisabled,
 }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="主导航">
@@ -50,6 +52,7 @@ export function Sidebar({
           return (
             <button
               key={item.id}
+              disabled={navigationDisabled}
               className={`nav-item ${active ? "is-active" : ""}`}
               onClick={() => onNavigate(item.id)}
               aria-current={active ? "page" : undefined}
@@ -74,7 +77,7 @@ export function Sidebar({
         <button className="icon-button" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "浅色主题" : "深色主题"}>
           {theme === "dark" ? <Icons.sun size={16} /> : <Icons.moon size={16} />}
         </button>
-        <button className="icon-button" onClick={onOpenSettings} aria-label="打开设置" title="设置">
+        <button className="icon-button" onClick={onOpenSettings} disabled={navigationDisabled} aria-label="打开设置" title="设置">
           <Icons.settings size={16} />
         </button>
         <div className="build-tag">v0.1 · local</div>

@@ -491,3 +491,56 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
+
+/* Native workspace controls retain the classic shell and grid. */
+:root { --bg: #000; --text: #e0e0e0; }
+:root[data-theme="light"] { --bg: #fff; --text: #000; --muted: #64646d; }
+button:disabled { opacity: .48; cursor: not-allowed; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.workspace-stack { display: grid; gap: 18px; padding: 20px 0 30px; }
+.workspace-stack .panel { min-width: 0; }
+.workspace-stack h2 { margin-bottom: 12px; }
+.workspace-stack h3 { font-size: 14px; margin-top: 14px; }
+.workspace-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+.workspace-toolbar label { flex: 1; min-width: 150px; }
+.workspace-toolbar .field { margin: 0; }
+.workspace-toolbar > span, .muted { color: var(--muted); font-size: 12px; }
+.workspace-toolbar select, .field select { display: block; width: 100%; padding: 8px; border: 1px solid var(--border); background: var(--surface-raised); border-radius: 5px; }
+.workspace-toolbar .field input, .workspace-stack .field input, .workspace-stack .field textarea { font-size: 13px; padding: 9px; }
+.workspace-stack .field { font-size: 12px; margin-top: 12px; }
+.workspace-stack .primary-button, .workspace-stack .secondary-button, .workspace-toolbar .secondary-button { min-height: 34px; height: auto; font-size: 12px; white-space: normal; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.source-record { border-top: 1px solid var(--border); padding: 14px 0; overflow-wrap: anywhere; }
+.source-record p { margin: 5px 0; }
+.path-text { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 11px; }
+.json-view { max-height: 380px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-raised); padding: 12px; border-radius: 6px; font-size: 11px; }
+.node-picker { display: grid; gap: 8px; max-height: 750px; overflow-y: auto; }
+.node-picker .task-card { font-size: 12px; }
+.node-picker .task-card strong { font-size: 13px; }
+.svg-page { margin: 14px 0; }
+.svg-page img { width: 100%; height: auto; display: block; background: white; border: 1px solid var(--border); }
+.svg-page figcaption { text-align: center; padding: 8px; color: var(--muted); }
+.artifact-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.capability-details { display: grid; grid-template-columns: minmax(110px, .4fr) 1fr; gap: 12px; }
+.capability-details dd { margin: 0; overflow-wrap: anywhere; }
+.audit-list { padding-left: 20px; }
+.audit-list li { padding: 8px; }
+.audit-list time { display: block; font-size: 11px; color: var(--muted); }
+.workspace-stack .compare-view { min-height: 0; }
+.workspace-stack details { margin: 14px 0; }
+summary { cursor: pointer; }
+.stat-item { display: flex; flex-direction: column; gap: 4px; }
+.stat-item strong { font-size: 24px; }
+.callout { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .form-grid, .artifact-list { grid-template-columns: 1fr; }
+  .workspace-toolbar { align-items: stretch; }
+  .workspace-toolbar label { flex-basis: 100%; }
+  .result-grid { grid-template-columns: minmax(0, 1fr); }
+  .node-picker { max-height: 270px; }
+}
+.brand .brand-mark { display: grid; color: #fff; font-size: 21px; letter-spacing: 0; }
+@media (max-width: 760px) { .nav-list { display: flex; } }
+.bridge-discovery { margin-top: 18px; }
+.bridge-discovery > p { margin-top: 8px; }
+.bridge-gates { list-style: none; margin: 14px 0 0; padding: 0; }
