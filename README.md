@@ -1,8 +1,8 @@
 # Entwurf
 
-Entwurf 是面向 Windows 10/11 x64 的本地优先知识图工具。目标流程是将教材解析为带来源锚点的 Knowledge IR，借助 GPT 规划，再由本机编译、校验和导出可编辑的知识图。界面使用简体中文，代码与数据字段使用英文。
+Entwurf 是本地优先的知识图工具，提供 Windows 10/11 x64 桌面应用、本机 WebUI 和 GitHub Pages 网页版。三个入口使用同一界面和 Rust 知识核心：桌面与本机 WebUI 保存到本地文件和 SQLite，网页版保存到当前浏览器的 IndexedDB。界面使用简体中文，代码与数据字段使用英文。
 
-当前提供 **v0.1 Windows 桌面候选版本**：五页工作台已连接本地项目存储、PDF/Markdown/LaTeX/图片导入、来源审阅、节点编辑、版本比较和矢量导出。自包含 C# bridge 与 PDFium 随安装包交付。ChatGPT 桌面自动化的四项兼容性门槛尚未通过，因此保持关闭；可复制 TaskEnvelope，在外部生成后手动导入 ResultEnvelope JSON。
+当前提供 **v0.1 候选版本**：五页工作台支持 PDF/Markdown/LaTeX/图片导入、来源审阅、节点编辑、版本比较和矢量导出。自包含 Windows 适配器与 PDFium 随安装包交付。ChatGPT 图片生成作为独立任务结果保存；结构化知识规划继续使用 TaskEnvelope / ResultEnvelope 人工交接。当前自动化与三个入口的实际验收进度见 [共享网页与自动化验收](docs/development/automation-web-acceptance.md)。
 
 来源、公式和布局校验通过后，可导出 SVG、300 DPI PNG、A3 矢量 PDF、文件哈希清单及可重导入的 Knowledge IR。完整范围见 [v0.1 开发计划](docs/plans/entwurf-v0.1.md)，实际测试证据与仍未验证的环境见 [验收状态](docs/development/progress.md)。公开合成样本的通过结果不代表真实教材章节验收。
 
@@ -15,6 +15,14 @@ Entwurf 是面向 Windows 10/11 x64 的本地优先知识图工具。目标流�
 人工 GPT 流程只复制提示文本。如需参考已导入的风格图，请在 ChatGPT 对话中手动附加对应图片；提示中的本机路径不会上传图片。返回的图片引用会保留为未应用状态，本地编译仅采用兼容的分组与分页建议。
 
 项目目录保存原始资料副本、SQLite、恢复镜像、不可变版本和导出文件，备份时请复制整个目录。应用本地运行且无遥测；「设置」中的脱敏诊断只在主动导出时写入所选本地文件。
+
+## 网页与图片生成
+
+安装版启动后，本机 WebUI 位于 `http://127.0.0.1:48123/`。GitHub Pages 地址为 [dieWehmut.github.io/Entwurf](https://diewehmut.github.io/Entwurf/)；浏览器数据库按网站和浏览器隔离，不会自动与桌面项目同步。网页构建、存储和部署说明见 [共享网页工作区](docs/development/web.md)。
+
+导入知识资料后，在任务页打开「ChatGPT 连接设置」，选择 Windows 客户端或浏览器扩展。Windows 客户端模式使用本机已经登录的 ChatGPT，操作时保持 Windows 已解锁；浏览器模式使用已登录浏览器中的配套扩展。网页版通过本机配对窗口连接同一个服务，本机 WebUI 与桌面自动连接。配对和刷新不会发送提示。
+
+填写「图片生成提示」，点击「启动一次图片生成」。匹配当前任务和知识版本的原图自动保存到该入口的项目中，并显示来源与 SHA-256；可在任务页、结果页查看并下载原始图片。连接中断后继续观察原运行，不自动重发。「停止观察」不会撤回已经提交给 ChatGPT 的请求。
 
 ## 开发
 
@@ -51,7 +59,8 @@ Rust 核心测试可独立运行 `cargo test --locked -p entwurf-core -p entwurf
 | `apps/desktop` | React/Vite 前端与 Tauri 壳 |
 | `crates` | Rust 解析、IR、存储、编译和验证；内部开发工具 |
 | `packages/contracts` | JSON Schema 与共享契约 |
-| `sidecars/gpt-bridge` | 随包交付的 Windows C# bridge；自动化门槛默认关闭 |
+| `sidecars/gpt-bridge` | 随包交付的 Windows UI Automation 适配器与独立结构化规划检测 |
+| `sidecars/chatgpt-browser` | 复用浏览器登录会话的图片自动化扩展 |
 | `scripts/windows` | 原生 Windows 检测、构建与测试 |
 | `fixtures` | 可公开合成样本；私有教材放 `fixtures/private/` |
 | `docs` | 计划、架构与验收说明 |

@@ -7,7 +7,7 @@ const ADDRESS: &str = "http://127.0.0.1:48123";
 #[derive(Default)]
 pub struct CompanionState(tokio::sync::Mutex<()>);
 
-pub async fn access(app: &tauri::AppHandle, origin: &str) -> Result<serde_json::Value, String> {
+pub async fn start(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<CompanionState>();
     let _guard = state.0.lock().await;
     match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 48123)).await {
@@ -49,6 +49,11 @@ pub async fn access(app: &tauri::AppHandle, origin: &str) -> Result<serde_json::
         Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
         Err(error) => return Err(format!("无法启动本机伴随服务：{error}")),
     }
+    Ok(())
+}
+
+pub async fn access(app: &tauri::AppHandle, origin: &str) -> Result<serde_json::Value, String> {
+    start(app).await?;
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

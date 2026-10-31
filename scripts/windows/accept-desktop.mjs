@@ -221,6 +221,29 @@ try {
     assert(capabilities.ocr_languages.includes('eng'));
     report.capabilities = capabilities;
   });
+  await step('installed desktop serves the local WebUI before a project is opened', async () => {
+    const base = 'http://127.0.0.1:48123';
+    await expect.poll(async () => {
+      try {
+        const response = await fetch(`${base}/api/bootstrap`, { signal: AbortSignal.timeout(4000) });
+        const info = await response.json();
+        return response.ok && info.runtime === 'local-http' && info.storage === 'sqlite';
+      } catch { return false; }
+    }, { timeout: 20_000 }).toBe(true);
+    const owner = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      '(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 48123 -State Listen).OwningProcess | ConvertTo-Json -Compress'],
+      { timeout: 15_000, windowsHide: true });
+    assert.equal(JSON.parse(owner.stdout.trim()), config.process_id, 'the installed desktop must own the companion listener');
+    const response = await fetch(`${base}/`);
+    assert(response.ok);
+    const html = await response.text();
+    assert.match(html, /Entwurf/);
+    const script = html.match(/<script[^>]+src="([^"]+)"/);
+    assert(script, 'embedded frontend must expose its production script');
+    const asset = await fetch(new URL(script[1], base));
+    assert(asset.ok);
+    assert((await asset.arrayBuffer()).byteLength > 1000);
+  });
   await step('offline WebView2 keeps local native workflows available', async () => {
     const session = await page.context().newCDPSession(page);
     await session.send('Network.enable');
