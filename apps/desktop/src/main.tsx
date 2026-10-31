@@ -2,9 +2,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles/global.css";
+import { selectRuntime } from "./lib/runtime";
 
-createRoot(document.getElementById("root")!).render(
+const root = createRoot(document.getElementById("root")!);
+root.render(<p role="status">正在打开工作区…</p>);
+void selectRuntime().then(client => root.render(
   <StrictMode>
-    <App />
+    <App client={client} />
   </StrictMode>,
-);
+)).catch(error => root.render(<p role="alert">{error instanceof Error ? error.message : String(error)}</p>));

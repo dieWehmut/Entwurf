@@ -12,7 +12,7 @@ export interface WorkspaceSnapshot {
 }
 export type BridgeGate = "discover_window" | "reliable_input" | "reliable_completion" | "reliable_capture";
 export interface BridgeReport {
-  status: string; detail: string; automation_enabled: false;
+  status: string; detail: string; automation_enabled: boolean;
   capabilities?: {
     app_found: boolean; web_view_accessibility: boolean; foreground: boolean;
     login_likely: boolean | null; app_version: string | null;
@@ -23,13 +23,15 @@ export interface BridgeReport {
 }
 export interface Capabilities {
   version: string; platform: string; tesseract_available: boolean; ocr_languages: string[];
-  automation_enabled: false; bridge_status: string; bridge_detail: string;
+  automation_enabled: boolean; bridge_status: string; bridge_detail: string;
+  runtime?: "native" | "browser" | "local-http";
+  storage?: string;
   bridge?: BridgeReport | null;
 }
 export type NodeEdit = Pick<KnowledgeNode, "id" | "title" | "body" | "latex" | "anchors" | "importance">;
 type TaskArgs = { taskId: string };
 type VersionArgs = TaskArgs & { baseVersionId: string };
-interface Commands {
+export interface Commands {
   bootstrap: [undefined, Capabilities];
   workspace_snapshot: [{ taskId?: string }, WorkspaceSnapshot];
   create_project: [{ root: string; name: string }, WorkspaceSnapshot];
@@ -52,7 +54,7 @@ interface Commands {
   preview_current: [TaskArgs, WorkspaceSnapshot];
   export_current: [TaskArgs & { outputDir?: string }, WorkspaceSnapshot];
   export_diagnostics: [undefined, string | null];
-  choose_directory: [undefined, string | null];
+  choose_directory: [undefined | { purpose: "create" | "open"; name?: string }, string | null];
   choose_sources: [undefined, string[]];
   choose_result_file: [undefined, string | null];
   choose_ir_file: [undefined, string | null];
@@ -62,10 +64,13 @@ interface Commands {
 }
 export interface WorkspaceClient {
   available: boolean;
+  runtime?: "native" | "browser" | "local-http";
+  projects?(): Promise<{ root: string; name: string; id: string }[]>;
   call<K extends keyof Commands>(command: K, args: Commands[K][0]): Promise<Commands[K][1]>;
 }
 export const nativeClient: WorkspaceClient = {
   available: isTauri(),
+  runtime: "native",
   call: (command, args) => invoke(command, args),
 };
 export function errorMessage(error: unknown): string {

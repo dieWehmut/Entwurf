@@ -11,13 +11,21 @@
     "test:e2e": "playwright test",
     "tauri": "tauri",
     "desktop:dev": "tauri dev -- --locked",
-    "desktop:build": "tauri build -- --locked"
+    "desktop:build": "tauri build -- --locked",
+    "web:assets": "node scripts/prepare-web-assets.mjs",
+    "web:build": "pnpm web:assets && tsc -b && vite build",
+    "web:dev": "pnpm web:assets && vite --host 127.0.0.1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tesseract.js": "^7.0.0",
+    "utif": "^3.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
@@ -27,7 +35,9 @@
     "@testing-library/user-event": "^14.6.8",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/utif": "^3.0.6",
     "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^6.2.7",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.0",
