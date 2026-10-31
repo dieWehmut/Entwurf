@@ -30,7 +30,7 @@ export function createHttpClient(initial: Capabilities & { session_token: string
   };
   async function call(name: keyof Commands, args: unknown): Promise<unknown> {
     switch (name) {
-      case "open_automation_setup": window.open("http://127.0.0.1:48123/pair.html", "_blank", "noopener,noreferrer"); return null;
+      case "open_automation_setup": window.open("/pair.html", "_blank", "noopener,noreferrer"); return null;
       case "import_generated_image": {
         const { bytes, ...metadata } = args as Commands["import_generated_image"][0];
         const body = new FormData();

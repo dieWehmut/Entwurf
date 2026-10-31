@@ -19,6 +19,14 @@ it("reports server rejection without treating it as a saved snapshot", async () 
   await expect(client.call("create_task", { title: "test" })).rejects.toThrow("stale version");
 });
 
+it("opens automation setup on the current local HTTP port", async () => {
+  const opened = vi.spyOn(window, "open").mockReturnValue(null);
+  try {
+    await createHttpClient({ session_token: "secret" } as never).call("open_automation_setup", undefined);
+    expect(opened).toHaveBeenCalledWith("/pair.html", "_blank", "noopener,noreferrer");
+  } finally { opened.mockRestore(); }
+});
+
 it("creates a new document identity even when sessionStorage is cloned", async () => {
   sessionStorage.setItem("entwurf.http-client.v1", "inherited-id");
   const first = (await import("./http-client")).httpClientId();

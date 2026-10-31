@@ -1,6 +1,6 @@
 import { createHash, webcrypto } from "node:crypto";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { createAutomationService, importAutomationImage, pairAutomation, type AutomationRun } from "./automation";
+import { createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, type AutomationRun } from "./automation";
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto));
 afterEach(() => vi.unstubAllGlobals());
@@ -58,4 +58,29 @@ it("cancels observation without submitting another run", async () => {
     expect(fetcher.mock.calls[0][0]).toBe("http://127.0.0.1:48123/api/automation/runs/run-1/cancel");
     expect(fetcher.mock.calls[0][1].method).toBe("POST");
   } finally { vi.unstubAllGlobals(); }
+});
+
+it.each(["http://127.0.0.1:49124", "http://localhost:49124/", "http://[::1]:49124"])("uses the validated local HTTP service address %s", async base_url => {
+  const fetcher = vi.fn().mockResolvedValue(new Response("{}"));
+  vi.stubGlobal("fetch", fetcher);
+  const access = await getAutomationAccess({ runtime: "local-http", call: vi.fn().mockResolvedValue({ token: "fixture", base_url }) } as never);
+  await createAutomationService(access!).status();
+  expect(fetcher.mock.calls[0][0]).toBe(`${new URL(base_url).origin}/api/automation/status`);
+});
+
+it.each([
+  "https://127.0.0.1:48123", "http://other.example:48123", "http://127.0.0.2:48123", "http://localhost.example:48123",
+  "http://user@127.0.0.1:48123", "http://user:password@localhost:48123", "http://127.0.0.1:48123/other",
+  "http://127.0.0.1:48123/other/..", "http://127.0.0.1:48123\\other\\..",
+  "http://127.0.0.1:48123/?token=other", "http://127.0.0.1:48123/?", "http://127.0.0.1:48123/#other", "http://127.0.0.1:48123/#", "invalid",
+])("rejects automation addresses with a nonlocal origin or URL components: %s", base_url => {
+  expect(() => createAutomationService({ token: "fixture", base_url })).toThrow("无效的服务地址");
+});
+
+it("keeps native access and stored browser pairing on the default companion", async () => {
+  const access = { token: "fixture", base_url: "http://127.0.0.1:49124" };
+  await expect(getAutomationAccess({ runtime: "native", call: vi.fn().mockResolvedValue(access) } as never)).rejects.toThrow("无效的服务地址");
+  localStorage.setItem("entwurf.automation-access.v1", JSON.stringify(access));
+  expect(await getAutomationAccess({ runtime: "browser" } as never)).toBeNull();
+  expect(localStorage.getItem("entwurf.automation-access.v1")).toBeNull();
 });

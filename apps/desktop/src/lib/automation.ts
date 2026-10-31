@@ -10,13 +10,20 @@ export class AutomationHttpError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 const accessKey = "entwurf.automation-access.v1";
-function checkedAccess(value: unknown): AutomationAccess {
+function checkedAccess(value: unknown, allowLocalPort = false): AutomationAccess {
   const access = value as AutomationAccess;
-  if (!access || typeof access.token !== "string" || !access.token || typeof access.base_url !== "string" || new URL(access.base_url).origin !== automationOrigin) throw new Error("自动化配对返回了无效的服务地址。");
-  return { token: access.token, base_url: automationOrigin };
+  const invalid = () => new Error("自动化配对返回了无效的服务地址。");
+  if (!access || typeof access.token !== "string" || !access.token || typeof access.base_url !== "string") throw invalid();
+  let address: URL;
+  try { address = new URL(access.base_url); } catch { throw invalid(); }
+  if (address.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(address.hostname)
+    || !/^http:\/\/[^/\\?#]+\/?$/i.test(access.base_url)
+    || address.username || address.password || address.pathname !== "/" || access.base_url.includes("?") || access.base_url.includes("#")
+    || (!allowLocalPort && address.origin !== automationOrigin)) throw invalid();
+  return { token: access.token, base_url: address.origin };
 }
 export async function getAutomationAccess(client: WorkspaceClient): Promise<AutomationAccess | null> {
-  if (client.runtime !== "browser") return checkedAccess(await client.call("automation_access", undefined));
+  if (client.runtime !== "browser") return checkedAccess(await client.call("automation_access", undefined), client.runtime === "local-http");
   const stored = localStorage.getItem(accessKey);
   if (!stored) return null;
   try { return checkedAccess(JSON.parse(stored)); } catch { localStorage.removeItem(accessKey); return null; }
@@ -36,7 +43,7 @@ export function pairAutomation(): Promise<AutomationAccess> {
   });
 }
 export function createAutomationService(access: AutomationAccess) {
-  access = checkedAccess(access);
+  access = checkedAccess(access, true);
   async function request(path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${access.base_url}/api/automation${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${access.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15_000) });
     if (!response.ok) { const error = await response.json().catch(() => ({})); throw new AutomationHttpError(error.error ?? `自动化服务返回 ${response.status}`, response.status); }
