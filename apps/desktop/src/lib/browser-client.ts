@@ -1,7 +1,7 @@
 import type { Commands, WorkspaceClient, WorkspaceSnapshot } from "./workspace";
 import { chooseFiles, chooseJson, download, sourceAccept } from "./web-files";
 
-type Request = { type: "call"; command: string; args?: unknown; cleanupPaths?: string[] } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact" | "generated_image"; args: unknown };
+type Request = { type: "call"; command: string; args?: unknown; cleanupPaths?: string[]; files?: { path: string; bytes: Uint8Array }[] } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact" | "generated_image"; args: unknown };
 export function createBrowserClient(): WorkspaceClient {
   const worker = new Worker(new URL("./browser-worker.ts", import.meta.url), { type: "module" });
   let sequence = 0;
@@ -30,8 +30,7 @@ export function createBrowserClient(): WorkspaceClient {
       case "import_generated_image": {
         const { bytes, ...metadata } = args as Commands["import_generated_image"][0];
         const path = `/uploads/${crypto.randomUUID()}/generated-image`;
-        await request({ type: "upload", files: [{ path, bytes: new Uint8Array(bytes) }] });
-        return invoke(command, { ...metadata, path });
+        return request({ type: "call", command, args: { ...metadata, path }, files: [{ path, bytes: new Uint8Array(bytes) }], cleanupPaths: [path] });
       }
       case "generated_image_bytes": return Array.from(await request<Uint8Array>({ type: "generated_image", args }));
       case "bootstrap": {

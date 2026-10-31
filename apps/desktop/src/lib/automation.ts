@@ -6,6 +6,9 @@ export interface AutomationRun {
   phase: AutomationPhase; reason?: string; sha256?: string; mime_type?: string;
 }
 export const automationOrigin = "http://127.0.0.1:48123";
+export class AutomationHttpError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 const accessKey = "entwurf.automation-access.v1";
 function checkedAccess(value: unknown): AutomationAccess {
   const access = value as AutomationAccess;
@@ -36,7 +39,7 @@ export function createAutomationService(access: AutomationAccess) {
   access = checkedAccess(access);
   async function request(path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${access.base_url}/api/automation${path}`, { method: body === undefined ? "GET" : "POST", headers: { Authorization: `Bearer ${access.token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error ?? `自动化服务返回 ${response.status}`); }
+    if (!response.ok) { const error = await response.json().catch(() => ({})); throw new AutomationHttpError(error.error ?? `自动化服务返回 ${response.status}`, response.status); }
     return response.status === 204 ? null : response.json();
   }
   return {
@@ -68,6 +71,11 @@ export async function importAutomationImage(service: AutomationService, run: Aut
     stored = snapshot.project.generated_images?.find(image => image.run_id === run.run_id);
   }
   if (!stored || stored.sha256 !== run.sha256 || stored.task_id !== run.task_id || stored.base_version_id !== run.base_version_id || stored.prompt_sha256 !== run.prompt_sha256) throw new Error("项目没有返回匹配的已保存图片，未确认导入。");
+  // Metadata alone cannot prove that durable image bytes still exist. The core
+  // validates ownership, size and hash; independently bind returned bytes to ACK.
+  const retained = new Uint8Array(await client.call("generated_image_bytes", { taskId: run.task_id, imageId: stored.id }));
+  const retainedSha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", retained)), value => value.toString(16).padStart(2, "0")).join("");
+  if (retainedSha !== run.sha256) throw new Error("已保存图片的字节校验失败，未确认导入；服务端副本仍保留。");
   await service.ack(run.run_id, { sha256: run.sha256, image_id: stored.id });
   return snapshot;
 }

@@ -66,19 +66,19 @@ async function execute(request: Request) {
       for (const file of request.files ?? []) core.browser_put_file(file.path, file.bytes);
       result = null;
     } else {
+      for (const file of request.files ?? []) core.browser_put_file(file.path, file.bytes);
       result = JSON.parse(core.browser_call(request.command!, JSON.stringify(request.args ?? {})));
-      for (const path of request.cleanupPaths ?? []) if (path.startsWith("/uploads/")) core.browser_delete_file(path);
       const snapshot = result as { root?: string; selected_task_id?: string | null } | null;
       if (snapshot?.root) active = { root: snapshot.root, ...(snapshot.selected_task_id ? { taskId: snapshot.selected_task_id } : {}) };
       if (request.command === "import_sources" || request.command === "import_style_images") {
         for (const path of (request.args as { paths: string[] }).paths) if (path.startsWith("/uploads/")) core.browser_delete_file(path);
       }
-      if (request.command === "import_generated_image") {
-        const path = (request.args as { path: string }).path;
-        if (path.startsWith("/uploads/")) core.browser_delete_file(path);
-      }
     }
   } catch (error) { commandError = error; }
+  finally {
+    const retained = new Set(JSON.parse(core.browser_list_files()) as string[]);
+    for (const path of request.cleanupPaths ?? []) if (path.startsWith("/uploads/") && retained.has(path)) core.browser_delete_file(path);
+  }
   // Rejected ResultEnvelopes can persist correction counters and audit records.
   const after = capture();
   if (!equalFiles(before.files, after) || JSON.stringify(before.active) !== JSON.stringify(active)) {

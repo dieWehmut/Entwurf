@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Run } from "../App";
 import type { GeneratedImage } from "../lib/types";
 import { errorMessage, type WorkspaceClient, type WorkspaceSnapshot } from "../lib/workspace";
-import { createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, type AutomationRun, type AutomationService } from "../lib/automation";
+import { AutomationHttpError, createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, type AutomationRun, type AutomationService } from "../lib/automation";
 import { download } from "../lib/web-files";
 
 const phases = { queued: "等待执行", preparing: "准备 ChatGPT", submitting: "正在提交", generating: "等待生成", downloading: "取回图片", awaiting_import: "等待保存到项目", completed: "图片已入库", paused: "观察已暂停", failed: "执行失败", cancelled: "观察已停止" };
-const activePhases = new Set(["queued", "preparing", "submitting", "generating", "downloading"]);
+const activePhases = new Set(["queued", "preparing", "submitting", "generating", "downloading", "paused", "awaiting_import"]);
 interface Props { snapshot: WorkspaceSnapshot; client: WorkspaceClient; run: Run; locked: boolean }
 export function AutomationPanel({ snapshot, client, run, locked }: Props) {
   const taskId = snapshot.selected_task_id!;
@@ -19,6 +19,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
   const provisional = useRef<AutomationRun | null>(null);
+  const automaticAttempts = useRef(new Set<string>());
   useEffect(() => {
     let alive = true;
     void getAutomationAccess(client).then(access => { if (alive && access) setService(createAutomationService(access)); }).catch(cause => { if (alive) setError(errorMessage(cause)); });
@@ -34,7 +35,13 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
         if (!alive) return;
         setStatus(nextStatus);
         const ownRuns = nextRuns.filter(item => item.task_id === taskId);
-        if (provisional.current && !ownRuns.some(item => item.run_id === provisional.current!.run_id)) ownRuns.push(provisional.current);
+        if (provisional.current && !ownRuns.some(item => item.run_id === provisional.current!.run_id)) {
+          // A transport failure may have happened after acceptance. Query the
+          // original ID and never create a replacement submission automatically.
+          try { provisional.current = await service.get(provisional.current.run_id); } catch { /* Preserve the unresolved original ID. */ }
+          if (!alive) return;
+          ownRuns.push(provisional.current);
+        }
         else provisional.current = null;
         setRuns(ownRuns);
       } catch (cause) { if (alive) { setStatus(null); setError(errorMessage(cause)); } }
@@ -43,6 +50,18 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     void refresh();
     return () => { alive = false; clearTimeout(timer); };
   }, [service, taskId]);
+  useEffect(() => {
+    if (!service || locked || busy || !version) return;
+    const item = runs.find(item => item.phase === "awaiting_import" && item.task_id === taskId && item.base_version_id === version.id && item.sha256 && item.mime_type);
+    if (!item) return;
+    const key = `entwurf.automatic-import.v1:${client.runtime ?? "native"}:${snapshot.project.id}:${item.run_id}:${item.sha256}`;
+    if (automaticAttempts.current.has(key)) return;
+    automaticAttempts.current.add(key);
+    try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, "attempted"); } catch { /* The in-memory guard still prevents polling retries. */ }
+    void run("自动保存生成图片", () => importAutomationImage(service, item, client)).then(saved => {
+      if (saved) setRuns(items => items.map(current => current.run_id === item.run_id ? { ...current, phase: "completed" } : current));
+    });
+  }, [service, locked, busy, version, runs, taskId, client, snapshot.project.id, run]);
   async function connect() {
     if (submitting.current) return;
     submitting.current = true; setBusy(true); setError(null);
@@ -56,7 +75,12 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     const pending: AutomationRun = { run_id: crypto.randomUUID(), task_id: taskId, base_version_id: version.id, prompt_sha256: "", phase: "queued", reason: "提交结果尚未确认，请勿重复发送。" };
     provisional.current = pending; setRuns(items => [...items, pending]);
     try { const started = await service.start({ run_id: pending.run_id, task_id: taskId, base_version_id: version.id, prompt }); provisional.current = started; setRuns(items => items.map(item => item.run_id === started.run_id ? started : item)); }
-    catch (cause) { setError(`${errorMessage(cause)} 将继续查询这次提交，不会自动重发。`); }
+    catch (cause) {
+      if (cause instanceof AutomationHttpError && cause.status >= 400 && cause.status < 500) {
+        provisional.current = null; setRuns(items => items.filter(item => item.run_id !== pending.run_id));
+        setError(`${errorMessage(cause)} 本次提交已被拒绝。`);
+      } else setError(`${errorMessage(cause)} 将继续查询这次提交，不会自动重发。`);
+    }
     finally { submitting.current = false; setBusy(false); }
   }
   async function cancel(item: AutomationRun) {
@@ -80,7 +104,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
       <div className="handoff-actions">{activePhases.has(item.phase) && <button className="secondary-button" disabled={locked || busy} onClick={() => { void cancel(item); }}>停止观察</button>}
       {(item.phase === "awaiting_import" || item.sha256) && item.phase !== "completed" && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run("保存生成图片", () => importAutomationImage(service, item, client)); }}>继续导入图片</button>}</div>
     </article>)}
-    <p className="muted">停止观察不会撤回已发送到 ChatGPT 的请求。刷新页面只查询已有运行，不重复提交；已取回的图片可继续导入。</p>
+    <p className="muted">匹配当前任务与版本的图片会自动保存一次；失败后可手动继续导入。停止观察不会撤回已发送到 ChatGPT 的请求，刷新页面不重复提交。</p>
   </section>;
 }
 export function GeneratedImageGallery({ snapshot, client }: Pick<Props, "snapshot" | "client">) {

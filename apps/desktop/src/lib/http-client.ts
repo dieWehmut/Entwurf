@@ -37,7 +37,14 @@ export function createHttpClient(initial: Capabilities & { session_token: string
         body.append("files", new Blob([new Uint8Array(bytes)], { type: metadata.mimeType }), "generated-image");
         const uploaded = await request("/api/uploads", { method: "POST", body }) as { path: string }[];
         if (!uploaded[0]?.path) throw new Error("生成图片暂存失败，请重试导入。");
-        return command(name, { ...metadata, path: uploaded[0].path });
+        let result: unknown;
+        let importError: unknown;
+        try { result = await command(name, { ...metadata, path: uploaded[0].path }); }
+        catch (error) { importError = error; }
+        try { await command("discard_uploads", { paths: uploaded.map(file => file.path) }); }
+        catch (cleanupError) { throw new Error(`${importError instanceof Error ? `${importError.message}；` : ""}清理暂存图片失败：${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`); }
+        if (importError !== undefined) throw importError;
+        return result;
       }
       case "bootstrap": return request("/api/bootstrap");
       case "choose_directory": return `/projects/${crypto.randomUUID()}`;
