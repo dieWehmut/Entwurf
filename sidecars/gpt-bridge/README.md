@@ -1,11 +1,16 @@
 # Entwurf GPT Bridge
 
-Windows .NET 10 sidecar with FlaUI 5/UIA3 **read-only ChatGPT discovery** and a
-current-user named-pipe transport. Automation remains unavailable/default off:
-there is no verified ChatGPT input, completion, or capture adapter in this build.
-All protocol methods exist; unavailable operations return explicit errors.
+Windows .NET 10 sidecar with FlaUI 5/UIA3 and two internal entrypoints:
 
-Discovery checks the Windows package identity, not just `ChatGPT.exe`: Codex
+- `--automation-stdin` runs the [Windows ChatGPT image executor](WINDOWS_IMAGE_AUTOMATION.md):
+  automatic input, one submission, task-bound completion detection, and original
+  image download through the existing local ChatGPT application. The linked document
+  records verified controls and the remaining coordinated live acceptance work.
+- The structured-task named-pipe bridge below retains read-only discovery and
+  explicit capability gates. Its input/completion/capture methods remain unavailable
+  until separately validated for the structured `TaskEnvelope` workflow.
+
+Structured-task discovery checks the Windows package identity, not just `ChatGPT.exe`: Codex
 also uses that executable name. Only `OpenAI.ChatGPT` / `OpenAI.ChatGPT-Desktop`
 Store package identities with the expected publisher qualify. Non-Store builds
 currently require manual handoff. Discovery inspects control types and pattern
