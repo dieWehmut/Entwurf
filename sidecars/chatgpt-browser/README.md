@@ -71,6 +71,12 @@ hash. It must not respond with acceptance merely because bytes reached staging.
 ## Completion and original image capture
 
 The content adapter rejects a nonempty composer and changes made before submit.
+Visible known login/signup controls produce `login_required` during discovery,
+preparation and immediately before submission, including login expiry after
+preparation. Detection uses fixed control IDs and exact English/Chinese control
+labels, without collecting account text. `composer_detected` reports control
+readiness only; absence of these login controls does not verify an account or
+authenticated session. Live account acceptance remains pending.
 It verifies the new user turn matches the submitted prompt and binds only the
 assistant response following that turn; replacing the bound turn is rejected.
 This check reads only the new turn, without collecting prior conversation text. Completion

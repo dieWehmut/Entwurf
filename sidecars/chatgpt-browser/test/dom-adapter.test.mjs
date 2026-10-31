@@ -115,3 +115,47 @@ test('new conversation routing preserves binding and replacing its user turn is 
   user.replaceWith(user.cloneNode(true));
   assert.throws(() => adapter.observe('r'), /conversation_changed/);
 });
+
+test('an anonymous composer with a visible login control is unavailable and remains unchanged', () => {
+  const { win, adapter } = fixture();
+  win.document.body.insertAdjacentHTML('beforeend', '<button data-testid="login-button">Log in</button>');
+  assert.deepEqual(adapter.probe(), { available: false, adapter: 'chatgpt-browser', reason: 'login_required' });
+  assert.throws(() => adapter.prepare({ run_id: 'r', prompt }), /login_required/);
+  assert.equal(win.document.querySelector('textarea').value, '');
+});
+
+test('login appearing after discovery prevents prompt preparation', () => {
+  const { win, adapter } = fixture();
+  assert.equal(adapter.probe().reason, 'composer_detected');
+  win.document.body.insertAdjacentHTML('beforeend', '<button aria-label="登录"></button>');
+  assert.throws(() => adapter.prepare({ run_id: 'r', prompt }), /login_required/);
+  assert.equal(win.document.querySelector('textarea').value, '');
+});
+
+test('login expiry before submit blocks the click for known localized auth controls', () => {
+  for (const html of [
+    '<button data-testid="signup-button">Sign up for free</button>',
+    '<button aria-label="Log in"></button>',
+    '<a role="button" aria-label="注册"></a>',
+    '<button>登录</button>',
+    '<button><span>Sign up</span></button>',
+    '<button aria-label="註冊"></button>',
+  ]) {
+    const { win, adapter } = fixture();
+    let clicks = 0;
+    win.document.querySelector('[data-testid="send-button"]').onclick = () => clicks++;
+    adapter.prepare({ run_id: 'r', prompt });
+    win.document.body.insertAdjacentHTML('beforeend', html);
+    assert.throws(() => adapter.submit('r'), /login_required/, html);
+    assert.equal(adapter.run.submitted, false);
+    assert.equal(clicks, 0);
+  }
+});
+
+test('hidden auth controls and unrelated labels do not establish an anonymous state', () => {
+  const { win, adapter } = fixture();
+  win.document.body.insertAdjacentHTML('beforeend', '<button hidden data-testid="login-button">Log in</button><div style="display:none"><button aria-label="Sign up">Sign up</button></div><div aria-hidden="true"><button>登录</button></div><button>How to log in</button>');
+  assert.equal(adapter.probe().reason, 'composer_detected');
+  adapter.prepare({ run_id: 'r', prompt });
+  assert.deepEqual(adapter.submit('r'), { submitted: true });
+});
