@@ -1,11 +1,14 @@
 //! SQLite WAL persistence with portable JSON recovery and immutable IR snapshots.
 
+use crate::files as fs;
 use std::collections::HashSet;
-use std::fs;
+#[cfg(not(feature = "browser"))]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(not(feature = "browser"))]
 use std::time::Duration;
 
+#[cfg(not(feature = "browser"))]
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -18,6 +21,7 @@ use crate::project::{Project, TaskVersion};
 pub const PROJECT_FILE: &str = "project.json";
 pub const DATABASE_FILE: &str = "project.sqlite3";
 pub const IR_FILE: &str = "knowledge.ir.json";
+#[cfg(not(feature = "browser"))]
 const DATABASE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +92,7 @@ fn hash(bytes: &[u8]) -> String {
 }
 
 // Serializes SQLite commit + JSON mirror across processes on Windows and Unix.
+#[cfg(not(feature = "browser"))]
 fn lock_project(paths: &ProjectPaths) -> Result<fs::File> {
     paths.ensure()?;
     let path = paths.root.join(".project.lock");
@@ -102,6 +107,7 @@ fn lock_project(paths: &ProjectPaths) -> Result<fs::File> {
     Ok(file)
 }
 
+#[cfg(not(feature = "browser"))]
 fn connect(paths: &ProjectPaths) -> Result<Connection> {
     paths.ensure()?;
     let mut connection = Connection::open(paths.database_file())?;
@@ -184,6 +190,24 @@ fn validate_project(project: &Project) -> Result<()> {
             return Err(EntwurfError::Contract("current version is missing".into()));
         }
     }
+    let mut image_ids = HashSet::new();
+    let mut image_runs = HashSet::new();
+    let mut image_hashes = HashSet::new();
+    for image in project.generated_images.as_deref().unwrap_or_default() {
+        component(&image.id)?;
+        if !image_ids.insert(&image.id)
+            || !image_runs.insert(&image.run_id)
+            || !image_hashes.insert(&image.sha256)
+            || u64::from(image.width) * u64::from(image.height) > 64_000_000
+            || !project
+                .task(&image.task_id)
+                .is_some_and(|t| t.versions.iter().any(|v| v.id == image.base_version_id))
+        {
+            return Err(EntwurfError::Contract(
+                "invalid generated image ownership or duplicate identity".into(),
+            ));
+        }
+    }
     let mut audit_ids = HashSet::new();
     for event in &project.audit {
         if event.id.is_empty()
@@ -218,6 +242,87 @@ fn decode_project(path: &Path, bytes: &[u8]) -> Result<Project> {
     Ok(project)
 }
 
+fn validate_history(old: &Project, project: &Project) -> Result<()> {
+    if old.id != project.id || old.created_at != project.created_at {
+        return Err(EntwurfError::Contract(
+            "project identity is immutable".into(),
+        ));
+    }
+    let old_images = old.generated_images.as_deref().unwrap_or_default();
+    let next_images = project.generated_images.as_deref().unwrap_or_default();
+    if next_images.len() < old_images.len() || next_images[..old_images.len()] != *old_images {
+        return Err(EntwurfError::Contract(
+            "generated image history is immutable and append-only".into(),
+        ));
+    }
+    // Audits and saved knowledge history may never disappear or be rewritten.
+    if project.audit.len() < old.audit.len()
+        || json(&project.audit[..old.audit.len()])? != json(&old.audit)?
+    {
+        return Err(EntwurfError::Contract(
+            "audit history is append-only".into(),
+        ));
+    }
+    for task in &old.tasks {
+        let next = project
+            .task(&task.id)
+            .ok_or_else(|| EntwurfError::Contract("task history cannot be removed".into()))?;
+        for version in &task.versions {
+            let next_version = next
+                .versions
+                .iter()
+                .find(|v| v.id == version.id)
+                .ok_or_else(|| {
+                    EntwurfError::Contract("version history cannot be removed".into())
+                })?;
+            if immutable(version)? != immutable(next_version)? {
+                return Err(EntwurfError::Contract(
+                    "saved version knowledge is immutable".into(),
+                ));
+            }
+            if let Some(history) = &version.visual_repairs {
+                let retained = next_version.visual_repairs.as_ref().is_some_and(|next| {
+                    next.len() >= history.len() && &next[..history.len()] == history.as_slice()
+                });
+                if !retained {
+                    return Err(EntwurfError::Contract(
+                        "saved visual repair history is append-only; undo requires a new version"
+                            .into(),
+                    ));
+                }
+            }
+            match (&version.gpt_import, &next_version.gpt_import) {
+                (Some(old), Some(next)) => {
+                    if json(&(
+                        &old.visual_plan,
+                        old.image_reference_present,
+                        old.image_reference_applied,
+                    ))? != json(&(
+                        &next.visual_plan,
+                        next.image_reference_present,
+                        next.image_reference_applied,
+                    ))? || next.warnings.len() < old.warnings.len()
+                        || json(&next.warnings[..old.warnings.len()])? != json(&old.warnings)?
+                    {
+                        return Err(EntwurfError::Contract(
+                            "saved GPT proposal is immutable and import warnings are append-only"
+                                .into(),
+                        ));
+                    }
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(EntwurfError::Contract(
+                        "saved GPT import metadata cannot be added or removed".into(),
+                    ))
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "browser"))]
 fn persist(connection: &mut Connection, paths: &ProjectPaths, project: &Project) -> Result<()> {
     validate_project(project)?;
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -226,69 +331,7 @@ fn persist(connection: &mut Connection, paths: &ProjectPaths, project: &Project)
         .optional()?;
     if let Some(previous) = previous {
         let old = decode_project(&paths.database_file(), previous.as_bytes())?;
-        if old.id != project.id || old.created_at != project.created_at {
-            return Err(EntwurfError::Contract(
-                "project identity is immutable".into(),
-            ));
-        }
-        // Audits and saved knowledge history may never disappear or be rewritten.
-        if project.audit.len() < old.audit.len()
-            || json(&project.audit[..old.audit.len()])? != json(&old.audit)?
-        {
-            return Err(EntwurfError::Contract(
-                "audit history is append-only".into(),
-            ));
-        }
-        for task in &old.tasks {
-            let next = project
-                .task(&task.id)
-                .ok_or_else(|| EntwurfError::Contract("task history cannot be removed".into()))?;
-            for version in &task.versions {
-                let next_version = next
-                    .versions
-                    .iter()
-                    .find(|v| v.id == version.id)
-                    .ok_or_else(|| {
-                        EntwurfError::Contract("version history cannot be removed".into())
-                    })?;
-                if immutable(version)? != immutable(next_version)? {
-                    return Err(EntwurfError::Contract(
-                        "saved version knowledge is immutable".into(),
-                    ));
-                }
-                if let Some(history) = &version.visual_repairs {
-                    let retained = next_version.visual_repairs.as_ref().is_some_and(|next| {
-                        next.len() >= history.len() && &next[..history.len()] == history.as_slice()
-                    });
-                    if !retained {
-                        return Err(EntwurfError::Contract("saved visual repair history is append-only; undo requires a new version".into()));
-                    }
-                }
-                match (&version.gpt_import, &next_version.gpt_import) {
-                    (Some(old), Some(next)) => {
-                        if json(&(
-                            &old.visual_plan,
-                            old.image_reference_present,
-                            old.image_reference_applied,
-                        ))? != json(&(
-                            &next.visual_plan,
-                            next.image_reference_present,
-                            next.image_reference_applied,
-                        ))? || next.warnings.len() < old.warnings.len()
-                            || json(&next.warnings[..old.warnings.len()])? != json(&old.warnings)?
-                        {
-                            return Err(EntwurfError::Contract("saved GPT proposal is immutable and import warnings are append-only".into()));
-                        }
-                    }
-                    (None, None) => {}
-                    _ => {
-                        return Err(EntwurfError::Contract(
-                            "saved GPT import metadata cannot be added or removed".into(),
-                        ))
-                    }
-                }
-            }
-        }
+        validate_history(&old, project)?;
     }
     let data = json(project)?;
     tx.execute("INSERT INTO project(id,data) VALUES (?1,?2) ON CONFLICT(id) DO UPDATE SET data=excluded.data", params![project.id, String::from_utf8_lossy(&data)])?;
@@ -322,7 +365,7 @@ fn persist(connection: &mut Connection, paths: &ProjectPaths, project: &Project)
 }
 
 fn read_project_mirror(paths: &ProjectPaths) -> Result<Option<Project>> {
-    if !paths.project_file().exists() {
+    if !fs::exists(paths.project_file()) {
         return Ok(None);
     }
     let bytes =
@@ -332,6 +375,7 @@ fn read_project_mirror(paths: &ProjectPaths) -> Result<Option<Project>> {
 
 // Under the project lock, restore recoverable history whenever migrations exist
 // without an authoritative project row (including interrupted initialization).
+#[cfg(not(feature = "browser"))]
 fn recover_committed_project(
     connection: &mut Connection,
     paths: &ProjectPaths,
@@ -350,6 +394,7 @@ fn recover_committed_project(
     Ok(None)
 }
 
+#[cfg(not(feature = "browser"))]
 pub fn save_project(paths: &ProjectPaths, project: &Project) -> Result<()> {
     validate_project(project)?;
     let _lock = lock_project(paths)?;
@@ -360,11 +405,12 @@ pub fn save_project(paths: &ProjectPaths, project: &Project) -> Result<()> {
     persist(&mut connection, paths, project)
 }
 
+#[cfg(not(feature = "browser"))]
 pub fn load_project(paths: &ProjectPaths) -> Result<Project> {
     let _lock = lock_project(paths)?;
     // Malformed snapshots are surfaced; recovery must be explicit for corrupt files.
     let mirror = read_project_mirror(paths)?;
-    if !paths.database_file().exists() && mirror.is_none() {
+    if !fs::exists(paths.database_file()) && mirror.is_none() {
         return Err(EntwurfError::ProjectNotFound(
             paths.root.display().to_string(),
         ));
@@ -389,13 +435,15 @@ pub fn load_project(paths: &ProjectPaths) -> Result<Project> {
 
 /// Rebuild a missing database from the validated portable project snapshot.
 /// An existing database is never replaced implicitly (including a corrupt one).
+#[cfg(not(feature = "browser"))]
 pub fn rebuild_database(paths: &ProjectPaths) -> Result<Project> {
     let _lock = lock_project(paths)?;
     rebuild_database_locked(paths)
 }
 
+#[cfg(not(feature = "browser"))]
 fn rebuild_database_locked(paths: &ProjectPaths) -> Result<Project> {
-    if paths.database_file().exists() {
+    if fs::exists(paths.database_file()) {
         return Err(EntwurfError::InvalidInput(
             "remove or quarantine existing database before rebuilding".into(),
         ));
@@ -452,8 +500,9 @@ pub fn copy_source(
     Ok(path)
 }
 
+#[cfg(not(feature = "browser"))]
 fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
-    if path.exists() {
+    if fs::exists(path) {
         let existing = fs::read(path).map_err(|e| EntwurfError::read(path, e))?;
         if existing == bytes {
             return Ok(());
@@ -482,6 +531,7 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
     }
 }
 
+#[cfg(not(feature = "browser"))]
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -501,6 +551,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     sync_parent(parent)
 }
 
+#[cfg(not(feature = "browser"))]
 fn sync_parent(parent: &Path) -> Result<()> {
     #[cfg(unix)]
     fs::File::open(parent)
@@ -515,11 +566,12 @@ pub fn write_text(path: &Path, text: &str) -> Result<()> {
 }
 
 /// Compatibility entry point retained for callers; applies real SQLite migrations.
+#[cfg(not(feature = "browser"))]
 pub fn migrate_placeholder(paths: &ProjectPaths) -> Result<()> {
     let _lock = lock_project(paths)?;
     connect(paths).map(|_| ())
 }
-#[cfg(test)]
+#[cfg(all(test, not(feature = "browser")))]
 mod tests {
     use super::*;
     use crate::project::{Project, VersionReason};
@@ -811,4 +863,55 @@ mod tests {
             Err(EntwurfError::CorruptState { .. })
         ));
     }
+}
+
+#[cfg(feature = "browser")]
+pub fn save_project(paths: &ProjectPaths, project: &Project) -> Result<()> {
+    validate_project(project)?;
+    if let Some(old) = read_project_mirror(paths)? {
+        validate_history(&old, project)?;
+    }
+    paths.ensure()?;
+    for task in &project.tasks {
+        for version in &task.versions {
+            write_immutable(
+                &paths
+                    .versions_dir()
+                    .join(&task.id)
+                    .join(&version.id)
+                    .join(IR_FILE),
+                &json(&version.ir)?,
+            )?;
+        }
+    }
+    write_atomic(&paths.project_file(), &json(project)?)
+}
+#[cfg(feature = "browser")]
+pub fn load_project(paths: &ProjectPaths) -> Result<Project> {
+    let project = read_project_mirror(paths)?
+        .ok_or_else(|| EntwurfError::ProjectNotFound(paths.root.display().to_string()))?;
+    save_project(paths, &project)?;
+    Ok(project)
+}
+#[cfg(feature = "browser")]
+pub fn rebuild_database(paths: &ProjectPaths) -> Result<Project> {
+    load_project(paths)
+}
+#[cfg(feature = "browser")]
+pub fn migrate_placeholder(paths: &ProjectPaths) -> Result<()> {
+    paths.ensure()
+}
+#[cfg(feature = "browser")]
+fn write_immutable(path: &Path, bytes: &[u8]) -> Result<()> {
+    if fs::exists(path) {
+        if fs::read(path).map_err(|e| EntwurfError::read(path, e))? == bytes {
+            return Ok(());
+        }
+        return Err(corrupt(path, "immutable file differs from saved knowledge"));
+    }
+    write_atomic(path, bytes)
+}
+#[cfg(feature = "browser")]
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    fs::write(path, bytes).map_err(|e| EntwurfError::write(path, e))
 }

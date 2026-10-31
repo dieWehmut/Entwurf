@@ -39,6 +39,7 @@ impl Project {
             tasks: Vec::new(),
             audit: Vec::new(),
             settings: ProjectSettings::default(),
+            generated_images: None,
         };
         project.audit(AuditKind::ProjectCreated, None, "project created");
         project

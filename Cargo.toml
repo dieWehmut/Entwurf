@@ -4,6 +4,7 @@ members = [
     "crates/entwurf-core",
     "crates/entwurf-cli",
     "crates/entwurf-web",
+    "crates/entwurf-wasm",
     "apps/desktop/src-tauri",
 ]
 

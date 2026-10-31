@@ -1,6 +1,7 @@
 //! Lossless source ingestion. `char_start/end` are UTF-8 byte offsets, never
 //! Unicode scalar indices. For binary sources they index the exact page
 //! transcript persisted as JSON in SourceFile.notes, not the binary file.
+use crate::files as fs;
 
 use crate::error::{EntwurfError, Result};
 use crate::ir::{
@@ -11,11 +12,16 @@ use crate::storage::{self, ProjectPaths};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
-    fs,
     path::{Path, PathBuf},
 };
+#[cfg(not(feature = "browser"))]
 #[path = "ingest_binary.rs"]
 mod binary;
+#[cfg(feature = "browser")]
+#[path = "ingest_browser.rs"]
+mod binary;
+#[cfg(feature = "browser")]
+pub use binary::{register_extraction, BrowserExtraction, BrowserPage};
 #[path = "ingest_text.rs"]
 mod text;
 

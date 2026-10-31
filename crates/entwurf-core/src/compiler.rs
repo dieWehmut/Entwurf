@@ -1,7 +1,7 @@
 //! Deterministic artifact compilation. SVG is the authoritative vector page;
 //! PNG rasterizes the authoritative SVG; PDF and SVG export one Typst scene.
 
-use std::fs;
+use crate::files as fs;
 use std::path::{Path, PathBuf};
 
 use resvg::tiny_skia;
@@ -310,15 +310,7 @@ pub fn compile(
         .map_err(|e| EntwurfError::write(&options.output_dir, e))?;
     for (_, name, bytes) in &data {
         let path = options.output_dir.join(name);
-        let mut pending = tempfile::NamedTempFile::new_in(&options.output_dir)
-            .map_err(|e| EntwurfError::write(&path, e))?;
-        use std::io::Write;
-        pending
-            .write_all(bytes)
-            .map_err(|e| EntwurfError::write(&path, e))?;
-        pending
-            .persist(&path)
-            .map_err(|e| EntwurfError::write(&path, e.error))?;
+        crate::storage::write_atomic(&path, bytes)?;
     }
     let managed = regex::Regex::new(r"^(page-[0-9]+\.svg|preview-[0-9]+\.png|manifest\.json)$")
         .expect("static pattern");

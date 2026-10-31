@@ -32,3 +32,6 @@ mod obstacle_routes;
 pub mod visual_repair;
 
 mod visual_plan;
+
+/// Native disk or worker-local virtual files.
+pub mod files;
