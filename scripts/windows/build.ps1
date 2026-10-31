@@ -1,0 +1,25 @@
+[CmdletBinding()]
+param([switch]$Bundle)
+. (Join-Path $PSScriptRoot 'common.ps1')
+# This script builds in the current native Windows checkout. It does not install tools.
+& (Join-Path $PSScriptRoot 'check-prerequisites.ps1') -Strict
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+Push-Location $root
+try {
+    Push-Location (Join-Path $root 'apps\desktop')
+    try {
+        Invoke-CheckedNative 'pnpm' @('install', '--frozen-lockfile')
+        Invoke-CheckedNative 'pnpm' @('build')
+    } finally { Pop-Location }
+    Invoke-CheckedNative 'cargo' @('build', '--locked', '--workspace', '--release', '--target', 'x86_64-pc-windows-msvc')
+    Invoke-CheckedNative 'dotnet' @('publish', 'sidecars/gpt-bridge/Entwurf.Bridge/Entwurf.Bridge.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $root 'artifacts\gpt-bridge'))
+    Push-Location (Join-Path $root 'apps\desktop')
+    try {
+        $tauriArguments = @('tauri', 'build', '--target', 'x86_64-pc-windows-msvc')
+        if ($Bundle) { $tauriArguments += @('--bundles', 'nsis') } else { $tauriArguments += '--no-bundle' }
+        $tauriArguments += @('--', '--locked')
+        Invoke-CheckedNative 'pnpm' $tauriArguments
+    } finally { Pop-Location }
+    Write-Output 'Build completed. The sidecar is published separately under artifacts/gpt-bridge; packaging integration is a separate release gate.'
+} finally { Pop-Location }

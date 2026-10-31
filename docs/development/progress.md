@@ -1,0 +1,40 @@
+# v0.1 implementation and acceptance status
+
+The binding requirements are in [the supplied plan](../plans/entwurf-v0.1.md).
+The user's later instruction authorizes staged commits and pushes to `origin`;
+it overrides the plan's original no-push instruction. Work is on `feat/v0.1`.
+Existing prototype code and green smoke tests do not establish release readiness.
+
+| Stage | Required evidence | Status on 2026-10-31 |
+| --- | --- | --- |
+| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | In progress: native toolchain smoke checks pass; repository build still pending |
+| 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | In progress: replacing prototype JSON-only persistence |
+| 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Pending; current bridge is a disabled stdio stub |
+| 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Pending; prototype parsing does not satisfy these requirements |
+| 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Pending; prototype export exists but Chinese/math output is not reliable |
+| 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Pending; partial checks exist, but passing tests do not establish full content integrity |
+| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Pending; present UI is a visual demo |
+| 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Pending |
+| 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Pending |
+
+## Release gates that require stronger evidence
+
+- The licensed private probability chapter and handwritten style reference must
+  stay under ignored `fixtures/private/`. The public synthetic sample is a CI
+  fixture, not a substitute for private-chapter acceptance.
+- A complete chapter must preserve all core content within three A3 landscape
+  pages. Critical nodes and headings need source anchors; formulas must match
+  their source or carry a complete reversible correction record.
+- Export must reject unconfirmed formulas, overlapping or clipped content and
+  text below 8 pt. Tests must inspect readable Chinese/math and artifact hashes,
+  not just filenames, PDF headers or UI notifications.
+- UI automation remains off until discovery, input, completion detection and
+  capture all pass on the actual target ChatGPT version in a Windows foreground
+  session. Manual mode must work independently of automation availability.
+- Screenshot acceptance covers all five pages, both themes, 1280×800 and
+  1920×1080, and 100%/125%/150% scale, including focus and contrast checks.
+- The acceptance harness in `crates/entwurf-cli` is internal development code;
+  no public CLI or network service is part of the product contract.
+
+This file records unfinished requirements explicitly and must be updated with
+test commands, artifacts and commit evidence as each stage is verified.
