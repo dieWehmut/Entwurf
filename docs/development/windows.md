@@ -38,16 +38,30 @@ If local execution policy blocks scripts, run a reviewed script with `powershell
 
 `test.ps1` checks Rust formatting, runs the full Rust workspace for `x86_64-pc-windows-msvc`, runs the explicit C# test project, and installs/tests/builds the frontend with its frozen lockfile. Add `-E2E` to run the existing Playwright suite after installing its browser with `pnpm --dir apps/desktop exec playwright install chromium`. Playwright browser tests exercise the web frontend, not native IPC or ChatGPT controls. Test results are written under ignored `artifacts/test-results/`.
 
-`build.ps1` builds the frontend, the release Rust workspace, the self-contained `win-x64` bridge and the Tauri application. It stops at the first failed command. Cargo build/test and Tauri's Cargo runner use `--locked`, so stale or missing Cargo.lock fails instead of resolving a new graph. The frontend pins pnpm 10.34.9 in `package.json`; preflight requires a stable pnpm 10 version and rejects incompatible majors. The local `@tauri-apps/cli` dependency backs `pnpm tauri`; no global Tauri CLI is required. The normal build uses `--no-bundle`; `-Bundle` requests NSIS.
+The ordinary Cargo command skips tests marked `ignored` that require real PDFium,
+OCR or a published bridge. To include the actual parsing and rendering engines
+after building/preparing the resources, run:
+
+```powershell
+$env:ENTWURF_PDFIUM_DIR = (Resolve-Path 'apps/desktop/src-tauri/resources/pdfium').Path
+# Set this to the directory containing your installed tesseract.exe, or use PATH.
+$env:ENTWURF_TEST_OCR_DIR = (Split-Path (Get-Command tesseract.exe).Source)
+cargo test --locked -p entwurf-core -p entwurf-cli --target x86_64-pc-windows-msvc -- --include-ignored --test-threads=1
+# Exercise the Rust parent against the real published sidecar too:
+$env:ENTWURF_BRIDGE_TEST_EXE = (Resolve-Path 'apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.exe').Path
+cargo test --locked -p entwurf-desktop --target x86_64-pc-windows-msvc bridge::tests -- --include-ignored --test-threads=1
+```
+
+`build.ps1` builds the frontend and self-contained `win-x64` bridge, fetches the locked Rust dependencies, generates release notices, and lets Tauri compile the shipped application once. It stops at the first failed command. Cargo build/test and Tauri's Cargo runner use `--locked`, so stale or missing Cargo.lock fails instead of resolving a new graph. The frontend pins pnpm 10.34.9 in `package.json`; preflight requires a stable pnpm 10 version and rejects incompatible majors. The local `@tauri-apps/cli` dependency backs `pnpm tauri`; no global Tauri CLI is required. The normal build uses `--no-bundle`; `-Bundle` requests NSIS.
 
 Outputs:
 
 - Frontend: `apps/desktop/dist/`.
 - Native release executable: `target/x86_64-pc-windows-msvc/release/`.
 - NSIS candidate: `target/x86_64-pc-windows-msvc/release/bundle/nsis/`.
-- Standalone bridge publish: `artifacts/gpt-bridge/`.
+- Self-contained bridge publish/resources: `apps/desktop/src-tauri/resources/gpt-bridge/`.
 
-The bridge is currently published separately. Tauri launch/IPC integration and installation of that sidecar are still required before claiming automated operation or a complete installer. Build success alone does not satisfy these gates.
+If `CARGO_TARGET_DIR` is set, native executable and installer paths use that directory instead of `target/`. The self-contained bridge, pinned PDFium DLL and release notices are copied into Tauri resources and installed with the application. The Rust parent probes the bridge through the authenticated pipe; this does not enable ChatGPT automation or imply its compatibility gates passed.
 
 For manual frontend/native commands:
 
@@ -67,4 +81,27 @@ dotnet test sidecars/gpt-bridge/Entwurf.Bridge.Tests/Entwurf.Bridge.Tests.csproj
 
 ## Release gate
 
-The current prototype must still pass install/uninstall in a clean user profile; Chinese and space-containing paths; offline startup and real project operations; 100%/125%/150% DPI and multiple monitors; content/formula/source verification; faithful SVG/PNG/PDF/manifest export; font and dependency notice inclusion; and absence of telemetry. Keep automation disabled unless window discovery, reliable input, completion detection and reliable retrieval all pass in a real foreground session on the target ChatGPT version. Preserve drafts and pause safely when the user changes windows, locks the screen, or the application structure changes.
+Actual results and remaining environment limits are in [acceptance status](progress.md).
+Keep automation disabled unless window discovery, reliable input, completion
+detection and reliable retrieval all pass in a real foreground session on the
+target ChatGPT version. Unit tests and CSS zoom screenshots do not establish
+native OS scaling or physical multi-monitor behavior.
+
+The installed-app harness uses an owned test installation under
+`%LOCALAPPDATA%\Programs\Entwurf` and a separate project/evidence directory. It
+refuses to replace an existing installation without its ownership record. From a
+native checkout with frontend development dependencies installed:
+
+```powershell
+.\scripts\windows\reinstall-acceptance.ps1 `
+  -Installer 'C:\path\to\Entwurf_0.1.0_x64-setup.exe' `
+  -EvidenceRoot "$env:LOCALAPPDATA\EntwurfAcceptance\new-run"
+```
+
+Cycle 0 installs and exercises the app; cycles 1 and 2 actually uninstall,
+verify every project file hash, reinstall, and repeat native import/edit/export
+checks. The driver uses a localhost WebView2 debugging endpoint only for the
+test-launched process and native file-dialog controls scoped to that process.
+It disables WebView networking; it does not disconnect host network adapters.
+Evidence remains outside Git. A unique WebView profile is not by itself a fresh
+native application configuration; test those separately.

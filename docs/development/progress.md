@@ -3,41 +3,40 @@
 The binding requirements are in [the supplied plan](../plans/entwurf-v0.1.md).
 The user's later instruction authorizes staged commits and pushes to `origin`;
 it overrides the plan's original no-push instruction. Work is on `feat/v0.1`.
-Existing prototype code and green smoke tests do not establish release readiness.
+The current Windows desktop candidate has actual installed-app evidence below.
+See [native acceptance](native-acceptance.md) for the tested installer and limits.
 
-| Stage | Required evidence | Status on 2026-10-31 |
+| Stage | Required evidence | Status on 2026-11-01 |
 | --- | --- | --- |
-| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native checkout and tools ready; current desktop check passes; Rust 1.92 minimum checked; Release build in progress |
+| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native tools verified; Release NSIS built at f05e572 and installed; build compiles the shipped desktop once |
 | 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | Implemented and reviewed, including desktop event transitions, immutable edits, recovery and legacy snapshot compatibility |
 | 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Native parent and self-contained resources integrated; 41 C# and 8 actual parent/child tests pass; no verified ChatGPT window and all four gates remain false |
-| 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Implemented and reviewed; 17 actual-engine tests pass on Windows/Linux; installed resource resolution remains pending |
-| 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Shared measured Typst scene and bounded in-process cache implemented; Chinese/math vector PDF independently verified, public chapter fits one A3 page; installed export pending |
-| 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Implemented and reviewed, including actual contrast, obstacle routing, durable three-round budget, selected repair undo and whole-version restoration; installed UI acceptance pending |
-| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Five native pages, IR reimport and planning feedback implemented; 33 React and 10 browser tests pass; initial installed desktop flow passes, final reinstall acceptance pending |
-| 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Implemented and reviewed, including safe native IR reimport and applied/advisory GPT grouping with visible warnings; initial installed offline import/edit/export passes, final additions await installed verification |
-| 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Reproducible dependency notices and opt-in redacted diagnostics implemented/reviewed; first NSIS build running; installation/reinstallation pending |
+| 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Actual-engine tests pass; installed two-page PDF uses the pinned bundled DLL; two private images retain exact originals and pending OCR/formula reviews |
+| 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Shared measured scene and bounded cache implemented; Chinese/math vector PDF independently verified; installed one-page baseline and applied two-page proposal export pass |
+| 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Reviewed and tested; installed UI confirms real heading repair, exact-IR undo, preserved history, disabled replay and invalidated exports |
+| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | 33 React and 10 browser tests pass; installed five-page/two-theme flows, native dialogs, IR restoration and diagnostics save/cancel pass |
+| 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Root actual-engine run: 145 passed, zero ignored; installed offline reload/import/edit/export, applied grouping, manual-edit preservation and IR reimport pass |
+| 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Actual repeated uninstall/reinstall passes with project hashes intact; separate fresh App configuration and database reconstruction pass; native OS scaling and physical multi-monitor remain unverified |
 
-## Release gates that require stronger evidence
+## Remaining environment limits
 
-- The licensed private probability chapter and handwritten style reference must
-  stay under ignored `fixtures/private/`. The public synthetic sample is a CI
-  fixture, not a substitute for private-chapter acceptance.
-- A complete chapter must preserve all core content within three A3 landscape
-  pages. Critical nodes and headings need source anchors; formulas must match
-  their source or carry a complete reversible correction record.
-- Export must reject unconfirmed formulas, overlapping or clipped content and
-  text below 8 pt. Tests must inspect readable Chinese/math and artifact hashes,
-  not just filenames, PDF headers or UI notifications.
+- The user confirmed no original textbook chapter is available. The two private
+  images were tested for style storage/OCR, with reviews left pending. The public
+  synthetic chapter does not establish real-textbook or handwriting accuracy.
 - UI automation remains off until discovery, input, completion detection and
   capture all pass on the actual target ChatGPT version in a Windows foreground
   session. Manual mode must work independently of automation availability.
-- Screenshot acceptance covers all five pages, both themes, 1280×800 and
-  1920×1080, and 100%/125%/150% scale, including focus and contrast checks.
+- Browser screenshots cover five pages, both themes, two viewports and three
+  CSS zoom levels. Native screenshots record actual viewport/DPR. This machine
+  exposes one monitor; physical multi-monitor and OS 100/125/150% remain untested.
+- Offline tests disable WebView networking and reload the UI. Host adapters and
+  native process networking remain unchanged; no whole-machine disconnection or
+  system-wide packet-capture result is claimed.
 - The acceptance harness in `crates/entwurf-cli` is internal development code;
   no public CLI or network service is part of the product contract.
 
-This file records unfinished requirements explicitly and must be updated with
-test commands, artifacts and commit evidence as each stage is verified.
+The checkpoints below are historical; their then-pending items are superseded by
+the current table and linked native acceptance report.
 
 ## Verified development baseline
 
@@ -151,3 +150,14 @@ connection for this flow; host network adapters were not changed. This is actual
 native IPC and installed code, with no mocked commands. The synthetic result
 does not claim real ChatGPT generation. Two uninstall/reinstall cycles and final
 installed checks for subsequent additions remain outstanding.
+
+## Final installed candidate checkpoint — 2026-11-01
+
+The `f05e572` bundle passes two complete runs of the reviewed native reinstall
+driver, with 11 workflow checks per cycle and 167/224 existing project files
+unchanged after the respective uninstalls. The same installer/executable hashes
+were verified in both runs. Native IR reimport, actual two-page GPT grouping,
+repair undo and diagnostic Save As/cancel all pass. Separate fresh App configuration
+checks pass 17/17, and installed database recovery checks pass 22/22. The final
+application is installed; test processes are closed. See [the complete native
+acceptance record](native-acceptance.md) for hashes, commands, scope and limitations.
