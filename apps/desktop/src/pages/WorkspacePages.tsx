@@ -69,6 +69,7 @@ export function SettingsPage({ snapshot, capabilities, client, run, locked, them
     }); }}>导出脱敏诊断</button>
     {diagnosticsPath && <p className="path-text" role="status">已保存：{diagnosticsPath}</p>}
   </section>
+  {client.runtime === "browser" && <section className="panel"><h2>开源许可</h2><p><a href={`${import.meta.env.BASE_URL}licenses/THIRD-PARTY-NOTICES.txt`} target="_blank" rel="noreferrer">第三方许可证与版权声明</a></p><p><a href={`${import.meta.env.BASE_URL}licenses/dependency-inventory.json`} target="_blank" rel="noreferrer">网页依赖清单</a></p></section>}
   <section className="panel"><h2>OCR 设置</h2><label className="field">OCR 语言<input value={ocrDraft ?? snapshot?.project.settings.ocr_languages ?? ""} placeholder="chi_sim+eng" onChange={e => setOcrDraft(e.target.value)} disabled={locked || !snapshot} /></label><p className="muted">保存后用于后续资料摄取。已有资料请在来源页重新解析原件。</p><button className="primary-button" disabled={locked || !snapshot || !ocrDraft?.trim()} onClick={() => { void run("保存 OCR 设置", () => client.call("save_settings", { ocrLanguages: ocrDraft!.trim() }), () => setOcrDraft(null)); }}>保存 OCR 设置</button></section></div>;
 }
 

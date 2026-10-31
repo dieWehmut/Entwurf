@@ -14,6 +14,7 @@ PDF.js 解析 PDF 文字层，扫描页和图片由 Tesseract.js OCR。PDF worke
 
 ```sh
 pnpm --dir apps/desktop install --frozen-lockfile
+cargo fetch --locked
 bash scripts/build-wasm.sh --test
 pnpm --dir apps/desktop web:assets
 cd apps/desktop
@@ -24,7 +25,9 @@ pnpm exec vite preview --host 127.0.0.1 --port 1435 --base=/Entwurf/
 
 打开 `http://127.0.0.1:1435/Entwurf/`。本机 HTTP 服务使用默认 `/` 的构建；不要给本机服务使用 Pages 子路径构建。
 
-`public/wasm` 和 `public/vendor` 是可重建产物，不提交到 Git。`web:assets` 只复制锁定的依赖，不在运行时依赖 CDN。普通 `pnpm build` 保留桌面构建行为；网页验收前需要准备上述 WASM 和浏览器提取组件。
+`public/wasm` 和 `public/vendor` 是可重建产物，不提交到 Git。`web:assets` 准备锁定的依赖，不在运行时依赖 CDN。普通 `pnpm build` 保留桌面构建行为；网页验收前需要准备上述 WASM 和浏览器提取组件。
+
+`web:assets` 同时离线生成 `public/licenses/THIRD-PARTY-NOTICES.txt` 与 `dependency-inventory.json`，可用 `node scripts/release/generate-notices.mjs --web --check` 验证。清单依据 `entwurf-wasm` 的 wasm32 normal/build 依赖树、生产 npm 依赖和实际字体，沿用固定上游声明与 SHA 校验，不要求 NuGet、原生 PDFium 或 Windows 资源。首次准备前运行 `cargo fetch --locked`，供 Cargo 元数据读取使用；这些缓存中的非网页依赖不会因此加入清单。生成产物随网页一起发布，浏览器设置页的“开源许可”链接支持 `/Entwurf/` 子路径。
 
 ## 验收
 
