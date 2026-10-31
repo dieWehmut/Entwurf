@@ -1,10 +1,18 @@
 import type { Capabilities, Commands, WorkspaceClient, WorkspaceSnapshot } from "./workspace";
 import { chooseFiles, chooseJson, download, sourceAccept } from "./web-files";
 
-export function httpClientId(): string {
-  let id = sessionStorage.getItem("entwurf.http-client.v1");
-  if (!id) { id = crypto.randomUUID(); sessionStorage.setItem("entwurf.http-client.v1", id); }
-  return id;
+// sessionStorage is copied by window.open/duplicate-tab. Only selection can be
+// restored from it; the server session identity must belong to this document.
+const documentClientId = crypto.randomUUID();
+const selectionKey = "entwurf.http-selection.v1";
+export function httpClientId(): string { return documentClientId; }
+export async function restoreHttpSelection(client: WorkspaceClient): Promise<void> {
+  let selection: { root?: string; taskId?: string } | null;
+  try { selection = JSON.parse(sessionStorage.getItem(selectionKey) ?? "null"); }
+  catch { sessionStorage.removeItem(selectionKey); return; }
+  if (typeof selection?.root !== "string") return;
+  await client.call("load_existing_project", { root: selection.root });
+  if (typeof selection.taskId === "string") await client.call("workspace_snapshot", { taskId: selection.taskId });
 }
 export function createHttpClient(initial: Capabilities & { session_token: string }, clientId = httpClientId()): WorkspaceClient {
   const headers = { "X-Entwurf-Session": initial.session_token, "X-Entwurf-Client": clientId };
@@ -14,7 +22,12 @@ export function createHttpClient(initial: Capabilities & { session_token: string
     if (!response.ok) throw new Error(body.error ?? `本地服务返回 ${response.status}`);
     return body;
   }
-  const command = (name: string, args?: unknown) => request("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: name, args: args ?? {} }) });
+  const command = async (name: string, args?: unknown) => {
+    const result = await request("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command: name, args: args ?? {} }) });
+    const snapshot = result as WorkspaceSnapshot | null;
+    if (snapshot?.project && typeof snapshot.root === "string") sessionStorage.setItem(selectionKey, JSON.stringify({ root: snapshot.root, taskId: snapshot.selected_task_id ?? undefined }));
+    return result;
+  };
   async function call(name: keyof Commands, args: unknown): Promise<unknown> {
     switch (name) {
       case "bootstrap": return request("/api/bootstrap");

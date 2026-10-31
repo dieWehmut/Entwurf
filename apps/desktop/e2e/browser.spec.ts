@@ -115,3 +115,25 @@ test("a stale tab cannot overwrite a saved node and keeps its unsaved draft", as
   await other.getByRole("button", { name: "放弃草稿" }).click();
   await expect(other.getByLabel("节点标题")).toHaveValue("已提交的新标题");
 });
+
+test("EXIF-rotated JPEGs retain raw dimensions for source anchor validation", async ({ page }) => {
+  await page.goto("./"); await createProject(page, "EXIF 来源验收"); await createTask(page, "相机方向");
+  const images = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas"); canvas.width = 400; canvas.height = 160;
+    const draw = canvas.getContext("2d")!; draw.fillStyle = "white"; draw.fillRect(0, 0, 400, 160); draw.fillStyle = "black"; draw.font = "32px sans-serif"; draw.fillText("Probability 123", 20, 90);
+    const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), "image/jpeg"));
+    const jpeg = new Uint8Array(await blob.arrayBuffer());
+    return [6, 8].map(orientation => {
+      // APP1 Exif/TIFF: one SHORT Orientation tag. JPEG encoded size stays 400x160.
+      const exif = new Uint8Array([255,225,0,34,69,120,105,102,0,0,73,73,42,0,8,0,0,0,1,0,18,1,3,0,1,0,0,0,orientation,0,0,0,0,0,0,0]);
+      return { orientation, bytes: [...jpeg.subarray(0,2), ...exif, ...jpeg.subarray(2)] };
+    });
+  });
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "选择本机文件并导入" }).click();
+  await (await chooser).setFiles(images.map(image => ({ name: `orientation-${image.orientation}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from(image.bytes) })));
+  for (const image of images) await expect(page.getByText(`orientation-${image.orientation}.jpg`, { exact: true })).toBeVisible({ timeout: 30_000 });
+  await nav(page, "结果");
+  await expect(page.getByLabel("来源锚点 JSON")).toContainText('"width": 400');
+  await expect(page.getByLabel("来源锚点 JSON")).toContainText('"height": 160');
+});

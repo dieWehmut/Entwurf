@@ -7,6 +7,24 @@ export interface Extraction {
   pages: ExtractionPage[]; diagnostics: { level: "info" | "warning" | "error"; code: string; message: string }[];
 }
 const asset = (path: string) => new URL(`${import.meta.env.BASE_URL}vendor/${path}`, location.origin).href;
+function encodedJpegSize(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset++] !== 0xff) break;
+    while (bytes[offset] === 0xff) offset++;
+    const marker = bytes[offset++];
+    if (marker === 0xda || marker === 0xd9) break;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > bytes.length) break;
+    const length = view.getUint16(offset);
+    if (length < 2 || offset + length > bytes.length) break;
+    if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker) && length >= 7) return { width: view.getUint16(offset + 5), height: view.getUint16(offset + 3) };
+    offset += length;
+  }
+  throw new Error("无法读取 JPEG 原始尺寸，请检查图片文件。");
+}
 async function recognize(canvas: HTMLCanvasElement, languages: string) {
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker(languages.split("+").filter(Boolean), 1, {
@@ -39,7 +57,10 @@ export async function extractBinary(file: File, languages = "chi_sim+eng"): Prom
       finally { bitmap.close(); }
     }
     const text = await recognize(canvas, languages);
-    extraction.pages.push({ page: null, text, engine: "tesseract.js", is_ocr: true, region: { left: 0, top: 0, width: canvas.width, height: canvas.height, unit: "pixels" } });
+    // OCR uses the visually oriented bitmap, but whole-image anchors describe
+    // the retained encoded source. EXIF rotations can swap displayed axes.
+    const sourceSize = encodedJpegSize(bytes) ?? { width: canvas.width, height: canvas.height };
+    extraction.pages.push({ page: null, text, engine: "tesseract.js", is_ocr: true, region: { left: 0, top: 0, ...sourceSize, unit: "pixels" } });
     if (!text.trim()) extraction.diagnostics.push({ level: "warning", code: "empty_image", message: "图像未识别出文字，请核对原件。" });
     return extraction;
   }
