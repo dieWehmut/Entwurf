@@ -9,16 +9,7 @@ use crate::model::{
     mm_to_pt, LayoutDocument, LayoutPage, PlacedEdge, PlacedGroup, PlacedNode, Point, Rect,
 };
 
-#[derive(Debug, Clone)]
-pub struct LayoutOptions {
-    pub max_pages: u16,
-    pub min_font_pt: f32,
-    pub max_font_pt: f32,
-    pub column_gap_pt: f32,
-    pub node_gap_pt: f32,
-    pub card_padding_pt: f32,
-    pub preferred_columns: usize,
-}
+pub use crate::model::LayoutOptions;
 
 impl Default for LayoutOptions {
     fn default() -> Self {
@@ -30,6 +21,8 @@ impl Default for LayoutOptions {
             node_gap_pt: 10.0,
             card_padding_pt: 8.0,
             preferred_columns: 3,
+            obstacle_routing: false,
+            max_heading_font_pt: 128.0,
         }
     }
 }
@@ -61,6 +54,7 @@ pub fn layout(
         options.card_padding_pt,
         options.min_font_pt,
         options.max_font_pt,
+        options.max_heading_font_pt,
         style.typography.body_pt,
         style.typography.line_height,
     ]
@@ -68,6 +62,7 @@ pub fn layout(
     .all(|v| v.is_finite() && *v >= 0.0)
         || options.max_pages == 0
         || options.column_gap_pt < 8.0
+        || options.max_heading_font_pt < 8.0
         || options.min_font_pt < 8.0
         || options.max_font_pt < options.min_font_pt
         || options.preferred_columns == 0
@@ -85,7 +80,11 @@ pub fn layout(
         width_pt - 2.0 * margin_pt,
         height_pt - 2.0 * margin_pt - 88.0,
     );
-    let columns = column_rects(content, options.preferred_columns, options.column_gap_pt);
+    let columns = column_rects(
+        content,
+        options.preferred_columns as usize,
+        options.column_gap_pt,
+    );
     let card_width = columns[0].width;
     let inner_width = card_width - options.card_padding_pt * 2.0;
     if inner_width < 32.0 {
@@ -121,7 +120,8 @@ pub fn layout(
             let index = match selected {
                 Some(index) => index,
                 None => {
-                    current.edges = route_edges(ir, &current, current.index);
+                    current.edges =
+                        route_edges(ir, &current, current.index, options.obstacle_routing)?;
                     pages.push(current);
                     if pages.len() >= options.max_pages as usize {
                         return Err(crate::error::EntwurfError::Render(format!(
@@ -188,7 +188,7 @@ pub fn layout(
         }
     }
     if !current.nodes.is_empty() || pages.is_empty() {
-        current.edges = route_edges(ir, &current, current.index);
+        current.edges = route_edges(ir, &current, current.index, options.obstacle_routing)?;
         pages.push(current);
     }
     Ok(LayoutDocument {
@@ -315,7 +315,15 @@ fn column_rects(content: Rect, count: usize, gap: f32) -> Vec<Rect> {
         .collect()
 }
 
-fn route_edges(ir: &KnowledgeIr, page: &LayoutPage, page_number: u16) -> Vec<PlacedEdge> {
+fn route_edges(
+    ir: &KnowledgeIr,
+    page: &LayoutPage,
+    page_number: u16,
+    obstacles: bool,
+) -> Result<Vec<PlacedEdge>> {
+    if obstacles {
+        return crate::obstacle_routes::reroute(ir, page);
+    }
     let positions: BTreeMap<_, _> = page
         .nodes
         .iter()
@@ -370,7 +378,7 @@ fn route_edges(ir: &KnowledgeIr, page: &LayoutPage, page_number: u16) -> Vec<Pla
             label: edge.label.clone(),
         });
     }
-    edges
+    Ok(edges)
 }
 
 #[cfg(test)]

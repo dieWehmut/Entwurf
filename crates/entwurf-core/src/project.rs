@@ -119,6 +119,9 @@ impl Project {
             validation: None,
             artifacts: None,
             source_prompt_hash: None,
+            layout_options: None,
+            visual_repairs: None,
+            visual_repair_enabled: None,
         });
         task.current_version = Some(version_id.clone());
         task.updated_at = Utc::now();
@@ -184,6 +187,9 @@ impl Project {
             validation: source.validation,
             artifacts: None,
             source_prompt_hash: source.source_prompt_hash,
+            layout_options: source.layout_options,
+            visual_repairs: source.visual_repairs,
+            visual_repair_enabled: source.visual_repair_enabled,
         });
         task.current_version = Some(new_version_id);
         task.updated_at = Utc::now();

@@ -57,3 +57,31 @@ Measured bounds make those gates possible but do not claim that phase complete.
 Dependencies and their asset bytes are pinned by Cargo.lock. The existing LXGW
 font and its OFL license remain checked into the repository. No external Typst
 CLI, font install or network connection is required to compile an export.
+
+## Bounded repair and undo
+
+`prepare` (and therefore both desktop preview and export) validates the painted
+text pairs (`text` against card `surface`, and against page `background`) before
+rendering. Low contrast or malformed colors block output. Repair never changes
+colors or knowledge. Routes must be orthogonal, stay on-page, meet card borders,
+exist for same-page graph edges, and clear card interiors including the connector
+stroke. The deterministic obstacle grid can reroute through clear gutters.
+
+When geometry fails, preparation tries at most three recorded adjustments. Fixed
+policies compact padding/gaps, reduce body fonts to the 8pt floor, widen columns
+for oversized cards, reduce oversized headings (24/16/8pt caps), or reroute
+connectors. The page budget is unchanged. Failure after the budget stays blocking;
+content is never discarded to manufacture a passing result.
+
+Generated `VisualRepairRecord` values store deterministic identity, round,
+reason, exact IR/style hashes, before/after `LayoutOptions`, geometry hashes and
+outcome. `TaskVersion` optionally retains effective options, history and whether
+automatic repair is enabled. `repair_rounds_used` prevents repeated preview/export
+calls from silently extending the three-round budget of the same version.
+
+`visual_repair::rollback` verifies the current IR/style and option chain, then
+returns the selected record's preceding options and history with that adjustment
+and dependent successors marked reverted. The service saves a new version with
+the identical IR and disables automatic repair. An undo may restore a blocked
+layout; preparation preserves that result instead of redoing the repair. Existing
+version knowledge and previous repair records remain immutable.

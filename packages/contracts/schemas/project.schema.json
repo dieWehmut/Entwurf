@@ -614,6 +614,37 @@
             "string",
             "null"
           ]
+        },
+        "layout_options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/layoutOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-rust-default": true,
+          "x-rust-skip-none": true
+        },
+        "visual_repairs": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/visualRepairRecord"
+          },
+          "x-rust-default": true,
+          "x-rust-skip-none": true
+        },
+        "visual_repair_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "x-rust-default": true,
+          "x-rust-skip-none": true
         }
       },
       "x-rust-name": "TaskVersion",
@@ -817,6 +848,126 @@
       },
       "x-rust-name": "ProjectSettings",
       "x-rust-module": "project"
+    },
+    "layoutOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_pages",
+        "min_font_pt",
+        "max_font_pt",
+        "column_gap_pt",
+        "node_gap_pt",
+        "card_padding_pt",
+        "preferred_columns",
+        "obstacle_routing",
+        "max_heading_font_pt"
+      ],
+      "properties": {
+        "max_pages": {
+          "type": "integer",
+          "minimum": 0,
+          "x-rust-type": "u16"
+        },
+        "min_font_pt": {
+          "type": "number"
+        },
+        "max_font_pt": {
+          "type": "number"
+        },
+        "column_gap_pt": {
+          "type": "number"
+        },
+        "node_gap_pt": {
+          "type": "number"
+        },
+        "card_padding_pt": {
+          "type": "number"
+        },
+        "preferred_columns": {
+          "type": "integer",
+          "minimum": 0,
+          "x-rust-type": "u32"
+        },
+        "obstacle_routing": {
+          "type": "boolean"
+        },
+        "max_heading_font_pt": {
+          "type": "number",
+          "minimum": 8
+        }
+      },
+      "x-rust-name": "LayoutOptions",
+      "x-rust-module": "model",
+      "x-rust-derives": [
+        "PartialEq"
+      ]
+    },
+    "visualRepairRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "reason",
+        "ir_hash",
+        "style_hash",
+        "round",
+        "before",
+        "after",
+        "passed",
+        "reverted",
+        "before_geometry_hash",
+        "after_geometry_hash"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "ir_hash": {
+          "type": "string"
+        },
+        "style_hash": {
+          "type": "string"
+        },
+        "round": {
+          "type": "integer",
+          "minimum": 1,
+          "x-rust-type": "u16",
+          "maximum": 3
+        },
+        "before": {
+          "$ref": "#/$defs/layoutOptions"
+        },
+        "after": {
+          "$ref": "#/$defs/layoutOptions"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reverted": {
+          "type": "boolean"
+        },
+        "before_geometry_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after_geometry_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "x-rust-name": "VisualRepairRecord",
+      "x-rust-module": "model",
+      "x-rust-derives": [
+        "PartialEq"
+      ]
     }
   },
   "x-rust-name": "Project",

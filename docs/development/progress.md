@@ -12,10 +12,10 @@ Existing prototype code and green smoke tests do not establish release readiness
 | 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Native parent and self-contained resources integrated; 41 C# and 8 actual parent/child tests pass; no verified ChatGPT window and all four gates remain false |
 | 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Implemented and reviewed; 17 actual-engine tests pass on Windows/Linux; installed resource resolution remains pending |
 | 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Shared measured Typst scene and bounded in-process cache implemented; Chinese/math vector PDF independently verified, public chapter fits one A3 page; installed export pending |
-| 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Provenance, formula, coverage, measured bounds/size and artifact identity gates implemented and reviewed; automatic visual repair, per-repair undo and complete contrast/routing checks still pending |
-| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Five pages use real native commands; 23 React and 6 browser tests pass, review findings resolved; installed Windows UI acceptance pending |
+| 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Implemented and reviewed, including actual contrast, obstacle routing, durable three-round budget, selected repair undo and whole-version restoration; installed UI acceptance pending |
+| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Five pages use real native commands; 27 React and 8 browser tests pass, review findings resolved; installed Windows UI acceptance pending |
 | 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Service workflows, durable bounded retry, manual-edit protection and true exports implemented and reviewed; full installed-app offline round trip pending |
-| 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Pending |
+| 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Reproducible dependency notices and opt-in redacted diagnostics implemented/reviewed; first NSIS build running; installation/reinstallation pending |
 
 ## Release gates that require stronger evidence
 
@@ -97,3 +97,25 @@ unverified and must not be inferred from synthetic or generated content.
 - Native environment currently exposes one 1280 × 800 monitor. Physical
   multi-monitor acceptance remains unavailable. No uninstall/reinstall cycle
   has yet been completed; at least two are required before delivery.
+
+## Visual repair and release hardening checkpoint
+
+- Root reran all core/internal acceptance tests with PDFium and actual Tesseract:
+  **123 passed, zero failures or ignored tests**. This adds visual repair,
+  immutable history/undo, whole-version restoration and diagnostic redaction.
+- Independent review probes confirm that repeated failed exports cannot reset
+  the three-round budget, selected undo preserves exact IR bytes and disables
+  replay, changed styles invalidate only incompatible visual proof, and legacy
+  versions without new optional fields reopen and compile.
+- Latest native desktop check passes with repair and diagnostics commands.
+  Frontend verification is 27 React tests and 8 browser tests, including repair
+  undo and successful/cancelled diagnostic export.
+- Offline notice generation records 554 dependencies and 351 notice texts with
+  zero unresolved records. Native Windows generation in a Chinese/spaced path
+  matches the WSL output byte for byte. Original notice bytes have explicit Git
+  checkout attributes to avoid CRLF conversion and false native dirty status.
+- Diagnostics export is local and opt-in, containing fixed version/platform
+  strings, capability booleans and aggregate counts. It excludes source content,
+  filenames/paths, prompts, tokens, identifiers and arbitrary error text.
+- Physical multi-monitor, installed UI operations, actual reinstall cycles and
+  private textbook coverage remain separate acceptance gates.

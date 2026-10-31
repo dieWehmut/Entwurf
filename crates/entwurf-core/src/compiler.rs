@@ -21,6 +21,8 @@ pub struct CompileOptions {
     pub layout: LayoutOptions,
     pub validation: ValidationOptions,
     pub write_manifest: bool,
+    pub auto_repair: bool,
+    pub repair_rounds_used: u16,
 }
 
 impl CompileOptions {
@@ -31,6 +33,8 @@ impl CompileOptions {
             layout: LayoutOptions::default(),
             validation: ValidationOptions::default(),
             write_manifest: true,
+            auto_repair: true,
+            repair_rounds_used: 0,
         }
     }
 }
@@ -46,6 +50,8 @@ pub struct ArtifactSet {
     pub validation_passed: bool,
     pub validation_report: crate::ir::ValidationReport,
     pub layout_document: LayoutDocument,
+    pub effective_layout: LayoutOptions,
+    pub visual_repairs: Vec<crate::model::VisualRepairRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +82,8 @@ pub struct PreparedCompilation {
     pub document: Option<LayoutDocument>,
     pub validation: crate::ir::ValidationReport,
     pub svg_pages: Vec<String>,
+    pub effective_layout: LayoutOptions,
+    pub visual_repairs: Vec<crate::model::VisualRepairRecord>,
     scene: Option<typst_layout::PagedDocument>,
 }
 
@@ -86,11 +94,55 @@ pub fn prepare(
     style: &StyleSpec,
     options: &CompileOptions,
 ) -> Result<PreparedCompilation> {
-    let validation = validate_ir(ir, &options.validation)?;
+    let mut result = prepare_once(ir, style, options)?;
+    let mut records = Vec::new();
+    if options.auto_repair {
+        for round in options.repair_rounds_used.saturating_add(1)..=3 {
+            if !crate::visual_repair::repairable(&result.validation) {
+                break;
+            }
+            let before = result.effective_layout.clone();
+            let (after, reason) =
+                crate::visual_repair::next_options(&before, round, &result.validation);
+            if before == after {
+                break;
+            }
+            let before_hash = crate::visual_repair::geometry_hash(result.document.as_ref());
+            let mut trial = options.clone();
+            trial.layout = after;
+            trial.auto_repair = false;
+            let next = prepare_once(ir, style, &trial)?;
+            records.push(crate::visual_repair::record(
+                ir,
+                style,
+                round,
+                reason,
+                before,
+                next.effective_layout.clone(),
+                before_hash,
+                crate::visual_repair::geometry_hash(next.document.as_ref()),
+                next.validation.is_passing(),
+            ));
+            result = next;
+        }
+    }
+    result.visual_repairs = records;
+    Ok(result)
+}
+
+fn prepare_once(
+    ir: &KnowledgeIr,
+    style: &StyleSpec,
+    options: &CompileOptions,
+) -> Result<PreparedCompilation> {
+    let mut validation = validate_ir(ir, &options.validation)?;
+    crate::validate::validate_style(style, &mut validation, &options.validation);
     let mut prepared = PreparedCompilation {
         document: None,
         validation,
         svg_pages: Vec::new(),
+        effective_layout: options.layout.clone(),
+        visual_repairs: Vec::new(),
         scene: None,
     };
     if !prepared.validation.is_passing() {
@@ -104,6 +156,7 @@ pub fn prepare(
             .min(style.paper.max_pages),
         ..options.layout.clone()
     };
+    prepared.effective_layout = layout_options.clone();
     let document = match layout(ir, style, &layout_options) {
         Ok(document) => document,
         Err(error) => {
@@ -272,6 +325,8 @@ pub fn compile(
         validation_passed: true,
         validation_report: validation,
         layout_document: document,
+        effective_layout: prepared.effective_layout,
+        visual_repairs: prepared.visual_repairs,
     })
 }
 

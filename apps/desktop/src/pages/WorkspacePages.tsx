@@ -39,10 +39,21 @@ export function TasksPage({ snapshot, client, run, locked }: Props) {
 }
 export function SettingsPage({ snapshot, capabilities, client, run, locked, theme, toggleTheme, refreshCapabilities }: Omit<Props, "snapshot"> & { snapshot: WorkspaceSnapshot | null; capabilities: Capabilities | null; theme: Theme; toggleTheme: () => void; refreshCapabilities: () => void }) {
   const [ocrDraft, setOcrDraft] = useState<string | null>(null);
+  const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
   return <div className="workspace-stack"><section className="panel"><h2>外观与项目</h2><div className="setting-row"><div><strong>界面主题</strong><p>当前为{theme === "dark" ? "深色" : "浅色"}。</p></div><button className="secondary-button" onClick={toggleTheme}>切换主题</button></div><p className="path-text">项目目录：{snapshot?.root ?? "未打开"}</p></section>
   <section className="panel"><h2>本机能力报告</h2><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button>{capabilities ? <><dl className="capability-details"><dt>运行平台</dt><dd>{capabilities.platform} · {capabilities.version}</dd><dt>Tesseract</dt><dd>{capabilities.tesseract_available ? "已检测到" : "未检测到；图片文字保留为待确认"}</dd><dt>已安装 OCR 语言</dt><dd>{capabilities.ocr_languages.join(", ") || "未检测到语言包"}</dd><dt>ChatGPT 自动化</dt><dd>关闭 · {capabilities.bridge_status}</dd></dl><p className="muted">{capabilities.bridge_detail}</p></> : <p className="empty-note">尚未取得本机检测结果。</p>}
   {capabilities?.bridge && <BridgeDiscovery report={capabilities.bridge} />}
   <div className="callout subtle">自动化四项兼容性门槛尚未开放，此版本只能人工复制提示与导入结果。</div></section>
+  <section className="panel"><h2>脱敏诊断</h2><p className="muted">将本机能力与项目统计保存为脱敏诊断 JSON。</p>
+    <button className="secondary-button" disabled={locked} onClick={() => { void run("导出脱敏诊断", async () => {
+      setDiagnosticsPath(null);
+      const savedPath = await client.call("export_diagnostics", undefined);
+      if (!savedPath?.trim()) return;
+      setDiagnosticsPath(savedPath);
+      return null;
+    }); }}>导出脱敏诊断</button>
+    {diagnosticsPath && <p className="path-text" role="status">已保存：{diagnosticsPath}</p>}
+  </section>
   <section className="panel"><h2>OCR 设置</h2><label className="field">OCR 语言<input value={ocrDraft ?? snapshot?.project.settings.ocr_languages ?? ""} placeholder="chi_sim+eng" onChange={e => setOcrDraft(e.target.value)} disabled={locked || !snapshot} /></label><p className="muted">保存后用于后续资料摄取。已有资料请在来源页重新解析原件。</p><button className="primary-button" disabled={locked || !snapshot || !ocrDraft?.trim()} onClick={() => { void run("保存 OCR 设置", () => client.call("save_settings", { ocrLanguages: ocrDraft!.trim() }), () => setOcrDraft(null)); }}>保存 OCR 设置</button></section></div>;
 }
 

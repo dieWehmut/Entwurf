@@ -42,6 +42,7 @@ interface Commands {
   resolve_review: [VersionArgs & { itemId: string; note: string }, WorkspaceSnapshot];
   rollback_version: [TaskArgs & { versionId: string }, WorkspaceSnapshot];
   revert_correction: [VersionArgs & { correctionId: string }, WorkspaceSnapshot];
+  undo_visual_repair: [VersionArgs & { repairId: string }, WorkspaceSnapshot];
   save_style: [{ style: StyleSpec }, WorkspaceSnapshot];
   save_settings: [{ ocrLanguages: string }, WorkspaceSnapshot];
   prepare_handoff: [TaskArgs, WorkspaceSnapshot];
@@ -49,6 +50,7 @@ interface Commands {
   validate_current: [TaskArgs, WorkspaceSnapshot];
   preview_current: [TaskArgs, WorkspaceSnapshot];
   export_current: [TaskArgs & { outputDir?: string }, WorkspaceSnapshot];
+  export_diagnostics: [undefined, string | null];
   choose_directory: [undefined, string | null];
   choose_sources: [undefined, string[]];
   choose_result_file: [undefined, string | null];

@@ -45,10 +45,13 @@ pub fn scene(
         info = Some(base.info().clone());
         let mut rendered = base.pages()[0].clone();
         rendered.number = page.index as u64;
+        let mut heading_style = style.clone();
+        heading_style.typography.title_pt =
+            style.typography.title_pt.min(options.max_heading_font_pt);
         let heading = crate::rendering::heading_frame(
             &ir.title,
             page.width_pt - 2.0 * page.margin_pt,
-            style,
+            &heading_style,
         )?;
         rendered.frame.push_frame(
             Point::new(

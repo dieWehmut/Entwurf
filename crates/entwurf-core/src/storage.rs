@@ -256,6 +256,14 @@ fn persist(connection: &mut Connection, paths: &ProjectPaths, project: &Project)
                         "saved version knowledge is immutable".into(),
                     ));
                 }
+                if let Some(history) = &version.visual_repairs {
+                    let retained = next_version.visual_repairs.as_ref().is_some_and(|next| {
+                        next.len() >= history.len() && &next[..history.len()] == history.as_slice()
+                    });
+                    if !retained {
+                        return Err(EntwurfError::Contract("saved visual repair history is append-only; undo requires a new version".into()));
+                    }
+                }
             }
         }
     }

@@ -11,6 +11,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 type AppState = Mutex<Option<Workspace>>;
+type CapabilityState = Mutex<entwurf_core::diagnostics::DiagnosticCapabilities>;
 async fn state_call(
     app: tauri::AppHandle,
     action: impl FnOnce(&mut Option<Workspace>) -> Result<WorkspaceSnapshot, String> + Send + 'static,
@@ -79,6 +80,26 @@ async fn bootstrap(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     .await;
     value["bridge_status"] = probe.status.into();
     value["bridge_detail"] = probe.detail.into();
+    let capabilities = entwurf_core::diagnostics::DiagnosticCapabilities {
+        pdfium_available: app
+            .path()
+            .resource_dir()
+            .map_err(|e| e.to_string())?
+            .join("resources/pdfium/pdfium.dll")
+            .is_file(),
+        tesseract_available: value["tesseract_available"].as_bool().unwrap_or(false),
+        bridge_available: probe.status == "ready_manual",
+        chatgpt_detected: probe
+            .capabilities
+            .as_ref()
+            .and_then(|c| c.get("app_found"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        automation_enabled: false,
+    };
+    *app.state::<CapabilityState>()
+        .lock()
+        .map_err(|e| e.to_string())? = capabilities;
     value["bridge"] = serde_json::to_value(probe).map_err(|e| e.to_string())?;
     Ok(value)
 }
@@ -330,6 +351,56 @@ async fn import_result(
     workspace_call(app, move |ws| ws.import_result(&task_id, &json)).await
 }
 #[tauri::command]
+async fn undo_visual_repair(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    repair_id: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.undo_visual_repair(&task_id, &base_version_id, &repair_id)
+    })
+    .await
+}
+#[tauri::command]
+async fn export_diagnostics(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let picker = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        picker
+            .dialog()
+            .file()
+            .add_filter("Diagnostics JSON", &["json"])
+            .set_file_name("entwurf-diagnostics.json")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let path = chosen.into_path().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let capabilities = *app
+            .state::<CapabilityState>()
+            .lock()
+            .map_err(|e| e.to_string())?;
+        let state = app.state::<AppState>();
+        let state = state.lock().map_err(|e| e.to_string())?;
+        let snapshot = state
+            .as_ref()
+            .map(|ws| ws.snapshot(None))
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let report =
+            entwurf_core::diagnostics::build_redacted_diagnostics(snapshot.as_ref(), capabilities);
+        let bytes = serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?;
+        entwurf_core::storage::write_atomic(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(Some(path.display().to_string()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 async fn validate_current(
     app: tauri::AppHandle,
     task_id: String,
@@ -473,6 +544,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::new(None))
+        .manage(CapabilityState::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             open_workspace,
@@ -492,6 +564,8 @@ pub fn run() {
             prepare_handoff,
             import_result,
             validate_current,
+            undo_visual_repair,
+            export_diagnostics,
             preview_current,
             export_current,
             choose_directory,

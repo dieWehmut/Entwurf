@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && node ../../scripts/release/generate-notices.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -41,7 +41,8 @@
       "resources/pdfium/**/*",
       "../../../assets/fonts/OFL.txt",
       "../../../assets/fonts/Typst-NOTICE.txt",
-      "resources/gpt-bridge/**/*"
+      "resources/gpt-bridge/**/*",
+      "resources/licenses/**/*"
     ],
     "icon": [
       "icons/icon.png",

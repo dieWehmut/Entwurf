@@ -1,16 +1,28 @@
 import { expect, test, type Page } from '@playwright/test';
-import { fixture, capabilities } from '../tests/protocol-fixture';
-async function nativeFixture(page: Page, exportFailure = false, delayedStyle = false) {
+import { fixture, capabilities, repairFixture } from '../tests/protocol-fixture';
+async function nativeFixture(page: Page, exportFailure = false, delayedStyle = false, withRepair = false) {
   // Explicit browser-only Tauri IPC mock, never shipped in the application.
+  const snapshot = fixture();
+  if (withRepair) snapshot.current_version!.visual_repairs = [repairFixture()];
   await page.addInitScript(({ snapshot, capabilities, exportFailure, delayedStyle }) => {
     Object.assign(window, { isTauri: true });
     let current = snapshot;
+    let diagnosticsExports = 0;
     Object.assign(window, { __TAURI_INTERNALS__: { invoke: async (command: string, args: any) => {
       if (command === 'bootstrap') return capabilities;
+      if (command === 'export_diagnostics') return diagnosticsExports++ === 0 ? 'fixture/diagnostics.json' : null;
       if (command === 'workspace_snapshot') return structuredClone(current);
       const version = current.current_version!;
       if (command === 'save_style' && delayedStyle) return new Promise(resolve => { Object.assign(window, { finishStyleSave: () => { current.project.style = args.style; resolve(structuredClone(current)); } }); });
-      if (command === 'update_nodes' || command === 'rollback_version') {
+      if (command === 'undo_visual_repair') {
+        if (args.baseVersionId !== version.id || args.repairId !== version.visual_repairs?.[0].id) throw 'stale or unknown repair';
+        const next = structuredClone(version); next.id = 'version-undo'; next.revision += 1;
+        next.visual_repairs![0].reverted = true; next.visual_repair_enabled = false;
+        next.layout_options = next.visual_repairs![0].before; next.artifacts = null;
+        next.validation = { schema_version: 1, checked_at: '2026-01-02T00:00:00Z', metrics: {}, findings: [{ id: 'undo-finding', code: 'node_overlap', severity: 'blocking', message: '撤销后需要重新修复版式', node_id: null, evidence: null }] };
+        current = { ...current, current_version: next, preview_pages: [] };
+        current.project.tasks[0].versions.push(next); current.project.tasks[0].current_version = next.id; current.project.tasks[0].state = 'NEEDS_REVIEW';
+      } else if (command === 'update_nodes' || command === 'rollback_version') {
         const old = structuredClone(version);
         const next = command === 'rollback_version' ? structuredClone(current.project.tasks[0].versions.find(v => v.id === args.versionId)!) : structuredClone(version);
         next.id = `version-${old.revision + 1}`; next.revision = old.revision + 1;
@@ -36,7 +48,7 @@ async function nativeFixture(page: Page, exportFailure = false, delayedStyle = f
       else throw `Unmocked IPC command: ${command}`;
       return structuredClone(current);
     } } });
-  }, { snapshot: fixture(), capabilities, exportFailure, delayedStyle });
+  }, { snapshot, capabilities, exportFailure, delayedStyle });
 }
 const nav = (page: Page, label: string) => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${label}`) }).click();
 test('browser without IPC explicitly disables native workspace', async ({ page }) => {
@@ -119,4 +131,34 @@ test('settings renders native discovery evidence and four unverified gates', asy
   await expect(gates.getByText('未验证', { exact: true })).toHaveCount(4);
   await expect(page.getByRole('switch')).toHaveCount(0);
   await page.screenshot({ path: '/tmp/entwurf-frontend-bridge-report.png', fullPage: true });
+});
+
+test('visual repair undo replaces outputs and renders the newly checked version', async ({ page }) => {
+  await nativeFixture(page, false, false, true); await page.goto('/'); await nav(page, '结果');
+  await expect(page.getByText('公开测试：缩小卡片间距')).toBeVisible();
+  await page.getByRole('button', { name: /导出 SVG/ }).click();
+  await expect(page.getByRole('button', { name: '打开 PDF', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '编译页面', exact: true }).click();
+  await expect(page.getByRole('img', { name: '本地编译第 1 页' })).toBeVisible();
+  await page.getByRole('button', { name: '撤销第 1 轮版式修复' }).click();
+  await expect(page.getByText('已撤销', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '撤销第 1 轮版式修复' })).toBeDisabled();
+  await expect(page.getByText('撤销后需要重新修复版式')).toBeVisible();
+  await expect(page.getByRole('img', { name: '本地编译第 1 页' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '打开 PDF', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '节点编辑', exact: true }).click();
+  await expect(page.getByLabel('节点标题')).toHaveValue('公开测试定义');
+  await expect(page.getByLabel('公式 LaTeX')).toHaveValue('P(A)=1');
+  await page.screenshot({ path: '/tmp/entwurf-frontend-visual-repair-undone.png', fullPage: true });
+});
+test('diagnostics export shows only a returned saved path and no completion on cancellation', async ({ page }) => {
+  await nativeFixture(page); await page.goto('/'); await expect(page.getByLabel('当前任务')).toHaveValue('task-1');
+  await page.getByRole('button', { name: '打开设置', exact: true }).click();
+  await page.getByRole('button', { name: '导出脱敏诊断', exact: true }).click();
+  await expect(page.getByText('已保存：fixture/diagnostics.json', { exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/entwurf-frontend-diagnostics-saved.png', fullPage: true });
+  await page.getByRole('button', { name: '导出脱敏诊断', exact: true }).click();
+  await expect(page.getByRole('main')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByText('已保存：fixture/diagnostics.json', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('导出脱敏诊断完成', { exact: true })).toHaveCount(0);
 });

@@ -316,6 +316,131 @@ pub fn validate_layout(
             }
             placed_rects.insert(node.node_id.as_str(), (page.index, rect));
         }
+        let mut routed = std::collections::BTreeSet::new();
+        for edge in &page.edges {
+            if !routed.insert(edge.edge_id.as_str()) {
+                ir_report.push(
+                    "duplicate_route",
+                    Severity::Blocking,
+                    format!("edge {} is routed twice", edge.edge_id),
+                );
+            }
+            let original = ir.edges.iter().find(|e| e.id == edge.edge_id);
+            let from = page.nodes.iter().find(|n| n.node_id == edge.from_node);
+            let to = page.nodes.iter().find(|n| n.node_id == edge.to_node);
+            if !original.is_some_and(|e| e.from == edge.from_node && e.to == edge.to_node)
+                || from.is_none()
+                || to.is_none()
+                || edge.page != page.index
+                || edge.points.len() < 2
+            {
+                ir_report.push(
+                    "invalid_route",
+                    Severity::Blocking,
+                    format!("invalid edge route {}", edge.edge_id),
+                );
+                continue;
+            }
+            let degenerate = edge
+                .points
+                .windows(2)
+                .all(|p| (p[0].x - p[1].x).abs() + (p[0].y - p[1].y).abs() < 0.01)
+                || edge.from_node == edge.to_node
+                    && (edge
+                        .points
+                        .iter()
+                        .all(|p| (p.x - edge.points[0].x).abs() < 0.01)
+                        || edge
+                            .points
+                            .iter()
+                            .all(|p| (p.y - edge.points[0].y).abs() < 0.01));
+            if degenerate {
+                ir_report.push(
+                    "edge_endpoint",
+                    Severity::Blocking,
+                    format!("edge {} has no visible route", edge.edge_id),
+                );
+            }
+            let on_boundary = |p: crate::model::Point, r: crate::model::Rect| {
+                r.contains(p)
+                    && [
+                        (p.x - r.x).abs(),
+                        (p.x - r.right()).abs(),
+                        (p.y - r.y).abs(),
+                        (p.y - r.bottom()).abs(),
+                    ]
+                    .into_iter()
+                    .any(|d| d < 0.1)
+            };
+            if !on_boundary(edge.points[0], from.unwrap().rect)
+                || !on_boundary(*edge.points.last().unwrap(), to.unwrap().rect)
+            {
+                ir_report.push(
+                    "edge_endpoint",
+                    Severity::Blocking,
+                    format!("edge {} must terminate at card boundaries", edge.edge_id),
+                );
+            }
+            if edge.points.iter().any(|p| {
+                !p.x.is_finite()
+                    || !p.y.is_finite()
+                    || p.x < 0.0
+                    || p.y < 0.0
+                    || p.x > page.width_pt
+                    || p.y > page.height_pt
+            }) {
+                ir_report.push(
+                    "edge_out_of_bounds",
+                    Severity::Blocking,
+                    format!("edge {} leaves its page", edge.edge_id),
+                );
+            }
+            for (segment_index, pair) in edge.points.windows(2).enumerate() {
+                if (pair[0].x - pair[1].x).abs() > 0.01 && (pair[0].y - pair[1].y).abs() > 0.01 {
+                    ir_report.push(
+                        "edge_nonorthogonal",
+                        Severity::Blocking,
+                        format!("edge {} contains a diagonal segment", edge.edge_id),
+                    );
+                    continue;
+                }
+                for node in &page.nodes {
+                    // A 0.6pt connector may meet its endpoint border, but its
+                    // stroke must clear every other card, not just its centreline.
+                    let terminal = (segment_index == 0 && node.node_id == edge.from_node)
+                        || (segment_index + 2 == edge.points.len() && node.node_id == edge.to_node);
+                    let obstacle = if terminal {
+                        node.rect
+                    } else {
+                        crate::model::Rect::new(
+                            node.rect.x - 0.3,
+                            node.rect.y - 0.3,
+                            node.rect.width + 0.6,
+                            node.rect.height + 0.6,
+                        )
+                    };
+                    if crate::obstacle_routes::segment_hits(pair[0], pair[1], obstacle) {
+                        ir_report.push(
+                            "edge_crosses_node",
+                            Severity::Blocking,
+                            format!("edge {} crosses card {}", edge.edge_id, node.node_id),
+                        );
+                    }
+                }
+            }
+        }
+        for edge in &ir.edges {
+            if page.nodes.iter().any(|n| n.node_id == edge.from)
+                && page.nodes.iter().any(|n| n.node_id == edge.to)
+                && !routed.contains(edge.id.as_str())
+            {
+                ir_report.push(
+                    "missing_route",
+                    Severity::Blocking,
+                    format!("missing route for edge {}", edge.id),
+                );
+            }
+        }
         for (index, node) in page.nodes.iter().enumerate() {
             for other in page.nodes.iter().skip(index + 1) {
                 if node.rect.intersects(&other.rect) {
@@ -337,21 +462,6 @@ pub fn validate_layout(
             );
         }
     }
-    for edge in ir.edges.iter() {
-        let (Some((from_page, from)), Some((to_page, to))) = (
-            placed_rects.get(edge.from.as_str()),
-            placed_rects.get(edge.to.as_str()),
-        ) else {
-            continue;
-        };
-        if from_page == to_page && from.intersects(to) {
-            ir_report.push(
-                "edge_crosses_node",
-                Severity::Warning,
-                format!("edge {} runs through a node card", edge.id),
-            );
-        }
-    }
     ir_report
         .metrics
         .insert("pages".into(), layout.pages.len() as f64);
@@ -359,6 +469,45 @@ pub fn validate_layout(
         .metrics
         .insert("placed_nodes".into(), placed_ids.len() as f64);
     Ok(ir_report.clone())
+}
+
+/// Validate exactly the painted text/background pairs: cards use surface;
+/// document heading/footer use background. Colors are never repaired implicitly.
+pub fn validate_style(
+    style: &crate::ir::StyleSpec,
+    report: &mut ValidationReport,
+    options: &ValidationOptions,
+) {
+    for color in [
+        &style.colors.accent,
+        &style.colors.border,
+        &style.colors.muted,
+    ] {
+        if let Err(error) = parse_hex_color(color) {
+            report.push("invalid_color", Severity::Blocking, error.to_string());
+        }
+    }
+    for (name, background) in [
+        ("cards", &style.colors.surface),
+        ("heading/footer", &style.colors.background),
+    ] {
+        match contrast_ratio(&style.colors.text, background) {
+            Ok(ratio) if ratio >= options.minimum_contrast => {
+                report
+                    .metrics
+                    .insert(format!("text_contrast_{name}"), ratio as f64);
+            }
+            Ok(ratio) => report.push(
+                "text_contrast",
+                Severity::Blocking,
+                format!(
+                    "{name} text contrast {ratio:.2} is below {:.2}",
+                    options.minimum_contrast
+                ),
+            ),
+            Err(error) => report.push("invalid_color", Severity::Blocking, error.to_string()),
+        }
+    }
 }
 
 pub fn contrast_ratio(foreground: &str, background: &str) -> Result<f32> {
@@ -376,7 +525,7 @@ pub fn contrast_ratio(foreground: &str, background: &str) -> Result<f32> {
 
 fn parse_hex_color(value: &str) -> Result<(f32, f32, f32)> {
     let value = value.trim().trim_start_matches('#');
-    if value.len() != 6 {
+    if value.len() != 6 || !value.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(EntwurfError::InvalidInput(format!(
             "expected #RRGGBB color, got {value}"
         )));

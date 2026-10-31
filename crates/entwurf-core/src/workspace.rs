@@ -528,23 +528,47 @@ impl Workspace {
         task_id: &str,
         version_id: &str,
     ) -> Result<WorkspaceSnapshot> {
-        let task = self
+        let source = self
             .project
             .task(task_id)
-            .ok_or_else(|| invalid("unknown task"))?;
-        let ir = task
+            .ok_or_else(|| invalid("unknown task"))?
             .versions
             .iter()
             .find(|v| v.id == version_id)
-            .ok_or_else(|| invalid("unknown version"))?
-            .ir
-            .clone();
-        self.save_ir(
-            task_id,
-            ir,
-            VersionReason::ManualSnapshot,
-            &format!("rollback from version {version_id}"),
-        )
+            .cloned()
+            .ok_or_else(|| invalid("unknown version"))?;
+        let current_style = crate::visual_repair::style_hash(&self.project.style);
+        let incompatible = source
+            .visual_repairs
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .any(|r| r.style_hash != current_style);
+        let mut p = self.project.clone();
+        let id = p.save_version(task_id, source.ir, VersionReason::ManualSnapshot)?;
+        let version = p
+            .task_mut(task_id)
+            .unwrap()
+            .versions
+            .iter_mut()
+            .find(|v| v.id == id)
+            .unwrap();
+        version.source_prompt_hash = source.source_prompt_hash;
+        if !incompatible {
+            version.layout_options = source.layout_options;
+            version.visual_repairs = source.visual_repairs;
+            version.visual_repair_enabled = source.visual_repair_enabled;
+        }
+        Self::state(&mut p, task_id, TaskState::IrReady)?;
+        p.audit(
+            AuditKind::VersionCreated,
+            Some(task_id.into()),
+            format!("rollback from version {version_id}; knowledge unchanged"),
+        );
+        if incompatible {
+            p.audit(AuditKind::StateChanged,Some(task_id.into()),"selected version's visual repair proof uses a different style; current style retained and visual options/history reset for fresh validation");
+        }
+        self.commit(p, Some(task_id))
     }
     pub fn revert_correction(
         &mut self,
@@ -616,8 +640,80 @@ impl Workspace {
                 .join(version),
         );
         options.layout = crate::layout::LayoutOptions::from_style(&self.project.style);
+        if let Some(saved) = self
+            .project
+            .task(task_id)
+            .and_then(|task| task.versions.iter().find(|v| v.id == version))
+        {
+            if let Some(layout) = &saved.layout_options {
+                options.layout = layout.clone();
+            }
+            options.auto_repair = saved.visual_repair_enabled.unwrap_or(true);
+            options.repair_rounds_used = saved
+                .visual_repairs
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|r| !r.reverted)
+                .count()
+                .min(3) as u16;
+        }
         options.validation.max_pages = self.project.style.paper.max_pages;
         options
+    }
+    fn attach_repairs(
+        version: &mut TaskVersion,
+        layout: crate::layout::LayoutOptions,
+        records: Vec<crate::model::VisualRepairRecord>,
+    ) -> Result<()> {
+        let history = version.visual_repairs.get_or_insert_with(Vec::new);
+        for record in records {
+            if let Some(existing) = history.iter().find(|r| r.id == record.id) {
+                if existing != &record {
+                    return Err(invalid("visual repair history cannot be rewritten"));
+                }
+            } else {
+                history.push(record);
+            }
+        }
+        if history.iter().filter(|r| !r.reverted).count() > 3 {
+            return Err(invalid("visual repair budget exceeded"));
+        }
+        version.layout_options = Some(layout);
+        Ok(())
+    }
+    /// Undo visual options in a fresh version, keeping the exact knowledge bytes.
+    pub fn undo_visual_repair(
+        &mut self,
+        task_id: &str,
+        base: &str,
+        repair_id: &str,
+    ) -> Result<WorkspaceSnapshot> {
+        self.baseline(task_id, base)?;
+        let previous = self.current(task_id)?.clone();
+        let records = previous
+            .visual_repairs
+            .as_deref()
+            .ok_or_else(|| invalid("current version has no visual repairs"))?;
+        let (options, history) =
+            crate::visual_repair::rollback(&previous.ir, &self.project.style, records, repair_id)?;
+        let mut p = self.project.clone();
+        let id = p.save_version(task_id, previous.ir.clone(), VersionReason::ManualSnapshot)?;
+        let version = p
+            .task_mut(task_id)
+            .unwrap()
+            .versions
+            .iter_mut()
+            .find(|v| v.id == id)
+            .unwrap();
+        version.layout_options = Some(options);
+        version.visual_repairs = Some(history);
+        version.visual_repair_enabled = Some(false);
+        version.source_prompt_hash = previous.source_prompt_hash;
+        Self::state(&mut p, task_id, TaskState::IrReady)?;
+        p.audit(AuditKind::VersionCreated,Some(task_id.into()),format!("undid visual repair {repair_id} from version {base}; knowledge unchanged; automatic repair disabled"));
+        self.commit(p, Some(task_id))?;
+        self.preview_current(task_id)
     }
     pub fn preview_current(&mut self, task_id: &str) -> Result<WorkspaceSnapshot> {
         let v = self.current(task_id)?.clone();
@@ -628,11 +724,13 @@ impl Workspace {
             report.push("unresolved_review", Severity::Blocking, item.reason.clone());
         }
         let (mut document, mut pages) = (None, vec![]);
+        let mut repairs = None;
         if report.is_passing() {
             match crate::compiler::prepare(&v.ir, &self.project.style, &options) {
                 Ok(prepared) => {
                     report = prepared.validation;
                     document = prepared.document;
+                    repairs = Some((prepared.effective_layout, prepared.visual_repairs));
                     pages = prepared
                         .svg_pages
                         .into_iter()
@@ -654,6 +752,9 @@ impl Workspace {
             .unwrap();
         current.validation = Some(report);
         current.layout = document;
+        if let Some((layout, records)) = repairs {
+            Self::attach_repairs(current, layout, records)?;
+        }
         if !passing {
             current.artifacts = None;
         }
@@ -715,6 +816,18 @@ impl Workspace {
                     artifacts.layout_document,
                     artifacts.validation_report,
                     paths,
+                )?;
+                let current = p
+                    .task_mut(task_id)
+                    .unwrap()
+                    .versions
+                    .iter_mut()
+                    .find(|version| version.id == v.id)
+                    .unwrap();
+                Self::attach_repairs(
+                    current,
+                    artifacts.effective_layout,
+                    artifacts.visual_repairs,
                 )?;
                 Self::state(&mut p, task_id, TaskState::Exported)?;
                 p.audit(

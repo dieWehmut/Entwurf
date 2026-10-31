@@ -22,6 +22,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 mod rendering;
 mod scene;
 
+pub mod diagnostics;
 pub mod math_text;
 pub mod provenance;
 pub mod workspace;
+
+mod obstacle_routes;
+pub mod visual_repair;

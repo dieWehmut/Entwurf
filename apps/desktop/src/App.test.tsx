@@ -1,7 +1,7 @@
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { fixture, capabilities } from '../tests/protocol-fixture';
+import { fixture, capabilities, repairFixture } from '../tests/protocol-fixture';
 import { versionDiff, type WorkspaceClient, type WorkspaceSnapshot } from './lib/workspace';
 function setup(handler?: (command: string, args: any, state: WorkspaceSnapshot) => unknown) {
   let state = fixture();
@@ -258,4 +258,84 @@ it.each([false, true])('renders native ChatGPT discovery and four gates (window 
   if (found) expect(within(gates).getByText('通过')).toBeVisible();
   expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /开启自动/ })).not.toBeInTheDocument();
+});
+
+
+describe('visual repair and diagnostics release flows', () => {
+  it('undoes a repair against its base version and replaces old artifacts, report and preview', async () => {
+    const { user, call, state } = setup((command, _args, state) => {
+      if (command === 'undo_visual_repair') {
+        const next = structuredClone(state);
+        next.current_version!.id = 'version-undo'; next.current_version!.revision = 2;
+        next.project.tasks[0].current_version = 'version-undo'; next.project.tasks[0].state = 'NEEDS_REVIEW';
+        next.current_version!.visual_repairs![0].reverted = true;
+        next.current_version!.visual_repair_enabled = false;
+        next.current_version!.layout_options = next.current_version!.visual_repairs![0].before;
+        next.current_version!.artifacts = null; next.preview_pages = [];
+        next.current_version!.validation = { schema_version: 1, checked_at: '2026-01-02T00:00:00Z', metrics: {}, findings: [{ id: 'undo-blocked', code: 'node_overlap', severity: 'blocking', message: '撤销后的版式仍需修复', node_id: null, evidence: null }] };
+        return next;
+      }
+    });
+    state.current_version!.visual_repairs = [repairFixture()]; state.current_version!.visual_repair_enabled = true;
+    state.current_version!.artifacts = { svg: ['old.svg'], png: ['old.png'], pdf: 'old.pdf', manifest: 'old-manifest.json', ir: 'old-ir.json' };
+    state.preview_pages = [{ page: 1, svg: '<svg xmlns="http://www.w3.org/2000/svg" />' }];
+    await navigate(user, '结果'); await user.click(screen.getByRole('button', { name: '刷新工作区' }));
+    await user.click(screen.getByRole('button', { name: '编译页面' }));
+    expect(screen.getByRole('img', { name: '本地编译第 1 页' })).toBeVisible();
+    expect(screen.getByText('old.pdf')).toBeVisible();
+    expect(screen.getByText('公开测试：缩小卡片间距')).toBeVisible();
+    expect(screen.getByText('当轮校验通过')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '撤销第 1 轮版式修复' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('undo_visual_repair', { taskId: 'task-1', baseVersionId: 'version-1', repairId: 'repair-1' }));
+    expect(await screen.findByText('撤销后的版式仍需修复')).toBeVisible();
+    expect(screen.getByRole('button', { name: '撤销第 1 轮版式修复' })).toBeDisabled();
+    expect(screen.getByText('已撤销')).toBeVisible();
+    expect(screen.queryByRole('img', { name: '本地编译第 1 页' })).not.toBeInTheDocument();
+    expect(screen.queryByText('old.pdf')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开 PDF' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '节点编辑' }));
+    expect(screen.getByLabelText('节点正文')).toHaveValue(state.current_version!.ir.nodes[0].body);
+    expect(screen.getByLabelText('公式 LaTeX')).toHaveValue(state.current_version!.ir.nodes[0].latex);
+  });
+  it('disables repair undo for unsaved node changes and keeps a rejected repair intact', async () => {
+    const { user, call, state } = setup(command => { if (command === 'undo_visual_repair') throw new Error('stale base version'); });
+    state.current_version!.visual_repairs = [repairFixture()];
+    await navigate(user, '结果'); await user.click(screen.getByRole('button', { name: '刷新工作区' }));
+    await user.type(screen.getByLabelText('节点正文'), ' local draft');
+    expect(screen.getByRole('button', { name: '撤销第 1 轮版式修复' })).toBeDisabled();
+    expect(call.mock.calls.some(([command]) => command === 'undo_visual_repair')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '放弃草稿' }));
+    await user.click(screen.getByRole('button', { name: '撤销第 1 轮版式修复' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('stale base version');
+    expect(screen.getByText('未撤销')).toBeVisible();
+    expect(screen.queryByText('撤销版式修复完成')).not.toBeInTheDocument();
+  });
+  it('exports diagnostics without a project and clears success when the next dialog is cancelled', async () => {
+    const call = vi.fn(async (command: string): Promise<unknown> => {
+      if (command === 'bootstrap') return capabilities;
+      if (command === 'workspace_snapshot') throw new Error('no project is open');
+      if (command === 'export_diagnostics') return 'C:\\公开诊断\\report.json';
+      throw new Error(`unexpected ${command}`);
+    });
+    render(<App client={{ available: true, call } as WorkspaceClient} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '打开设置' })).toBeEnabled());
+    await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    const button = screen.getByRole('button', { name: '导出脱敏诊断' });
+    expect(button).toBeEnabled(); await userEvent.click(button);
+    expect(await screen.findByText('已保存：C:\\公开诊断\\report.json')).toBeVisible();
+    expect(call).toHaveBeenCalledWith('export_diagnostics', undefined);
+    call.mockResolvedValueOnce(null);
+    await userEvent.click(button);
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('导出脱敏诊断完成')).not.toBeInTheDocument();
+  });
+  it('does not report a diagnostics file when native writing fails', async () => {
+    const { user } = setup(command => { if (command === 'export_diagnostics') throw new Error('diagnostics write failed'); });
+    await screen.findByLabelText('当前任务'); await user.click(screen.getByRole('button', { name: '打开设置' }));
+    await user.click(screen.getByRole('button', { name: '导出脱敏诊断' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('diagnostics write failed');
+    expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('导出脱敏诊断完成')).not.toBeInTheDocument();
+  });
 });
