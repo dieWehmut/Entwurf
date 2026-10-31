@@ -250,7 +250,7 @@ it.each([false, true])('renders native ChatGPT discovery and four gates (window 
   render(<App client={{ available: true, call } as WorkspaceClient} />);
   await screen.findByLabelText('当前任务'); await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
   expect(screen.getByText(found ? '检测到 ChatGPT 窗口' : '未检测到 ChatGPT 窗口')).toBeVisible();
-  const gates = screen.getByRole('list', { name: 'ChatGPT 自动化兼容性门槛' });
+  const gates = screen.getByRole('list', { name: '结构化规划接口兼容性门槛' });
   expect(within(gates).getAllByRole('listitem')).toHaveLength(4);
   expect(within(gates).getAllByText('未验证')).toHaveLength(found ? 3 : 4);
   expect(within(gates).getByText('可靠完成判定')).toBeVisible();

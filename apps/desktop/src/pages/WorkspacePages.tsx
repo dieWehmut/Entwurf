@@ -56,9 +56,9 @@ export function SettingsPage({ snapshot, capabilities, client, run, locked, them
   const [ocrDraft, setOcrDraft] = useState<string | null>(null);
   const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
   return <div className="workspace-stack"><section className="panel"><h2>外观与项目</h2><div className="setting-row"><div><strong>界面主题</strong><p>当前为{theme === "dark" ? "深色" : "浅色"}。</p></div><button className="secondary-button" onClick={toggleTheme}>切换主题</button></div><p className="path-text">项目目录：{snapshot?.root ?? "未打开"}</p></section>
-  <section className="panel"><h2>本机能力报告</h2><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button>{capabilities ? <><dl className="capability-details"><dt>运行平台</dt><dd>{capabilities.platform} · {capabilities.version}</dd>{capabilities.storage && <><dt>项目存储</dt><dd>{capabilities.storage === "indexeddb" ? "此浏览器数据库" : capabilities.storage === "sqlite" ? "本机 SQLite 数据库" : capabilities.storage}</dd></>}<dt>Tesseract</dt><dd>{capabilities.tesseract_available ? "已检测到" : "未检测到；图片文字保留为待确认"}</dd><dt>已安装 OCR 语言</dt><dd>{capabilities.ocr_languages.join(", ") || "未检测到语言包"}</dd><dt>ChatGPT 自动化</dt><dd>{capabilities.runtime === "browser" ? "连接与运行状态见任务页" : `${capabilities.automation_enabled ? "可用" : "关闭"} · ${capabilities.bridge_status}`}</dd></dl><p className="muted">{capabilities.bridge_detail}</p></> : <p className="empty-note">尚未取得本机检测结果。</p>}
+  <section className="panel"><h2>本机能力报告</h2><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button>{capabilities ? <><dl className="capability-details"><dt>运行平台</dt><dd>{capabilities.platform} · {capabilities.version}</dd>{capabilities.storage && <><dt>项目存储</dt><dd>{capabilities.storage === "indexeddb" ? "此浏览器数据库" : capabilities.storage === "sqlite" ? "本机 SQLite 数据库" : capabilities.storage}</dd></>}<dt>Tesseract</dt><dd>{capabilities.tesseract_available ? "已检测到" : "未检测到；图片文字保留为待确认"}</dd><dt>已安装 OCR 语言</dt><dd>{capabilities.ocr_languages.join(", ") || "未检测到语言包"}</dd><dt>ChatGPT 图片生成</dt><dd>连接与运行状态见任务页</dd></dl><p className="muted">{capabilities.bridge ? "结构化规划接口：" : ""}{capabilities.bridge_detail}</p></> : <p className="empty-note">尚未取得本机检测结果。</p>}
   {capabilities?.bridge && <BridgeDiscovery report={capabilities.bridge} />}
-  {!capabilities?.automation_enabled && capabilities?.runtime !== "browser" && <div className="callout subtle">自动化尚未连接。可先复制提示与导入结果。</div>}</section>
+  </section>
   <section className="panel"><h2>脱敏诊断</h2><p className="muted">将本机能力与项目统计保存为脱敏诊断 JSON。</p>
     <button className="secondary-button" disabled={locked} onClick={() => { void run("导出脱敏诊断", async () => {
       setDiagnosticsPath(null);
@@ -81,11 +81,11 @@ const bridgeGateLabels: { id: BridgeGate; label: string }[] = [
 ];
 function BridgeDiscovery({ report }: { report: BridgeReport }) {
   const detected = report.capabilities;
-  return <div className="bridge-discovery"><h3>ChatGPT 本机检测</h3><p className="muted">{report.detail}</p>
+  return <div className="bridge-discovery"><h3>结构化规划接口检测</h3><p className="muted">{report.detail}</p>
     {detected ? <><p>{detected.app_found ? "检测到 ChatGPT 窗口" : "未检测到 ChatGPT 窗口"}</p>
       <dl className="capability-details"><dt>应用版本</dt><dd>{detected.app_version ?? "未确认"}</dd><dt>窗口 / 可访问控件</dt><dd>{detected.window_count} / {detected.accessible_controls}</dd><dt>WebView 可访问性</dt><dd>{detected.web_view_accessibility ? "已检测到" : "未检测到"}</dd><dt>前台窗口</dt><dd>{detected.foreground ? "是" : "否"}</dd></dl>
       {detected.detail && <p className="muted">{detected.detail}</p>}
-      <ul className="bridge-gates" aria-label="ChatGPT 自动化兼容性门槛">{bridgeGateLabels.map(({ id, label }) => {
+      <ul className="bridge-gates" aria-label="结构化规划接口兼容性门槛">{bridgeGateLabels.map(({ id, label }) => {
         const gate = detected.gates[id];
         return <li className="source-record" key={id}><div className="result-head"><strong>{label}</strong><span className={`status-pill ${gate?.passed ? "tone-ok" : "tone-muted"}`}>{gate?.passed ? "通过" : "未验证"}</span></div><p className="muted">{gate?.evidence ?? "本次检测没有提供此项证据。"}</p></li>;
       })}</ul></> : <p className="empty-note">未取得 ChatGPT 窗口检测结果。</p>}
