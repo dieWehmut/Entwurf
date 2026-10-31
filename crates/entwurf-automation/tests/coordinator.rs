@@ -646,3 +646,136 @@ async fn missing_origin_only_derives_the_verified_local_host_capability() {
         assert_eq!(response.status(), want);
     }
 }
+
+#[tokio::test]
+async fn cancellation_while_disconnected_reconciles_without_replaying_start() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    socket.close(None).await.unwrap();
+    f.phase("paused").await;
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs/run-1/cancel",
+            &f.token,
+            json!({})
+        )
+        .await
+        .1["phase"],
+        "cancelled"
+    );
+    let mut reconnected = f.authenticated().await;
+    // The real extension restores its unfinished local record on authentication.
+    generating(&mut reconnected).await;
+    assert_eq!(
+        read(&mut reconnected).await,
+        json!({"type":"cancel","run_id":"run-1"})
+    );
+    reconnected
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"cancelled"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), reconnected.next())
+            .await
+            .is_err(),
+        "terminal confirmation must not loop cancel messages"
+    );
+    reconnected.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn durable_completion_reconciles_lost_ack_without_affecting_next_run() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    let (_, sha, artifact) = image();
+    socket
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    socket.close(None).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs/run-1/ack",
+            &f.token,
+            json!({"sha256":sha,"image_id":"image-1"})
+        )
+        .await
+        .1["phase"],
+        "completed"
+    );
+    let mut reconnected = f.authenticated().await;
+    let pending = json!({"type":"status","run_id":"run-1","phase":"awaiting_import"});
+    reconnected
+        .send(Message::Text(pending.to_string().into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&mut reconnected).await,
+        json!({"type":"artifact_accepted","run_id":"run-1"})
+    );
+    reconnected
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"completed"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), reconnected.next())
+            .await
+            .is_err(),
+        "ACK confirmation must not loop"
+    );
+    reconnected
+        .send(Message::Text(
+            json!({"type":"probe","available":true,"reason":"composer_detected"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let mut next = start_request();
+    next["run_id"] = json!("run-2");
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, next)
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut reconnected).await["run"]["run_id"], "run-2");
+    reconnected
+        .send(Message::Text(pending.to_string().into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&mut reconnected).await,
+        json!({"type":"artifact_accepted","run_id":"run-1"})
+    );
+    assert_eq!(
+        f.http("GET", "/api/automation/runs/run-2", &f.token, json!(null))
+            .await
+            .1["phase"],
+        "queued"
+    );
+    reconnected.close(None).await.unwrap();
+}

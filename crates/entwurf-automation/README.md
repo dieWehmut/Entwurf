@@ -52,7 +52,11 @@ before starting another.
 A new run is atomically persisted before one in-memory `start` message is queued.
 Prompts are never written to disk or logs. Duplicate HTTP requests return existing
 state; reconnects send `status` only, and restarted unfinished runs become paused.
-There is no automatic start retry. Staged artifacts remain available across
+When the companion reports a locally unfinished run after reconnecting, durable
+server cancellation/failure is reconciled with `cancel`, and durable completion
+with `artifact_accepted`. Terminal confirmations do not echo additional commands;
+reconciliation does not affect a newer run. There is no automatic start retry.
+Staged artifacts remain available across
 restart and frontend refresh.
 
 Authenticated artifact messages must match the run, task, base version, MIME
