@@ -14,6 +14,9 @@ $EvidenceRoot = [IO.Path]::GetFullPath($EvidenceRoot).TrimEnd('\')
 # Keep installed application files separate from user projects and build/OCR tools.
 $installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\Entwurf'
 $executable = Join-Path $installDirectory 'entwurf-desktop.exe'
+$bridgeExecutable = Join-Path $installDirectory 'resources\gpt-bridge\Entwurf.Bridge.exe'
+# Hash only Entwurf's local workspace, never the surrounding WebView profiles.
+$localWebDirectory = Join-Path $env:APPDATA 'io.github.diewehmut.entwurf\local-web'
 $projectFolder = ConvertFrom-Json '"\u4e2d\u6587 \u9879\u76ee\u6570\u636e"'
 $projectDirectory = Join-Path $EvidenceRoot $projectFolder
 $ownerFile = Join-Path $EvidenceRoot 'acceptance-owner.json'
@@ -38,23 +41,74 @@ if (Test-Path $ownerFile) {
     $owner = @{ install_directory = $installDirectory; project_directory = $projectDirectory }
     [IO.File]::WriteAllText($ownerFile, ($owner | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 }
-function Stop-AcceptanceApp {
-    foreach ($candidate in @(Get-CimInstance Win32_Process -Filter "Name='entwurf-desktop.exe'")) {
-        if ($candidate.ExecutablePath -eq $executable) { Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue }
+function Get-AcceptanceBridgeChildren([object[]]$Parents) {
+    if ($Parents.Count -eq 0) { return }
+    foreach ($child in @(Get-CimInstance Win32_Process -Filter "Name='Entwurf.Bridge.exe'")) {
+        if ($child.ExecutablePath -ne $bridgeExecutable) { continue }
+        foreach ($parent in $Parents) {
+            if ($child.ParentProcessId -eq $parent.ProcessId -and $child.CreationDate -ge $parent.CreationDate) {
+                $child
+                break
+            }
+        }
     }
+}
+function Wait-AcceptanceBridgeExit([object[]]$Children, [int]$TimeoutMilliseconds = 5000) {
+    if ($Children.Count -eq 0) { return }
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $live = @(Get-CimInstance Win32_Process -Filter "Name='Entwurf.Bridge.exe'")
+        $remaining = @($Children | Where-Object {
+            $tracked = $_
+            @($live | Where-Object { $_.ProcessId -eq $tracked.ProcessId -and $_.CreationDate -eq $tracked.CreationDate -and $_.ExecutablePath -eq $bridgeExecutable }).Count -gt 0
+        })
+        if ($remaining.Count -eq 0) { return }
+        if ($timer.ElapsedMilliseconds -ge $TimeoutMilliseconds) {
+            throw 'Owned Entwurf bridge did not exit after its desktop parent stopped; aborting before data hashes or uninstall.'
+        }
+        Start-Sleep -Milliseconds ([Math]::Min(100, [Math]::Max(1, $TimeoutMilliseconds - $timer.ElapsedMilliseconds)))
+    }
+}
+function Stop-AcceptanceApp {
+    $parents = @(Get-CimInstance Win32_Process -Filter "Name='entwurf-desktop.exe'" | Where-Object { $_.ExecutablePath -eq $executable })
+    $children = @(Get-AcceptanceBridgeChildren $parents)
+    foreach ($parent in $parents) { Stop-Process -Id $parent.ProcessId -Force -ErrorAction Stop }
+    # A child may have started between the first snapshot and parent shutdown.
+    $children += @(Get-AcceptanceBridgeChildren $parents)
+    Wait-AcceptanceBridgeExit $children
 }
 function Invoke-Installer([string]$Path, [string]$Arguments) {
     $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru
     if (-not $process.WaitForExit(180000)) { throw 'Installer exceeded the three-minute acceptance deadline.' }
     if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)." }
 }
-function Get-ProjectHashes {
+function Get-PreservedDataSnapshot([string]$Directory) {
     $files = @{}
-    foreach ($file in @(Get-ChildItem -LiteralPath $projectDirectory -Recurse -File -Force)) {
-        $relative = $file.FullName.Substring($projectDirectory.Length).TrimStart('\')
-        $files[$relative] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    if (-not (Test-Path -LiteralPath $Directory)) { return @{ present = $false; files = $files } }
+    $rootItem = Get-Item -LiteralPath $Directory -Force
+    if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Preserved data must be an ordinary owned directory, not a redirected path.'
     }
-    return $files
+    for ($ancestor = $rootItem.Parent; $null -ne $ancestor; $ancestor = $ancestor.Parent) {
+        if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing a preserved data path beneath a redirected directory.' }
+    }
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($rootItem.FullName)
+    while ($pending.Count -gt 0) {
+        foreach ($item in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing to follow a redirected item in preserved data.' }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName); continue }
+            $relative = $item.FullName.Substring($rootItem.FullName.Length).TrimStart('\')
+            $files[$relative] = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+        }
+    }
+    return @{ present = $true; files = $files }
+}
+function Assert-PreservedDataUnchanged($Before, $After, [string]$Label) {
+    if ($Before.present -ne $After.present -or $Before.files.Count -ne $After.files.Count) { throw "Uninstall changed the $Label data file count or directory presence." }
+    foreach ($relative in $Before.files.Keys) {
+        if (-not $After.files.ContainsKey($relative) -or $After.files[$relative] -ne $Before.files[$relative]) { throw "Uninstall modified a $Label data file." }
+    }
 }
 for ($cycle = $StartCycle; $cycle -le $LastCycle; $cycle++) {
     $cycleDirectory = Join-Path $EvidenceRoot "cycle-$cycle"
@@ -64,21 +118,24 @@ for ($cycle = $StartCycle; $cycle -le $LastCycle; $cycle++) {
     if ($cycle -gt 0) {
         $mirror = Join-Path $projectDirectory 'project.json'
         if (-not (Test-Path $mirror)) { throw 'Existing acceptance project must be present before uninstalling.' }
-        $before = Get-ProjectHashes
+        $before = Get-PreservedDataSnapshot $projectDirectory
+        $localWebBefore = Get-PreservedDataSnapshot $localWebDirectory
         $uninstallers = @(Get-ChildItem $installDirectory -Filter '*uninstall*.exe' -File)
         if ($uninstallers.Count -ne 1) { throw 'Could not uniquely locate this installation uninstaller.' }
         # NSIS documented flags: /S; _?= must be last and unquoted even with spaces.
         # https://nsis.sourceforge.io/Docs/Chapter3.html#3.2
         Invoke-Installer $uninstallers[0].FullName "/S _?=$installDirectory"
         if (Test-Path $executable) { throw 'Uninstaller left the application executable installed.' }
-        $after = Get-ProjectHashes
-        if ($before.Count -ne $after.Count) { throw 'Uninstall changed the user project file count.' }
-        foreach ($relative in $before.Keys) {
-            if ($after[$relative] -ne $before[$relative]) { throw 'Uninstall modified a user project file.' }
-        }
+        $after = Get-PreservedDataSnapshot $projectDirectory
+        $localWebAfter = Get-PreservedDataSnapshot $localWebDirectory
+        Assert-PreservedDataUnchanged $before $after 'user project'
+        Assert-PreservedDataUnchanged $localWebBefore $localWebAfter 'local web workspace'
         $record.uninstalled = $true
         $record.project_unchanged_after_uninstall = $true
-        $record.project_files_verified_after_uninstall = $before.Count
+        $record.project_files_verified_after_uninstall = $before.files.Count
+        $record.local_web_unchanged_after_uninstall = $true
+        $record.local_web_present_before_uninstall = $localWebBefore.present
+        $record.local_web_files_verified_after_uninstall = $localWebBefore.files.Count
     }
     if (-not (Test-Path $executable)) {
         # NSIS /D must be the final unquoted parameter.
