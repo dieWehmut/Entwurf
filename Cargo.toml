@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/entwurf-automation",
     "crates/entwurf-core",
     "crates/entwurf-cli",
     "apps/desktop/src-tauri",
