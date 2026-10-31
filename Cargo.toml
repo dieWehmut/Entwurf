@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/entwurf-core",
     "crates/entwurf-cli",
+    "crates/entwurf-web",
     "apps/desktop/src-tauri",
 ]
 
