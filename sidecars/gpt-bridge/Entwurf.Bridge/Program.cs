@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Entwurf.Bridge;
 
+if (args.Length == 1 && args[0] == "--automation-stdin") return await AutomationBootstrap.RunAsync();
+
 // Bootstrap is a single inherited-pipe frame, never an interactive or public CLI.
 // The Rust parent uses redirected stdin; .NET parents can pass an inherited handle.
 var stdinBootstrap = args.Length == 1 && args[0] == "--bootstrap-stdin";
