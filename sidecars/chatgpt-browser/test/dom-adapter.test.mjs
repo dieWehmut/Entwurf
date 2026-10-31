@@ -1,0 +1,75 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import { ChatGptPage } from '../dom-adapter.mjs';
+
+const prompt = 'Generate a blue circle.';
+function fixture() {
+  const dom = new JSDOM(`<main><div data-message-author-role="assistant"><img id="old-image"></div>
+    <textarea id="prompt-textarea"></textarea><button data-testid="send-button">Send</button></main>`, { url: 'https://chatgpt.com/' });
+  const win = dom.window;
+  let now = 0;
+  const adapter = new ChatGptPage(win, { now: () => now });
+  const advance = ms => { now += ms; };
+  function response() {
+    const user = win.document.createElement('div'); user.dataset.messageAuthorRole = 'user';
+    win.document.querySelector('main').append(user);
+    const message = win.document.createElement('div'); message.dataset.messageAuthorRole = 'assistant';
+    message.innerHTML = '<img id="generated" src="blob:https://chatgpt.com/original"><button aria-label="Download image">Download</button>';
+    for (const [key, value] of Object.entries({ complete: true, naturalWidth: 1024, naturalHeight: 1024 })) {
+      Object.defineProperty(message.querySelector('img'), key, { value });
+    }
+    win.document.querySelector('main').append(message);
+    return message;
+  }
+  return { win, adapter, advance, response };
+}
+
+test('does not overwrite an existing user draft', () => {
+  const { win, adapter } = fixture();
+  win.document.querySelector('textarea').value = 'An unsent user draft';
+  assert.throws(() => adapter.prepare({ run_id: 'r', prompt }), /composer_not_empty/);
+  assert.equal(win.document.querySelector('textarea').value, 'An unsent user draft');
+});
+
+test('a user edit after preparation prevents submission', () => {
+  const { win, adapter } = fixture();
+  adapter.prepare({ run_id: 'r', prompt });
+  win.document.querySelector('textarea').value = 'Edited by user';
+  let clicks = 0; win.document.querySelector('button').onclick = () => clicks++;
+  assert.throws(() => adapter.submit('r'), /composer_changed/);
+  assert.equal(clicks, 0);
+});
+
+test('an old image or a temporarily absent stop button cannot complete a new run', () => {
+  const { adapter, advance } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r'); advance(10000);
+  assert.equal(adapter.observe('r').phase, 'generating');
+});
+
+test('waits for the new response image, generation end and image stability', () => {
+  const { win, adapter, advance, response } = fixture();
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  const stop = win.document.createElement('button'); stop.dataset.testid = 'stop-button'; win.document.body.append(stop);
+  response(); advance(2000);
+  assert.equal(adapter.observe('r').phase, 'generating');
+  stop.remove();
+  assert.equal(adapter.observe('r').phase, 'generating');
+  advance(1600);
+  assert.equal(adapter.observe('r').phase, 'image_ready');
+});
+
+test('navigation after preparation prevents sending into another conversation', () => {
+  const { win, adapter } = fixture();
+  adapter.prepare({ run_id: 'r', prompt });
+  win.history.pushState({}, '', '/c/other');
+  assert.throws(() => adapter.submit('r'), /conversation_changed/);
+});
+
+test('a successful run permits one submission only', () => {
+  const { win, adapter } = fixture();
+  let clicks = 0; win.document.querySelector('button').onclick = () => clicks++;
+  adapter.prepare({ run_id: 'r', prompt }); adapter.submit('r');
+  assert.throws(() => adapter.submit('r'), /already_submitted/);
+  assert.equal(clicks, 1);
+});
