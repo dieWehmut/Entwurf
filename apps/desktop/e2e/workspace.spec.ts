@@ -135,7 +135,7 @@ test('settings renders native discovery evidence and four unverified gates', asy
   await expect(page.getByLabel('当前任务')).toHaveValue('task-1');
   await page.getByRole('button', { name: '打开设置', exact: true }).click();
   await expect(page.getByText('未检测到 ChatGPT 窗口', { exact: true })).toBeVisible();
-  const gates = page.getByRole('list', { name: 'ChatGPT 自动化兼容性门槛' });
+  const gates = page.getByRole('list', { name: '结构化规划接口兼容性门槛' });
   await expect(gates.getByRole('listitem')).toHaveCount(4);
   await expect(gates.getByText('未验证', { exact: true })).toHaveCount(4);
   await expect(page.getByRole('switch')).toHaveCount(0);
