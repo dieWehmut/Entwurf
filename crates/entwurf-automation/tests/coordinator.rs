@@ -779,3 +779,89 @@ async fn durable_completion_reconciles_lost_ack_without_affecting_next_run() {
     );
     reconnected.close(None).await.unwrap();
 }
+
+#[tokio::test]
+async fn failed_artifact_storage_disconnects_and_reconnect_retries_bytes_not_prompt() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    let (_, sha, artifact) = image();
+    let database = f.dir.path().join("automation.json");
+    let backup = f.dir.path().join("saved-automation.json");
+    std::fs::rename(&database, &backup).unwrap();
+    std::fs::create_dir(&database).unwrap();
+    socket
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&mut socket).await,
+        json!({"type":"error","code":"automation_storage_failed"})
+    );
+    let closed = tokio::time::timeout(Duration::from_secs(2), socket.next()).await;
+    assert!(
+        matches!(
+            closed,
+            Ok(None) | Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_)))
+        ),
+        "storage failure must close the connection so retained bytes are retried"
+    );
+    std::fs::remove_dir(&database).unwrap();
+    std::fs::rename(&backup, &database).unwrap();
+    let mut reconnected = f.authenticated().await;
+    assert_eq!(
+        read(&mut reconnected).await,
+        json!({"type":"status","run_id":"run-1"})
+    );
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), reconnected.next())
+            .await
+            .is_err(),
+        "reconnect and duplicate request must not replay start"
+    );
+    reconnected
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"awaiting_import"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    reconnected
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), reconnected.next())
+            .await
+            .is_err(),
+        "restaging bytes cannot acknowledge the owner database import"
+    );
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs/run-1/ack",
+            &f.token,
+            json!({"sha256":sha,"image_id":"image-after-retry"})
+        )
+        .await
+        .1["phase"],
+        "completed"
+    );
+    assert_eq!(
+        read(&mut reconnected).await,
+        json!({"type":"artifact_accepted","run_id":"run-1"})
+    );
+    reconnected.close(None).await.unwrap();
+}

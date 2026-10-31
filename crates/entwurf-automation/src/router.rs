@@ -287,7 +287,17 @@ async fn session(state: AutomationState, mut socket: WebSocket) {
           match incoming {
            Ok(Some(Ok(Message::Text(text)))) => {
             let result = serde_json::from_str::<Value>(&text).map_err(|_| AutomationError("invalid_extension_message")).and_then(|value| apply_extension(&state, &id, value));
-            if let Err(error) = result { if output.send(Message::Text(json!({"type":"error","code":error.0}).to_string().into())).await.is_err() { break; } }
+            if let Err(error) = result {
+                if output.send(Message::Text(json!({"type":"error","code":error.0}).to_string().into())).await.is_err() { break; }
+                if error.0 == "automation_storage_failed" {
+                    // The companion retains captured bytes until owner import ACK.
+                    // Its reconnect restore retransmits those bytes, never a prompt.
+                    // Keeping this failed session alive would strand awaiting_import
+                    // because ordinary ticks report status without resending bytes.
+                    let _ = output.send(Message::Close(None)).await;
+                    break;
+                }
+            }
            },
            Ok(Some(Ok(Message::Ping(bytes)))) => { if output.send(Message::Pong(bytes)).await.is_err() { break; } },
            Ok(Some(Ok(Message::Pong(_)))) => {},
