@@ -36,6 +36,7 @@ interface Commands {
   load_existing_project: [{ root: string }, WorkspaceSnapshot];
   create_task: [{ title: string; chapter?: string }, WorkspaceSnapshot];
   import_sources: [TaskArgs & { paths: string[] }, WorkspaceSnapshot];
+  import_ir: [TaskArgs & { baseVersionId: string | null; json: string }, WorkspaceSnapshot];
   import_style_images: [{ paths: string[] }, WorkspaceSnapshot];
   reimport_source: [VersionArgs & { sourceId: string }, WorkspaceSnapshot];
   update_nodes: [VersionArgs & { edits: NodeEdit[]; nodeOrder?: string[] }, WorkspaceSnapshot];
@@ -54,6 +55,7 @@ interface Commands {
   choose_directory: [undefined, string | null];
   choose_sources: [undefined, string[]];
   choose_result_file: [undefined, string | null];
+  choose_ir_file: [undefined, string | null];
   copy_prompt: [TaskArgs, null];
   open_chatgpt: [undefined, null];
   open_export: [TaskArgs & { kind: "svg" | "png" | "pdf" | "ir" | "manifest"; index?: number }, null];

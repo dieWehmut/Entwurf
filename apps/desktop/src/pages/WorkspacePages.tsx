@@ -1,10 +1,12 @@
 import { useState } from "react";
 import type { Run } from "../App";
-import type { StyleSpec, Theme } from "../lib/types";
+import type { StyleSpec, TaskVersion, Theme } from "../lib/types";
 import { type BridgeGate, type BridgeReport, type Capabilities, type WorkspaceClient, type WorkspaceSnapshot } from "../lib/workspace";
 interface Props { snapshot: WorkspaceSnapshot; client: WorkspaceClient; run: Run; locked: boolean }
-export function SourcesPage({ snapshot, client, run, locked }: Props) {
+export function SourcesPage({ snapshot, client, run, locked, onCreateTask }: Props & { onCreateTask: () => void }) {
   const taskId = snapshot.selected_task_id;
+  const task = snapshot.project.tasks.find(t => t.id === taskId);
+  const emptyTask = !!task && task.versions.length === 0;
   const version = snapshot.current_version;
   const [role, setRole] = useState("knowledge");
   const [styleDraft, setStyleDraft] = useState<StyleSpec | null>(null);
@@ -16,6 +18,15 @@ export function SourcesPage({ snapshot, client, run, locked }: Props) {
     {!taskId && <p className="empty-note">导入知识资料前请先创建任务。</p>}
     {version?.ir.sources.map(source => <article className="source-record" key={source.id}><strong>{source.original_name}</strong><p>{source.kind} · {source.byte_len.toLocaleString()} bytes</p><p className="path-text">项目内路径：{source.stored_path}</p><p className="path-text">SHA-256：{source.content_hash}</p>{source.notes.map((note, index) => <p className="muted" key={index}>{note}</p>)}<button className="secondary-button" disabled={locked} onClick={() => { void run("重新解析原件", () => client.call("reimport_source", { taskId: taskId!, baseVersionId: version.id, sourceId: source.id })); }}>重新解析原件</button></article>)}
     {!version?.ir.sources.length && <p className="empty-note">当前任务还没有知识来源。</p>}
+  </section><section className="panel"><h2>恢复已审阅的 Knowledge IR</h2>
+    <p className="muted">导入已导出的 Knowledge IR（最多 16 MiB），保留节点、来源锚点与纠错记录。来源须按内容哈希匹配本项目已验证的原件。</p>
+    <p className="muted">若缺少来源，请先在其他任务导入原件，再创建空任务导入 IR。</p>
+    {task && !emptyTask && <p className="callout subtle">当前任务已有版本，请创建空任务以保留现有手工修改。</p>}
+    <div className="handoff-actions"><button className="secondary-button" disabled={locked || !!styleDraft || !emptyTask} onClick={() => { void run("导入 Knowledge IR", async () => {
+      const json = await client.call("choose_ir_file", undefined);
+      if (json === null) return;
+      return client.call("import_ir", { taskId: taskId!, baseVersionId: version?.id ?? null, json });
+    }); }}>导入 Knowledge IR</button><button className="secondary-button" disabled={locked} onClick={onCreateTask}>前往项目创建新任务</button></div>
   </section><section className="panel"><h2>画布与风格</h2><fieldset disabled={locked} className="form-grid">
     <label className="field">风格名称<input value={style.name} onChange={e => changeStyle({ name: e.target.value })} /></label>
     <label className="field">密度<select value={style.density} onChange={e => changeStyle({ density: e.target.value as StyleSpec["density"] })}><option value="dense">高密度</option><option value="balanced">均衡</option><option value="relaxed">宽松</option></select></label>
@@ -34,6 +45,7 @@ export function TasksPage({ snapshot, client, run, locked }: Props) {
   <div className="handoff-actions"><button className="primary-button" disabled={locked || !snapshot.current_version} onClick={() => { void run("生成 TaskEnvelope", () => client.call("prepare_handoff", { taskId: task.id })); }}>生成 TaskEnvelope</button><button className="secondary-button" disabled={locked || !handoff} onClick={() => { void run("复制提示", () => client.call("copy_prompt", { taskId: task.id })); }}>复制提示</button><button className="secondary-button" disabled={locked} onClick={() => { void run("打开 ChatGPT", () => client.call("open_chatgpt", undefined)); }}>打开 ChatGPT</button></div>
   {handoff && <><p className="callout subtle">r{handoff.revision} · {handoff.status} · 已纠正 {handoff.correction_attempts} 次</p>{handoff.last_error && <p className="callout warn">{handoff.last_error}</p>}{handoff.status === "manual_required" ? <p role="alert">第二次导入失败：需要人工处理。请检查资料与节点，保存新版本后重新生成提示。</p> : handoff.correction_attempts > 0 ? <p>第一次导入失败。复制当前纠正提示，让 ChatGPT 修正一次。</p> : null}<details><summary>查看当前提示与 TaskEnvelope</summary><pre className="json-view">{handoff.markdown}</pre><pre className="json-view">{handoff.envelope_json}</pre></details></>}
   <label className="field">ResultEnvelope JSON<textarea disabled={locked} rows={7} value={json} onChange={e => setJson(e.target.value)} placeholder="粘贴 ChatGPT 返回的完整 JSON" /></label><div className="handoff-actions"><button className="primary-button" disabled={locked || !handoff || !json.trim() || handoff.status === "manual_required"} onClick={() => { void run("导入 GPT 结果", () => client.call("import_result", { taskId: task.id, json }), () => setJson("")); }}>导入 JSON</button><button className="secondary-button" disabled={locked || !handoff || handoff.status === "manual_required"} onClick={() => { void run("导入结果文件", async () => { const result = await client.call("choose_result_file", undefined); if (result !== null) return client.call("import_result", { taskId: task.id, json: result }); }); }}>选择 JSON 文件</button></div></section>
+  {snapshot.current_version?.gpt_import && <ImportedVisualPlan version={snapshot.current_version} />}
   <section className="panel"><h2>不可变版本</h2>{[...task.versions].reverse().map(v => <article className="source-record" key={v.id}><strong>r{v.revision} · {v.reason}</strong><p>{v.created_at} · {v.ir.nodes.length} 个节点</p><button className="secondary-button" disabled={locked || v.id === task.current_version} onClick={() => { void run("回滚版本", () => client.call("rollback_version", { taskId: task.id, versionId: v.id })); }}>从 r{v.revision} 恢复内容</button></article>)}{!task.versions.length && <p className="empty-note">导入资料后建立第一个版本。</p>}</section>
   <section className="panel"><h2>任务审计日志</h2><ol className="audit-list">{snapshot.project.audit.filter(event => event.task_id === task.id).map(event => <li key={event.id}><time>{event.at}</time><strong>{event.kind}</strong><p>{event.detail}</p></li>)}</ol></section></div>;
 }
@@ -74,4 +86,21 @@ function BridgeDiscovery({ report }: { report: BridgeReport }) {
         return <li className="source-record" key={id}><div className="result-head"><strong>{label}</strong><span className={`status-pill ${gate?.passed ? "tone-ok" : "tone-muted"}`}>{gate?.passed ? "通过" : "未验证"}</span></div><p className="muted">{gate?.evidence ?? "本次检测没有提供此项证据。"}</p></li>;
       })}</ul></> : <p className="empty-note">未取得 ChatGPT 窗口检测结果。</p>}
   </div>;
+}
+
+const visualPlanStatuses = {
+  not_evaluated: "尚未编译评估", applied: "已采用", partially_applied: "部分采用", ignored: "未采用",
+};
+function ImportedVisualPlan({ version }: { version: TaskVersion }) {
+  const metadata = version.gpt_import!;
+  const plan = metadata.visual_plan;
+  const nodeTitles = new Map(version.ir.nodes.map(node => [node.id, node.title]));
+  return <section className="panel"><h2>已导入的 GPT 视觉方案</h2>
+    <div className="result-head"><p>本地排版采用状态</p><strong>{visualPlanStatuses[metadata.visual_plan_status]}</strong></div>
+    <p className="muted">方案建议 {plan.page_count} 页；实际页面以本地编译与校验为准。</p>
+    {plan.groups.map(group => <article className="source-record" key={group.id}><strong>{group.title}</strong><p className="muted">建议第 {group.page} 页 · {group.node_ids.length} 个节点</p><p>{group.node_ids.map(id => nodeTitles.get(id) ?? id).join(" · ")}</p></article>)}
+    {!!plan.notes.length && <ul>{plan.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>}
+    {metadata.warnings.map((warning, index) => <div className="callout warn" key={`${warning.code}-${index}`}><div><strong>{warning.code}</strong><p>{warning.message}</p></div></div>)}
+    <p className="callout subtle">{metadata.image_reference_present ? metadata.image_reference_applied ? "本地服务报告已采用图片引用。请以编译页面为准。" : "结果包含图片引用；图片尚未取回，也未用于当前页面。" : "结果未包含图片引用。"}</p>
+  </section>;
 }

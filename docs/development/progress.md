@@ -13,8 +13,8 @@ Existing prototype code and green smoke tests do not establish release readiness
 | 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Implemented and reviewed; 17 actual-engine tests pass on Windows/Linux; installed resource resolution remains pending |
 | 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Shared measured Typst scene and bounded in-process cache implemented; Chinese/math vector PDF independently verified, public chapter fits one A3 page; installed export pending |
 | 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Implemented and reviewed, including actual contrast, obstacle routing, durable three-round budget, selected repair undo and whole-version restoration; installed UI acceptance pending |
-| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Five pages use real native commands; 27 React and 8 browser tests pass, review findings resolved; installed Windows UI acceptance pending |
-| 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Service workflows, durable bounded retry, manual-edit protection and true exports implemented and reviewed; full installed-app offline round trip pending |
+| 7. Desktop UI | Five functional pages, specified themes, first-run detection, persisted edits/anchors/importance/order, logs, manual handoff, real version comparison | Five native pages, IR reimport and planning feedback implemented; 33 React and 10 browser tests pass; initial installed desktop flow passes, final reinstall acceptance pending |
+| 8. End-to-end | Complete prompt/result round trip, one correction retry, durable revisions, local recompute, edited fields preserved, real offline import-to-export | Implemented and reviewed, including safe native IR reimport and applied/advisory GPT grouping with visible warnings; initial installed offline import/edit/export passes, final additions await installed verification |
 | 9. Release | Unsigned Windows x64 NSIS; clean-user install/uninstall/offline startup; Chinese/spaced paths; DPI/multi-monitor; dependency notices and redacted diagnostics | Reproducible dependency notices and opt-in redacted diagnostics implemented/reviewed; first NSIS build running; installation/reinstallation pending |
 
 ## Release gates that require stronger evidence
@@ -119,3 +119,35 @@ unverified and must not be inferred from synthetic or generated content.
   filenames/paths, prompts, tokens, identifiers and arbitrary error text.
 - Physical multi-monitor, installed UI operations, actual reinstall cycles and
   private textbook coverage remain separate acceptance gates.
+
+## Remaining desktop flow gaps closed
+
+- Native Knowledge IR import accepts an empty destination task and binds sources
+  to verified originals already retained by the project. Incoming file paths and
+  extraction transcripts are never trusted. Unknown originals require explicit
+  source import first; existing tasks and manual work are preserved.
+- GPT visual proposals now affect compatible group boundaries/page breaks while
+  preserving canonical node order and every knowledge node. Incompatible advice
+  has visible fallback warnings; unretrieved image references remain unapplied.
+- Mandatory formula review retains its proposal and warnings. IR reimport chooses
+  matching trusted extraction history, including a later successful PDF parse
+  after an earlier failed attempt. Both regressions were independently reproduced
+  and revalidated after correction.
+- Root's complete actual-engine test run passes **145 tests, zero ignored**;
+  generator tests pass twice, and native desktop checks pass after the fixes.
+
+## Actual first installation
+
+The unsigned Windows x64 NSIS bundle at `988fc22` built successfully (74.13 MiB).
+It was installed under the current user's `Programs/Entwurf`, separately from
+build tools and test projects. Its extracted executable icon matches the supplied
+image. Initial installed acceptance passes startup, real capability detection,
+native folder/file dialogs, a Chinese/spaced Markdown path, four explicit formula
+reviews, retained manual edits through a synthetic result import, actual SVG/PNG/
+PDF plus manifest hashes, and all five pages in both themes.
+
+WebView2 network access was disabled through its test-only localhost debugging
+connection for this flow; host network adapters were not changed. This is actual
+native IPC and installed code, with no mocked commands. The synthetic result
+does not claim real ChatGPT generation. Two uninstall/reinstall cycles and final
+installed checks for subsequent additions remain outstanding.

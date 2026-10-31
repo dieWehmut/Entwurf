@@ -1,16 +1,16 @@
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
-import { fixture, capabilities, repairFixture } from '../tests/protocol-fixture';
+import { fixture, capabilities, repairFixture, emptyTaskFixture, gptImportFixture } from '../tests/protocol-fixture';
 import { versionDiff, type WorkspaceClient, type WorkspaceSnapshot } from './lib/workspace';
-function setup(handler?: (command: string, args: any, state: WorkspaceSnapshot) => unknown) {
-  let state = fixture();
+function setup(handler?: (command: string, args: any, state: WorkspaceSnapshot) => unknown, initialState = fixture()) {
+  let state = initialState;
   const call = vi.fn(async (command: string, args: any) => {
     if (command === 'bootstrap') return capabilities;
     if (command === 'workspace_snapshot') return structuredClone(state);
     const result = await handler?.(command, args, state);
     if (result && typeof result === 'object' && 'project' in result) state = result as WorkspaceSnapshot;
-    return result ?? structuredClone(state);
+    return result === undefined ? structuredClone(state) : result;
   });
   render(<App client={{ available: true, call } as WorkspaceClient} />);
   return { call, user: userEvent.setup(), state, setState: (next: WorkspaceSnapshot) => { state = next; } };
@@ -338,4 +338,87 @@ describe('visual repair and diagnostics release flows', () => {
     expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
     expect(screen.queryByText('导出脱敏诊断完成')).not.toBeInTheDocument();
   });
+});
+
+
+describe('Knowledge IR import', () => {
+  it('requires a new empty task, then forwards the complete chosen IR unchanged', async () => {
+    const ir = fixture().current_version!.ir;
+    ir.nodes[0].body = '已审阅的公开正文'; ir.nodes[0].origin = 'user_edit';
+    const json = JSON.stringify(ir, null, 2);
+    const { user, call } = setup((command, _args, state) => {
+      if (command === 'create_task') return emptyTaskFixture();
+      if (command === 'choose_ir_file') return json;
+      if (command === 'import_ir') {
+        const next = structuredClone(state); const version = fixture().current_version!;
+        version.id = 'imported-ir-version'; version.ir = { ...ir, task_id: 'empty-task' };
+        next.current_version = version; next.project.tasks[1].versions = [version]; next.project.tasks[1].current_version = version.id; next.project.tasks[1].state = 'IR_READY';
+        return next;
+      }
+    });
+    await navigate(user, '资料与风格');
+    expect(screen.getByRole('button', { name: '导入 Knowledge IR' })).toBeDisabled();
+    expect(screen.getByText(/当前任务已有版本，请创建空任务/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '前往项目创建新任务' }));
+    await user.type(screen.getByLabelText('任务标题'), '空任务');
+    await user.click(screen.getByRole('button', { name: '创建任务' }));
+    expect(await screen.findByRole('button', { name: '导入 Knowledge IR' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '导入 Knowledge IR' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('import_ir', { taskId: 'empty-task', baseVersionId: null, json }));
+    expect(call).toHaveBeenCalledWith('choose_ir_file', undefined);
+    expect(screen.getByRole('button', { name: '导入 Knowledge IR' })).toBeDisabled();
+    await navigate(user, '结果');
+    expect(screen.getByLabelText('节点正文')).toHaveValue('已审阅的公开正文');
+    expect(screen.getByLabelText('来源锚点 JSON')).toHaveValue(JSON.stringify(ir.nodes[0].anchors, null, 2));
+  });
+  it('does not import or report completion when the IR chooser is cancelled', async () => {
+    const { user, call } = setup(command => command === 'choose_ir_file' ? null : undefined, emptyTaskFixture());
+    await navigate(user, '资料与风格'); await user.click(screen.getByRole('button', { name: '导入 Knowledge IR' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '导入 Knowledge IR' })).toBeEnabled());
+    expect(call.mock.calls.some(([command]) => command === 'import_ir')).toBe(false);
+    expect(screen.queryByText('导入 Knowledge IR完成')).not.toBeInTheDocument();
+  });
+  it.each(['IR schema invalid', 'Retained source hash not found; import originals first'])('keeps the empty task unchanged and displays %s', async message => {
+    const { user, state } = setup(command => {
+      if (command === 'choose_ir_file') return '{"invalid":true}';
+      if (command === 'import_ir') throw new Error(message);
+    }, emptyTaskFixture());
+    await navigate(user, '资料与风格'); await user.click(screen.getByRole('button', { name: '导入 Knowledge IR' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByRole('button', { name: '导入 Knowledge IR' })).toBeEnabled();
+    expect(state.current_version).toBeNull(); expect(state.project.tasks[1].versions).toHaveLength(0);
+    expect(screen.queryByText('导入 Knowledge IR完成')).not.toBeInTheDocument();
+  });
+});
+it('shows the persisted GPT proposal, advisory fallback, ignored edits and unretrieved image honestly', async () => {
+  const state = fixture();
+  state.current_version!.gpt_import = gptImportFixture();
+  const { user, call } = setup(undefined, state);
+  await navigate(user, '任务');
+  expect(screen.getByRole('heading', { name: '已导入的 GPT 视觉方案' })).toBeVisible();
+  expect(screen.getByText('未采用')).toBeVisible();
+  expect(screen.getByText('公开提议分组')).toBeVisible();
+  expect(screen.getByText('公开方案说明')).toBeVisible();
+  expect(screen.getByText('手工修改节点的更新已忽略')).toBeVisible();
+  expect(screen.getByText('方案与手工顺序不兼容，使用本地顺序排版')).toBeVisible();
+  expect(screen.getByText('结果包含图片引用；图片尚未取回，也未用于当前页面。')).toBeVisible();
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  expect(call.mock.calls.some(([command]) => command === 'open_export')).toBe(false);
+});
+
+it('updates visual-plan adoption only from the latest compiler snapshot', async () => {
+  const state = fixture(); state.current_version!.gpt_import = { ...gptImportFixture(), visual_plan_status: 'not_evaluated', warnings: [] };
+  const { user } = setup((command, _args, state) => {
+    if (command === 'preview_current') {
+      const next = structuredClone(state);
+      next.current_version!.gpt_import!.visual_plan_status = 'partially_applied';
+      next.current_version!.gpt_import!.warnings = [{ code: 'page_hint_ignored', message: '部分分页建议超出页数上限，已使用本地分页' }];
+      return next;
+    }
+  }, state);
+  await navigate(user, '任务'); expect(screen.getByText('尚未编译评估')).toBeVisible();
+  expect(screen.queryByText('已采用')).not.toBeInTheDocument();
+  await navigate(user, '结果'); await user.click(screen.getByRole('button', { name: '编译预览' }));
+  await navigate(user, '任务'); expect(screen.getByText('部分采用')).toBeVisible();
+  expect(screen.getByText('部分分页建议超出页数上限，已使用本地分页')).toBeVisible();
 });

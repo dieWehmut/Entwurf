@@ -42,6 +42,15 @@ pub fn layout(
     style: &StyleSpec,
     options: &LayoutOptions,
 ) -> Result<LayoutDocument> {
+    pack_groups(ir, style, options, build_groups(ir))
+}
+
+pub(crate) fn pack_groups(
+    ir: &KnowledgeIr,
+    style: &StyleSpec,
+    options: &LayoutOptions,
+    groups: Vec<Group>,
+) -> Result<LayoutDocument> {
     let width_pt = mm_to_pt(style.paper.width_mm);
     let height_pt = mm_to_pt(style.paper.height_mm);
     let margin_pt = mm_to_pt(style.paper.margin_mm);
@@ -95,9 +104,21 @@ pub fn layout(
     let mut pages = Vec::new();
     let mut current = new_page(1, width_pt, height_pt, margin_pt);
     let mut heights = vec![0.0; columns.len()];
-    // Groups are kept in stable chapter order. Each page/column fragment owns
-    // its own group geometry, avoiding stale cross-page rectangles.
-    for group in build_groups(ir) {
+    // Pack contiguous groups in canonical IR order. Never move a later node
+    // into an earlier hierarchy group across a manual ordering boundary.
+    for group in groups {
+        if group.page_hint == Some(current.index + 1) && !current.nodes.is_empty() {
+            current.edges = route_edges(ir, &current, current.index, options.obstacle_routing)?;
+            pages.push(current);
+            if pages.len() >= options.max_pages as usize {
+                return Err(crate::error::EntwurfError::Render(format!(
+                    "page budget {} exceeded by proposed page breaks",
+                    options.max_pages
+                )));
+            }
+            current = new_page(pages.len() as u16 + 1, width_pt, height_pt, margin_pt);
+            heights.fill(0.0);
+        }
         let mut group_column = None;
         for node_id in group.node_ids {
             let node = ir.node(&node_id).expect("group ids come from IR");
@@ -226,14 +247,16 @@ fn choose_column(heights: &[f32], needed: f32, max_height: f32) -> Option<usize>
 }
 
 #[derive(Debug, Clone)]
-struct Group {
-    id: Id,
-    title: String,
-    node_ids: Vec<Id>,
+pub(crate) struct Group {
+    pub id: Id,
+    pub title: String,
+    pub node_ids: Vec<Id>,
+    pub page_hint: Option<u16>,
 }
 
-fn build_groups(ir: &KnowledgeIr) -> Vec<Group> {
+pub(crate) fn build_groups(ir: &KnowledgeIr) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
+    let mut last_root = None;
     for node in &ir.nodes {
         let mut root = node;
         let mut seen = BTreeSet::new();
@@ -247,13 +270,19 @@ fn build_groups(ir: &KnowledgeIr) -> Vec<Group> {
             root = parent;
         }
         let id = format!("group:{}", root.id);
-        if let Some(group) = groups.iter_mut().find(|g| g.id == id) {
-            group.node_ids.push(node.id.clone());
+        if last_root.as_ref() == Some(&id) {
+            groups
+                .last_mut()
+                .expect("root has a group")
+                .node_ids
+                .push(node.id.clone());
         } else {
+            last_root = Some(id.clone());
             groups.push(Group {
-                id,
+                id: format!("{id}:run{}", groups.len()),
                 title: root.title.clone(),
                 node_ids: vec![node.id.clone()],
+                page_hint: None,
             });
         }
     }

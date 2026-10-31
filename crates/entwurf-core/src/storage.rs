@@ -264,6 +264,29 @@ fn persist(connection: &mut Connection, paths: &ProjectPaths, project: &Project)
                         return Err(EntwurfError::Contract("saved visual repair history is append-only; undo requires a new version".into()));
                     }
                 }
+                match (&version.gpt_import, &next_version.gpt_import) {
+                    (Some(old), Some(next)) => {
+                        if json(&(
+                            &old.visual_plan,
+                            old.image_reference_present,
+                            old.image_reference_applied,
+                        ))? != json(&(
+                            &next.visual_plan,
+                            next.image_reference_present,
+                            next.image_reference_applied,
+                        ))? || next.warnings.len() < old.warnings.len()
+                            || json(&next.warnings[..old.warnings.len()])? != json(&old.warnings)?
+                        {
+                            return Err(EntwurfError::Contract("saved GPT proposal is immutable and import warnings are append-only".into()));
+                        }
+                    }
+                    (None, None) => {}
+                    _ => {
+                        return Err(EntwurfError::Contract(
+                            "saved GPT import metadata cannot be added or removed".into(),
+                        ))
+                    }
+                }
             }
         }
     }

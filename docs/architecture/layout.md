@@ -85,3 +85,32 @@ and dependent successors marked reverted. The service saves a new version with
 the identical IR and disables automatic repair. An undo may restore a blocked
 layout; preparation preserves that result instead of redoing the repair. Existing
 version knowledge and previous repair records remain immutable.
+
+## Advisory GPT visual plans
+
+`CompileOptions.visual_plan` passes the accepted proposal into the same measured
+preparation used by preview, validation and export. Plans must cover every node
+exactly once, with unique nonempty group IDs and legal page references within the
+current page budget. Invalid proposals use canonical packing and return explicit
+warnings. They never weaken content/source validation or clear review items.
+
+Compatible contiguous group boundaries change column packing; compatible next-page
+hints create page breaks. Canonical IR node order always wins, including after a
+manual reorder. Noncontiguous/reversed groups and out-of-order group lists receive
+specific warnings for their ignored ordering hints. Hierarchy fallback groups are
+also contiguous runs, so a later sibling cannot move across an intervening node.
+
+Measured placement remains authoritative. A group that spills or cannot reach its
+requested page reports the actual pages. Unused page-count requests are reported;
+blank pages are not inserted. If hinted packing fails, the engine retries without
+proposal hints and records that fallback. Both routes retain every node and use
+the same readability/page/repair gates. Group titles and notes remain metadata;
+proposal text is never painted as additional knowledge or interpreted as math.
+
+`PreparedCompilation` and `ArtifactSet` expose `visual_plan_status` (`not_evaluated`,
+`applied`, `partially_applied`, `ignored`) and `visual_plan_warnings`. Warnings also
+appear in validation and exported `layout.json` diagnostics. Optional version
+`gpt_import` metadata preserves the proposal, append-only warnings, and truthful
+image-reference flags. Exact visual undo and version rollback retain the proposal
+and reevaluate its status. No image path supplied by a GPT result is opened by the
+layout engine.

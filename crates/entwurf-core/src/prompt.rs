@@ -234,6 +234,28 @@ pub fn validate_result(
             }
         }
     }
+    // Manual nodes are deliberately protected by apply_result; make skipped
+    // proposals visible instead of silently discarding their intent.
+    for id in result
+        .ir_patch
+        .update_nodes
+        .iter()
+        .map(|p| p.id.as_str())
+        .chain(result.ir_patch.remove_node_ids.iter().map(String::as_str))
+        .chain(result.corrections.iter().map(|c| c.node_id.as_str()))
+        .collect::<BTreeSet<_>>()
+    {
+        if envelope
+            .baseline_ir
+            .node(id)
+            .is_some_and(|n| n.origin == NodeOrigin::UserEdit)
+        {
+            warnings.push(ResultWarning::new(
+                "manual_update_ignored",
+                format!("GPT changes to manually edited node {id} were ignored"),
+            ));
+        }
+    }
     Ok(warnings)
 }
 

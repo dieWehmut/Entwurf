@@ -45,3 +45,12 @@ test('schema changes generate runtime Rust fields and check rejects every output
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test('TypeScript exports nested named schemas used by cross-schema references', () => {
+  const types = readFileSync(join(root, 'generated/types.ts'), 'utf8');
+  assert.match(types, /"visual_plan": VisualPlan/);
+  assert.match(types, /export type VisualPlan = /);
+  assert.match(types, /export type VisualGroup = /);
+  const names = [...types.matchAll(/export type (\w+) = /g)].map(m => m[1]);
+  assert.equal(names.length, new Set(names).size, 'each named wire type has exactly one export');
+});

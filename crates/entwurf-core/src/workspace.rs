@@ -177,14 +177,49 @@ impl Workspace {
     fn save_ir(
         &mut self,
         task_id: &str,
-        mut ir: KnowledgeIr,
+        ir: KnowledgeIr,
         reason: VersionReason,
         detail: &str,
     ) -> Result<WorkspaceSnapshot> {
+        self.save_ir_version(task_id, ir, reason, detail, false)
+    }
+    fn save_ir_version(
+        &mut self,
+        task_id: &str,
+        mut ir: KnowledgeIr,
+        reason: VersionReason,
+        detail: &str,
+        review_only: bool,
+    ) -> Result<WorkspaceSnapshot> {
+        let previous = self.current(task_id).ok().map(|v| {
+            (
+                v.id.clone(),
+                v.gpt_import.clone(),
+                v.source_prompt_hash.clone(),
+            )
+        });
         ir.id = new_id();
         ir.touch();
         let mut p = self.project.clone();
-        p.save_version(task_id, ir, reason)?;
+        let id = p.save_version(task_id, ir, reason)?;
+        if let Some((previous_id, proposal, prompt_hash)) = previous {
+            if review_only {
+                let version = p
+                    .task_mut(task_id)
+                    .unwrap()
+                    .versions
+                    .iter_mut()
+                    .find(|v| v.id == id)
+                    .unwrap();
+                version.gpt_import = proposal.map(|mut meta| {
+                    meta.visual_plan_status = crate::project::VisualPlanStatus::NotEvaluated;
+                    meta
+                });
+                version.source_prompt_hash = prompt_hash;
+            } else if proposal.is_some() {
+                p.audit(AuditKind::StateChanged,Some(task_id.into()),format!("GPT visual proposal invalidated by {detail}; retained in version {previous_id}"));
+            }
+        }
         Self::state(&mut p, task_id, TaskState::IrReady)?;
         p.audit(AuditKind::VersionCreated, Some(task_id.into()), detail);
         self.commit(p, Some(task_id))
@@ -287,6 +322,57 @@ impl Workspace {
             VersionReason::Ingested,
             "sources imported; copied originals retained",
         )
+    }
+    /// Import an external snapshot only into an empty task. Source paths in the
+    /// input carry no authority; evidence is rebound to project-owned originals.
+    pub fn import_ir(
+        &mut self,
+        task_id: &str,
+        base: Option<&str>,
+        json: &str,
+    ) -> Result<WorkspaceSnapshot> {
+        let task = self
+            .project
+            .task(task_id)
+            .ok_or_else(|| invalid("unknown task"))?;
+        if task.current_version.as_deref() != base {
+            return Err(invalid("this version changed; reload before importing"));
+        }
+        if !task.versions.is_empty() {
+            return Err(invalid("Knowledge IR import requires an empty task; create a new task to preserve existing work"));
+        }
+        let mut ir = crate::ir_import::parse_and_bind(&self.paths, &self.project, json)?;
+        let original = (ir.project_id.clone(), ir.task_id.clone(), ir.id.clone());
+        ir.project_id = self.project.id.clone();
+        ir.task_id = task_id.into();
+        ir.id = new_id();
+        ir.touch();
+        // This first content report never implies layout approval. Pending
+        // reviews and source/parser failures survive as ordinary blockers.
+        let report =
+            crate::validate::validate_ir(&ir, &crate::validate::ValidationOptions::default())?;
+        let passing = report.is_passing();
+        let mut project = self.project.clone();
+        let id = project.save_version(task_id, ir, VersionReason::ManualSnapshot)?;
+        project
+            .task_mut(task_id)
+            .unwrap()
+            .versions
+            .iter_mut()
+            .find(|v| v.id == id)
+            .unwrap()
+            .validation = Some(report);
+        Self::state(
+            &mut project,
+            task_id,
+            if passing {
+                TaskState::IrReady
+            } else {
+                TaskState::NeedsReview
+            },
+        )?;
+        project.audit(AuditKind::VersionCreated,Some(task_id.into()),format!("imported Knowledge IR sha256 {}; prior project/task/IR {}/{}/{}; sources rebound to verified retained originals",crate::ingest::hash_bytes(json.as_bytes()),original.0,original.1,original.2));
+        self.commit(project, Some(task_id))
     }
     pub fn reimport_source(
         &mut self,
@@ -426,9 +512,17 @@ impl Workspace {
             .filter_map(|t| p.current_ir(&t.id).cloned().map(|ir| (t.id.clone(), ir)))
             .collect();
         for (id, mut ir) in currents {
+            let proposal_version = self
+                .current(&id)
+                .ok()
+                .filter(|v| v.gpt_import.is_some())
+                .map(|v| v.id.clone());
             ir.id = new_id();
             ir.touch();
             p.save_version(&id, ir, VersionReason::ManualSnapshot)?;
+            if let Some(previous_id) = proposal_version {
+                p.audit(AuditKind::StateChanged,Some(id.clone()),format!("GPT visual proposal invalidated by style change; retained in version {previous_id}"));
+            }
             Self::state(&mut p, &id, TaskState::IrReady)?;
         }
         p.audit(
@@ -554,6 +648,10 @@ impl Workspace {
             .find(|v| v.id == id)
             .unwrap();
         version.source_prompt_hash = source.source_prompt_hash;
+        version.gpt_import = source.gpt_import.map(|mut meta| {
+            meta.visual_plan_status = crate::project::VisualPlanStatus::NotEvaluated;
+            meta
+        });
         if !incompatible {
             version.layout_options = source.layout_options;
             version.visual_repairs = source.visual_repairs;
@@ -620,11 +718,12 @@ impl Workspace {
         node.review_note = Some(note.trim().into());
         node.origin = NodeOrigin::UserEdit;
         ir.unverified.retain(|u| u.id != item_id);
-        self.save_ir(
+        self.save_ir_version(
             task_id,
             ir,
             VersionReason::UserEdited,
             &format!("review {item_id}: {}", note.trim()),
+            true,
         )
     }
     fn compile_options(
@@ -657,6 +756,10 @@ impl Workspace {
                 .filter(|r| !r.reverted)
                 .count()
                 .min(3) as u16;
+            options.visual_plan = saved
+                .gpt_import
+                .as_ref()
+                .map(|meta| meta.visual_plan.clone());
         }
         options.validation.max_pages = self.project.style.paper.max_pages;
         options
@@ -681,6 +784,26 @@ impl Workspace {
         }
         version.layout_options = Some(layout);
         Ok(())
+    }
+    fn attach_plan_result(
+        version: &mut TaskVersion,
+        status: Option<crate::project::VisualPlanStatus>,
+        warnings: Vec<crate::project::ImportWarning>,
+    ) {
+        if let Some(metadata) = &mut version.gpt_import {
+            if let Some(status) = status {
+                metadata.visual_plan_status = status;
+            }
+            for warning in warnings {
+                if !metadata
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == warning.code && w.message == warning.message)
+                {
+                    metadata.warnings.push(warning);
+                }
+            }
+        }
     }
     /// Undo visual options in a fresh version, keeping the exact knowledge bytes.
     pub fn undo_visual_repair(
@@ -710,6 +833,10 @@ impl Workspace {
         version.visual_repairs = Some(history);
         version.visual_repair_enabled = Some(false);
         version.source_prompt_hash = previous.source_prompt_hash;
+        version.gpt_import = previous.gpt_import.map(|mut meta| {
+            meta.visual_plan_status = crate::project::VisualPlanStatus::NotEvaluated;
+            meta
+        });
         Self::state(&mut p, task_id, TaskState::IrReady)?;
         p.audit(AuditKind::VersionCreated,Some(task_id.into()),format!("undid visual repair {repair_id} from version {base}; knowledge unchanged; automatic repair disabled"));
         self.commit(p, Some(task_id))?;
@@ -725,12 +852,15 @@ impl Workspace {
         }
         let (mut document, mut pages) = (None, vec![]);
         let mut repairs = None;
+        let mut plan_result = None;
         if report.is_passing() {
             match crate::compiler::prepare(&v.ir, &self.project.style, &options) {
                 Ok(prepared) => {
                     report = prepared.validation;
                     document = prepared.document;
                     repairs = Some((prepared.effective_layout, prepared.visual_repairs));
+                    plan_result =
+                        Some((prepared.visual_plan_status, prepared.visual_plan_warnings));
                     pages = prepared
                         .svg_pages
                         .into_iter()
@@ -754,6 +884,9 @@ impl Workspace {
         current.layout = document;
         if let Some((layout, records)) = repairs {
             Self::attach_repairs(current, layout, records)?;
+        }
+        if let Some((status, warnings)) = plan_result {
+            Self::attach_plan_result(current, status, warnings);
         }
         if !passing {
             current.artifacts = None;
@@ -829,6 +962,11 @@ impl Workspace {
                     artifacts.effective_layout,
                     artifacts.visual_repairs,
                 )?;
+                Self::attach_plan_result(
+                    current,
+                    artifacts.visual_plan_status,
+                    artifacts.visual_plan_warnings,
+                );
                 Self::state(&mut p, task_id, TaskState::Exported)?;
                 p.audit(
                     AuditKind::ExportCompleted,
@@ -1010,12 +1148,12 @@ impl Workspace {
         }
         let applied: Result<_> = (|| {
             let result = prompt::parse_result_envelope(json)?;
-            prompt::validate_result(&h.bundle.envelope, &result)?;
+            let warnings = prompt::validate_result(&h.bundle.envelope, &result)?;
             let (ir, corrections) = prompt::apply_result(&v.ir, &result)?;
-            Ok((ir, corrections, result))
+            Ok((ir, corrections, result, warnings))
         })();
         match applied {
-            Ok((mut ir, corrections, result)) => {
+            Ok((mut ir, corrections, result, warnings)) => {
                 let result_bytes =
                     serde_json::to_vec_pretty(&result).map_err(|e| invalid(e.to_string()))?;
                 let import_dir = self.paths.root.join("imports");
@@ -1035,6 +1173,23 @@ impl Workspace {
                     .find(|v| v.id == version_id)
                     .unwrap();
                 version.source_prompt_hash = Some(prompt::envelope_sha256(&h.bundle.envelope)?);
+                let mut warnings: Vec<_> = warnings
+                    .into_iter()
+                    .map(|w| crate::project::ImportWarning {
+                        code: w.code,
+                        message: w.message,
+                    })
+                    .collect();
+                if result.image_path.is_some() {
+                    warnings.push(crate::project::ImportWarning {code:"image_reference_unapplied".into(),message:"The returned image path is a reference only. No image was retrieved or opened; image paths in GPT results are not trusted file selections.".into()});
+                }
+                version.gpt_import = Some(crate::project::GptImportMetadata {
+                    visual_plan: result.visual_plan,
+                    warnings,
+                    image_reference_present: result.image_path.is_some(),
+                    image_reference_applied: false,
+                    visual_plan_status: crate::project::VisualPlanStatus::NotEvaluated,
+                });
                 Self::state(&mut p, task_id, TaskState::IrReady)?;
                 p.audit(
                     AuditKind::VersionCreated,

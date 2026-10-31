@@ -122,6 +122,7 @@ impl Project {
             layout_options: None,
             visual_repairs: None,
             visual_repair_enabled: None,
+            gpt_import: None,
         });
         task.current_version = Some(version_id.clone());
         task.updated_at = Utc::now();
@@ -190,6 +191,10 @@ impl Project {
             layout_options: source.layout_options,
             visual_repairs: source.visual_repairs,
             visual_repair_enabled: source.visual_repair_enabled,
+            gpt_import: source.gpt_import.map(|mut metadata| {
+                metadata.visual_plan_status = VisualPlanStatus::NotEvaluated;
+                metadata
+            }),
         });
         task.current_version = Some(new_version_id);
         task.updated_at = Utc::now();

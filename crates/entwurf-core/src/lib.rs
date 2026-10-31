@@ -23,9 +23,12 @@ mod rendering;
 mod scene;
 
 pub mod diagnostics;
+mod ir_import;
 pub mod math_text;
 pub mod provenance;
 pub mod workspace;
 
 mod obstacle_routes;
 pub mod visual_repair;
+
+mod visual_plan;

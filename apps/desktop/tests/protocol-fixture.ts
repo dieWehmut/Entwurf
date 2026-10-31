@@ -1,5 +1,5 @@
 // Public synthetic protocol fixture. This simulates the IPC boundary only; it is not a native filesystem/compiler test.
-import type { KnowledgeNode, StyleSpec, TaskVersion, VisualRepairRecord } from '../src/lib/types';
+import type { KnowledgeNode, StyleSpec, TaskVersion, VisualRepairRecord, GptImportMetadata } from '../src/lib/types';
 import type { Capabilities, WorkspaceSnapshot } from '../src/lib/workspace';
 export const capabilities: Capabilities = { version: '0.1.0', platform: 'fixture', tesseract_available: false, ocr_languages: [], automation_enabled: false, bridge_status: 'manual_only', bridge_detail: 'Deterministic protocol fixture; no native services running.', bridge: {
   status: 'read_only', detail: 'Public fixture for native discovery report rendering.', automation_enabled: false,
@@ -18,4 +18,19 @@ export function fixture(): WorkspaceSnapshot {
 export function repairFixture(): VisualRepairRecord {
   const before = { max_pages: 3, min_font_pt: 8, max_font_pt: 11, column_gap_pt: 12, node_gap_pt: 6, card_padding_pt: 8, preferred_columns: 3, obstacle_routing: false, max_heading_font_pt: 28 };
   return { id: 'repair-1', reason: '公开测试：缩小卡片间距', ir_hash: 'a'.repeat(64), style_hash: 'b'.repeat(64), round: 1, before, after: { ...before, node_gap_pt: 4, obstacle_routing: true }, passed: true, reverted: false, before_geometry_hash: 'c'.repeat(64), after_geometry_hash: 'd'.repeat(64) };
+}
+
+export function emptyTaskFixture(): WorkspaceSnapshot {
+  const state = fixture();
+  state.project.tasks.push({ ...structuredClone(state.project.tasks[0]), id: 'empty-task', title: '空任务', state: 'DRAFT', versions: [], current_version: null });
+  state.selected_task_id = 'empty-task'; state.current_version = null;
+  return state;
+}
+
+export function gptImportFixture(): GptImportMetadata {
+  return {
+    visual_plan: { page_count: 2, groups: [{ id: 'group-1', title: '公开提议分组', page: 2, node_ids: ['node-1', 'node-2'] }], notes: ['公开方案说明'] },
+    warnings: [{ code: 'manual_update_ignored', message: '手工修改节点的更新已忽略' }, { code: 'visual_plan_ignored', message: '方案与手工顺序不兼容，使用本地顺序排版' }],
+    image_reference_present: true, image_reference_applied: false, visual_plan_status: 'ignored',
+  };
 }

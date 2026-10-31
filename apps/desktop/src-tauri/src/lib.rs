@@ -351,6 +351,18 @@ async fn import_result(
     workspace_call(app, move |ws| ws.import_result(&task_id, &json)).await
 }
 #[tauri::command]
+async fn import_ir(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: Option<String>,
+    json: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.import_ir(&task_id, base_version_id.as_deref(), &json)
+    })
+    .await
+}
+#[tauri::command]
 async fn undo_visual_repair(
     app: tauri::AppHandle,
     task_id: String,
@@ -489,6 +501,32 @@ async fn choose_result_file(app: tauri::AppHandle) -> Result<Option<String>, Str
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+async fn choose_ir_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        let Some(chosen) = app
+            .dialog()
+            .file()
+            .add_filter("Knowledge IR JSON", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = chosen.into_path().map_err(|e| e.to_string())?;
+        let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut text = String::new();
+        file.take(16 * 1024 * 1024 + 1)
+            .read_to_string(&mut text)
+            .map_err(|e| e.to_string())?;
+        if text.len() > 16 * 1024 * 1024 {
+            return Err("Knowledge IR exceeds 16 MiB".into());
+        }
+        Ok(Some(text))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 async fn copy_prompt(app: tauri::AppHandle, task_id: String) -> Result<(), String> {
     let app2 = app.clone();
     workspace_call(app, move |ws| {
@@ -563,6 +601,7 @@ pub fn run() {
             save_settings,
             prepare_handoff,
             import_result,
+            import_ir,
             validate_current,
             undo_visual_repair,
             export_diagnostics,
@@ -571,6 +610,7 @@ pub fn run() {
             choose_directory,
             choose_sources,
             choose_result_file,
+            choose_ir_file,
             copy_prompt,
             open_export,
             open_chatgpt

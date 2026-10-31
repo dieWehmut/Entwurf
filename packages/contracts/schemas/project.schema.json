@@ -645,6 +645,18 @@
           ],
           "x-rust-default": true,
           "x-rust-skip-none": true
+        },
+        "gpt_import": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/gptImportMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-rust-default": true,
+          "x-rust-skip-none": true
         }
       },
       "x-rust-name": "TaskVersion",
@@ -968,6 +980,72 @@
       "x-rust-derives": [
         "PartialEq"
       ]
+    },
+    "importWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "x-rust-name": "ImportWarning",
+      "x-rust-module": "project",
+      "x-rust-derives": [
+        "PartialEq",
+        "Eq"
+      ]
+    },
+    "gptImportMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visual_plan",
+        "warnings",
+        "image_reference_present",
+        "image_reference_applied",
+        "visual_plan_status"
+      ],
+      "properties": {
+        "visual_plan": {
+          "$ref": "result-envelope.schema.json#/properties/visual_plan"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/importWarning"
+          }
+        },
+        "image_reference_present": {
+          "type": "boolean"
+        },
+        "image_reference_applied": {
+          "type": "boolean"
+        },
+        "visual_plan_status": {
+          "enum": [
+            "not_evaluated",
+            "applied",
+            "partially_applied",
+            "ignored"
+          ],
+          "x-rust-name": "VisualPlanStatus",
+          "x-rust-module": "project",
+          "x-rust-derives": [
+            "PartialEq",
+            "Eq"
+          ]
+        }
+      },
+      "x-rust-name": "GptImportMetadata",
+      "x-rust-module": "project"
     }
   },
   "x-rust-name": "Project",

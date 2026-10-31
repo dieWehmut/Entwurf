@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { fixture, capabilities, repairFixture } from '../tests/protocol-fixture';
-async function nativeFixture(page: Page, exportFailure = false, delayedStyle = false, withRepair = false) {
+import { fixture, capabilities, repairFixture, emptyTaskFixture, gptImportFixture } from '../tests/protocol-fixture';
+async function nativeFixture(page: Page, exportFailure = false, delayedStyle = false, withRepair = false, extra: { emptyTask?: boolean; importedPlan?: boolean } = {}) {
   // Explicit browser-only Tauri IPC mock, never shipped in the application.
-  const snapshot = fixture();
+  const snapshot = extra.emptyTask ? emptyTaskFixture() : fixture();
+  if (extra.importedPlan) snapshot.current_version!.gpt_import = gptImportFixture();
   if (withRepair) snapshot.current_version!.visual_repairs = [repairFixture()];
-  await page.addInitScript(({ snapshot, capabilities, exportFailure, delayedStyle }) => {
+  await page.addInitScript(({ snapshot, capabilities, exportFailure, delayedStyle, irVersion }) => {
     Object.assign(window, { isTauri: true });
     let current = snapshot;
     let diagnosticsExports = 0;
@@ -12,6 +13,14 @@ async function nativeFixture(page: Page, exportFailure = false, delayedStyle = f
       if (command === 'bootstrap') return capabilities;
       if (command === 'export_diagnostics') return diagnosticsExports++ === 0 ? 'fixture/diagnostics.json' : null;
       if (command === 'workspace_snapshot') return structuredClone(current);
+      if (command === 'choose_ir_file') return JSON.stringify(irVersion.ir, null, 2);
+      if (command === 'import_ir') {
+        const task = current.project.tasks.find(task => task.id === args.taskId)!;
+        if (task.versions.length || args.baseVersionId !== null) throw 'IR import requires an empty task';
+        const imported = structuredClone(irVersion); imported.id = 'version-ir-import'; imported.ir = { ...JSON.parse(args.json), task_id: task.id };
+        task.versions = [imported]; task.current_version = imported.id; task.state = 'IR_READY'; current.current_version = imported;
+        return structuredClone(current);
+      }
       const version = current.current_version!;
       if (command === 'save_style' && delayedStyle) return new Promise(resolve => { Object.assign(window, { finishStyleSave: () => { current.project.style = args.style; resolve(structuredClone(current)); } }); });
       if (command === 'undo_visual_repair') {
@@ -48,7 +57,7 @@ async function nativeFixture(page: Page, exportFailure = false, delayedStyle = f
       else throw `Unmocked IPC command: ${command}`;
       return structuredClone(current);
     } } });
-  }, { snapshot, capabilities, exportFailure, delayedStyle });
+  }, { snapshot, capabilities, exportFailure, delayedStyle, irVersion: fixture().current_version! });
 }
 const nav = (page: Page, label: string) => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${label}`) }).click();
 test('browser without IPC explicitly disables native workspace', async ({ page }) => {
@@ -161,4 +170,28 @@ test('diagnostics export shows only a returned saved path and no completion on c
   await expect(page.getByRole('main')).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByText('已保存：fixture/diagnostics.json', { exact: true })).toHaveCount(0);
   await expect(page.getByText('导出脱敏诊断完成', { exact: true })).toHaveCount(0);
+});
+
+test('whole Knowledge IR chooser fills a selected empty task and then blocks overwrite', async ({ page }) => {
+  await nativeFixture(page, false, false, false, { emptyTask: true }); await page.goto('/');
+  await expect(page.getByLabel('当前任务')).toHaveValue('empty-task'); await nav(page, '资料与风格');
+  await expect(page.getByRole('button', { name: '导入 Knowledge IR', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '导入 Knowledge IR', exact: true }).click();
+  await expect(page.getByRole('button', { name: '导入 Knowledge IR', exact: true })).toBeDisabled();
+  await expect(page.getByText(/当前任务已有版本，请创建空任务/)).toBeVisible();
+  await nav(page, '结果'); await expect(page.getByLabel('节点标题')).toHaveValue('公开测试定义');
+  await expect(page.getByLabel('公式 LaTeX')).toHaveValue('P(A)=1');
+});
+test('imported GPT proposal displays native fallback warnings and an unapplied image', async ({ page }) => {
+  await nativeFixture(page, false, false, false, { importedPlan: true }); await page.goto('/'); await nav(page, '任务');
+  await expect(page.getByRole('heading', { name: '已导入的 GPT 视觉方案' })).toBeVisible();
+  await expect(page.getByText('未采用', { exact: true })).toBeVisible();
+  await expect(page.getByText('公开提议分组', { exact: true })).toBeVisible();
+  await expect(page.getByText('手工修改节点的更新已忽略')).toBeVisible();
+  await expect(page.getByText('方案与手工顺序不兼容，使用本地顺序排版')).toBeVisible();
+  await expect(page.getByText('结果包含图片引用；图片尚未取回，也未用于当前页面。')).toBeVisible();
+  const proposal = page.locator('section').filter({ has: page.getByRole('heading', { name: '已导入的 GPT 视觉方案' }) });
+  await expect(proposal.locator('img')).toHaveCount(0);
+  await expect(proposal.getByRole('link')).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/entwurf-frontend-imported-proposal.png', fullPage: true });
 });

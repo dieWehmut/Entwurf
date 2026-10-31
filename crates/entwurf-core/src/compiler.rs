@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{EntwurfError, Result};
 use crate::ir::{KnowledgeIr, StyleSpec};
-use crate::layout::{layout, LayoutOptions};
+use crate::layout::LayoutOptions;
 use crate::model::{mm_to_pt, LayoutDocument};
 use crate::validate::{validate_ir, validate_layout, ValidationOptions};
 
@@ -23,6 +23,7 @@ pub struct CompileOptions {
     pub write_manifest: bool,
     pub auto_repair: bool,
     pub repair_rounds_used: u16,
+    pub visual_plan: Option<crate::ir::VisualPlan>,
 }
 
 impl CompileOptions {
@@ -35,6 +36,7 @@ impl CompileOptions {
             write_manifest: true,
             auto_repair: true,
             repair_rounds_used: 0,
+            visual_plan: None,
         }
     }
 }
@@ -52,6 +54,8 @@ pub struct ArtifactSet {
     pub layout_document: LayoutDocument,
     pub effective_layout: LayoutOptions,
     pub visual_repairs: Vec<crate::model::VisualRepairRecord>,
+    pub visual_plan_warnings: Vec<crate::project::ImportWarning>,
+    pub visual_plan_status: Option<crate::project::VisualPlanStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +88,8 @@ pub struct PreparedCompilation {
     pub svg_pages: Vec<String>,
     pub effective_layout: LayoutOptions,
     pub visual_repairs: Vec<crate::model::VisualRepairRecord>,
+    pub visual_plan_warnings: Vec<crate::project::ImportWarning>,
+    pub visual_plan_status: Option<crate::project::VisualPlanStatus>,
     scene: Option<typst_layout::PagedDocument>,
 }
 
@@ -143,6 +149,11 @@ fn prepare_once(
         svg_pages: Vec::new(),
         effective_layout: options.layout.clone(),
         visual_repairs: Vec::new(),
+        visual_plan_warnings: Vec::new(),
+        visual_plan_status: options
+            .visual_plan
+            .as_ref()
+            .map(|_| crate::project::VisualPlanStatus::NotEvaluated),
         scene: None,
     };
     if !prepared.validation.is_passing() {
@@ -157,7 +168,18 @@ fn prepare_once(
         ..options.layout.clone()
     };
     prepared.effective_layout = layout_options.clone();
-    let document = match layout(ir, style, &layout_options) {
+    let planned =
+        crate::visual_plan::layout(ir, style, &layout_options, options.visual_plan.as_ref());
+    prepared.visual_plan_warnings = planned.warnings;
+    prepared.visual_plan_status = planned.status;
+    for warning in &prepared.visual_plan_warnings {
+        prepared.validation.push(
+            &warning.code,
+            crate::ir::Severity::Warning,
+            &warning.message,
+        );
+    }
+    let document = match planned.document {
         Ok(document) => document,
         Err(error) => {
             prepared.validation.push(
@@ -327,6 +349,8 @@ pub fn compile(
         layout_document: document,
         effective_layout: prepared.effective_layout,
         visual_repairs: prepared.visual_repairs,
+        visual_plan_warnings: prepared.visual_plan_warnings,
+        visual_plan_status: prepared.visual_plan_status,
     })
 }
 
