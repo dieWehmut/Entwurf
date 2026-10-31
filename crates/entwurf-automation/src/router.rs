@@ -32,6 +32,7 @@ impl IntoResponse for AutomationError {
     fn into_response(self) -> Response {
         let status = match self.0 {
             "unauthorized" => StatusCode::UNAUTHORIZED,
+            "server_shutting_down" => StatusCode::SERVICE_UNAVAILABLE,
             "forbidden" => StatusCode::FORBIDDEN,
             "run_not_found" | "artifact_unavailable" => StatusCode::NOT_FOUND,
             "run_active"
@@ -221,7 +222,18 @@ async fn send(socket: &mut WebSocket, value: Value) -> bool {
         .await
         .is_ok()
 }
-async fn session(state: AutomationState, mut socket: WebSocket) {
+async fn session(state: AutomationState, socket: WebSocket) {
+    let mut shutdown = state.0.shutdown.subscribe();
+    if *shutdown.borrow() {
+        return;
+    }
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => {},
+        _ = session_active(state, socket) => {},
+    }
+}
+async fn session_active(state: AutomationState, mut socket: WebSocket) {
     let auth = match tokio::time::timeout(Duration::from_secs(10), socket.recv()).await {
         Ok(Some(Ok(Message::Text(text)))) if text.len() <= 4096 => {
             serde_json::from_str::<Value>(&text).ok()
@@ -232,6 +244,9 @@ async fn session(state: AutomationState, mut socket: WebSocket) {
     let (sender, mut receiver) = mpsc::channel::<Value>(16);
     let accepted = (|| -> Result<Vec<String>> {
         let mut i = state.lock()?;
+        if *state.0.shutdown.borrow() {
+            return Err(AutomationError("server_shutting_down"));
+        }
         let selected_token = if i.database.provider == "windows" {
             &i.database.native_token
         } else {
