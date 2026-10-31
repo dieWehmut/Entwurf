@@ -29,6 +29,7 @@ Desktop.ini
 
 # Private user inputs and runtime projects; keep only fixture instructions.
 /fixtures/private/*
+/sample/
 !/fixtures/private/.gitkeep
 !/fixtures/private/README.md
 /.entwurf/
