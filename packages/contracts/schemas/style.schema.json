@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://entwurf.local/schemas/style.schema.json",
+  "title": "Entwurf Style",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "paper", "colors", "typography", "density", "reference_images", "rules"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width_mm", "height_mm", "margin_mm", "max_pages"],
+      "properties": {
+        "width_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "height_mm": { "type": "number", "exclusiveMinimum": 0 },
+        "margin_mm": { "type": "number", "minimum": 0 },
+        "max_pages": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["background", "surface", "text", "muted", "accent", "border"],
+      "properties": {
+        "background": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "surface": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "text": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "muted": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "accent": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "border": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "typography": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "title_pt", "body_pt", "caption_pt", "line_height"],
+      "properties": {
+        "family": { "type": "string" },
+        "title_pt": { "type": "number", "minimum": 8 },
+        "body_pt": { "type": "number", "minimum": 8 },
+        "caption_pt": { "type": "number", "minimum": 8 },
+        "line_height": { "type": "number", "minimum": 1 }
+      }
+    },
+    "density": { "enum": ["relaxed", "balanced", "dense"] },
+    "reference_images": { "type": "array", "items": { "type": "string" } },
+    "rules": { "type": "array", "items": { "type": "string" } }
+  }
+}

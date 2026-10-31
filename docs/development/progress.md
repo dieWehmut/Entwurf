@@ -7,9 +7,9 @@ Existing prototype code and green smoke tests do not establish release readiness
 
 | Stage | Required evidence | Status on 2026-10-31 |
 | --- | --- | --- |
-| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | In progress: native toolchain smoke checks pass; repository build still pending |
-| 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | In progress: replacing prototype JSON-only persistence |
-| 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Pending; current bridge is a disabled stdio stub |
+| 1. Foundation | Native Windows worktree; Rust/MSVC, .NET 10, WebView2, Node, OCR detection; root documents; runnable build scripts | Native checkout created; prerequisite checks, PowerShell tests and native Tauri check pass; full repository build pending |
+| 2. Contracts and storage | Shared schema/types, transactional SQLite WAL migrations, immutable versions, hashed source copies, audited state transitions and database recovery | SQLite, snapshots/recovery and embedded schemas implemented; generated TS checked; generated Rust, state-machine hardening and import integration still pending |
+| 3. GPT bridge | Current-user named pipe, length-prefixed JSON-RPC, session token, observable UIA controls, tested pause/cancel and capability gates | Implementation under review; no verified ChatGPT window, automation remains unavailable |
 | 4. Ingestion | PDFium text/page extraction and scanned-page OCR, CommonMark, preserved LaTeX, image OCR, exact anchors and diagnostics | Pending; prototype parsing does not satisfy these requirements |
 | 5. Compiler | Shared Typst text/math scene, deterministic A3 layout and orthogonal routes, at most three pages, SVG/vector PDF, 300 DPI PNG, cache | Pending; prototype export exists but Chinese/math output is not reliable |
 | 6. Validation and repair | Schema/provenance/formula/coverage/layout/contrast/export gates, at most three content-preserving repair rounds, rollback | Pending; partial checks exist, but passing tests do not establish full content integrity |
@@ -38,3 +38,18 @@ Existing prototype code and green smoke tests do not establish release readiness
 
 This file records unfinished requirements explicitly and must be updated with
 test commands, artifacts and commit evidence as each stage is verified.
+
+## Verified development baseline
+
+- `c6a3ddf`: foundation documentation, supplied plan, ignore rules and Windows
+  scripts; pushed to `origin/feat/v0.1` after review and native PowerShell tests.
+- Native Windows `cargo test --locked -p entwurf-core -p entwurf-cli --target
+  x86_64-pc-windows-msvc`: 35 core and 3 acceptance tests pass after storage review
+  fixes, including recovery from an empty migrated database and immutable history.
+- Native Windows `cargo check --locked -p entwurf-desktop --target
+  x86_64-pc-windows-msvc`: passes after installer-mode, icon and borrow fixes.
+- Frontend `pnpm test` (5 tests) and `pnpm build` pass for the existing demo;
+  neither proves real IPC or export behavior.
+- `node packages/contracts/generate.mjs --check` and workspace Rust formatting
+  checks pass. Schemas also validate from a relocated core executable without
+  opening schema files from the development checkout.

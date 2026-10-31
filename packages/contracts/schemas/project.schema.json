@@ -1,0 +1,711 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://entwurf.local/schemas/project.schema.json",
+  "title": "Entwurf Project",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "created_at",
+    "updated_at",
+    "style",
+    "tasks",
+    "audit",
+    "settings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "style": {
+      "$ref": "style.schema.json"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/task"
+      }
+    },
+    "audit": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/audit"
+      }
+    },
+    "settings": {
+      "$ref": "#/$defs/settings"
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      }
+    },
+    "textLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "x",
+        "baseline",
+        "font_size",
+        "bold"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "baseline": {
+          "type": "number"
+        },
+        "font_size": {
+          "type": "number"
+        },
+        "bold": {
+          "type": "boolean"
+        }
+      }
+    },
+    "placedNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "kind",
+        "title",
+        "body",
+        "latex",
+        "page",
+        "rect",
+        "title_lines",
+        "body_lines",
+        "latex_lines",
+        "text_clipped"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "chapter",
+            "section",
+            "concept",
+            "definition",
+            "formula",
+            "theorem",
+            "example",
+            "warning",
+            "note"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "latex": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rect": {
+          "$ref": "#/$defs/rect"
+        },
+        "title_lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/textLine"
+          }
+        },
+        "body_lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/textLine"
+          }
+        },
+        "latex_lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/textLine"
+          }
+        },
+        "text_clipped": {
+          "type": "boolean"
+        }
+      }
+    },
+    "placedEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_id",
+        "from_node",
+        "to_node",
+        "page",
+        "points",
+        "label"
+      ],
+      "properties": {
+        "edge_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_node": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to_node": {
+          "type": "string",
+          "minLength": 1
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/point"
+          }
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "placedGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "page",
+        "rect"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rect": {
+          "$ref": "#/$defs/rect"
+        }
+      }
+    },
+    "layoutPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "width_pt",
+        "height_pt",
+        "margin_pt",
+        "groups",
+        "nodes",
+        "edges"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width_pt": {
+          "type": "number"
+        },
+        "height_pt": {
+          "type": "number"
+        },
+        "margin_pt": {
+          "type": "number"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/placedGroup"
+          }
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/placedNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/placedEdge"
+          }
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width_pt",
+        "height_pt",
+        "margin_pt",
+        "pages",
+        "diagnostics"
+      ],
+      "properties": {
+        "width_pt": {
+          "type": "number"
+        },
+        "height_pt": {
+          "type": "number"
+        },
+        "margin_pt": {
+          "type": "number"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layoutPage"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "code",
+        "severity",
+        "message",
+        "node_id",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "warning",
+            "info"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "checked_at",
+        "findings",
+        "metrics"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "svg",
+        "png",
+        "pdf",
+        "manifest",
+        "ir"
+      ],
+      "properties": {
+        "svg": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "png": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pdf": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "string"
+        },
+        "ir": {
+          "type": "string"
+        }
+      }
+    },
+    "taskVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "created_at",
+        "reason",
+        "ir",
+        "layout",
+        "validation",
+        "artifacts",
+        "source_prompt_hash"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "enum": [
+            "ingested",
+            "gpt_imported",
+            "user_edited",
+            "correction_reverted",
+            "manual_snapshot"
+          ]
+        },
+        "ir": {
+          "$ref": "knowledge-ir.schema.json"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/layout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "validation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/validation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifacts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/artifacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_prompt_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "id",
+        "title",
+        "chapter",
+        "state",
+        "created_at",
+        "updated_at",
+        "versions",
+        "current_version",
+        "paused_from",
+        "last_error"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chapter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "INGESTING",
+            "IR_READY",
+            "PROMPT_READY",
+            "SENDING",
+            "WAITING",
+            "IMPORTING",
+            "COMPILING",
+            "VERIFYING",
+            "NEEDS_REVIEW",
+            "APPROVED",
+            "EXPORTED",
+            "PAUSED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "versions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskVersion"
+          }
+        },
+        "current_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paused_from": {
+          "anyOf": [
+            {
+              "enum": [
+                "DRAFT",
+                "INGESTING",
+                "IR_READY",
+                "PROMPT_READY",
+                "SENDING",
+                "WAITING",
+                "IMPORTING",
+                "COMPILING",
+                "VERIFYING",
+                "NEEDS_REVIEW",
+                "APPROVED",
+                "EXPORTED",
+                "PAUSED",
+                "FAILED",
+                "CANCELLED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "at",
+        "task_id",
+        "kind",
+        "detail"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "project_created",
+            "source_imported",
+            "state_changed",
+            "version_created",
+            "correction_added",
+            "correction_reverted",
+            "export_completed",
+            "validation_failed",
+            "automation_paused",
+            "error"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "automation_enabled",
+        "tesseract_available",
+        "ocr_languages",
+        "locale"
+      ],
+      "properties": {
+        "automation_enabled": {
+          "type": "boolean"
+        },
+        "tesseract_available": {
+          "type": "boolean"
+        },
+        "ocr_languages": {
+          "type": "string"
+        },
+        "locale": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

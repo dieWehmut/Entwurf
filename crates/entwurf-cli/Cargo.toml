@@ -1,0 +1,18 @@
+[package]
+name = "entwurf-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Local command-line entry point for the Entwurf compiler"
+
+[[bin]]
+name = "entwurf"
+path = "src/main.rs"
+
+[dependencies]
+entwurf-core = { path = "../entwurf-core" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

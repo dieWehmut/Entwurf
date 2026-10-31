@@ -1,0 +1,9 @@
+{
+  "name": "@entwurf/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "generated/types.ts",
+  "exports": { ".": "./generated/types.ts" },
+  "scripts": { "generate": "node generate.mjs", "check": "node generate.mjs --check" }
+}

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://entwurf.local/schemas/knowledge-ir.schema.json",
+  "title": "Entwurf Knowledge IR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "project_id", "task_id", "title", "language", "sources", "nodes", "edges", "corrections", "unverified", "updated_at"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "project_id": { "$ref": "#/$defs/id" },
+    "task_id": { "$ref": "#/$defs/id" },
+    "title": { "type": "string", "minLength": 1 },
+    "subject": { "type": ["string", "null"] },
+    "language": { "type": "string", "minLength": 2 },
+    "sources": { "type": "array", "items": { "$ref": "#/$defs/source" } },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "corrections": { "type": "array", "items": { "$ref": "#/$defs/correction" } },
+    "unverified": { "type": "array", "items": { "$ref": "#/$defs/unverified" } },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "original_name", "kind", "content_hash", "stored_path", "byte_len", "imported_at", "notes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "original_name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["pdf", "markdown", "image", "latex"] },
+        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "stored_path": { "type": "string" },
+        "byte_len": { "type": "integer", "minimum": 0 },
+        "imported_at": { "type": "string", "format": "date-time" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "label"],
+      "properties": {
+        "source_id": { "$ref": "#/$defs/id" },
+        "page": { "type": ["integer", "null"], "minimum": 1 },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "char_start": { "type": ["integer", "null"], "minimum": 0 },
+        "char_end": { "type": ["integer", "null"], "minimum": 0 },
+        "quote_hash": { "type": ["string", "null"] },
+        "label": { "type": "string" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "body", "latex", "anchors", "importance", "origin", "parent_id", "tags", "verified", "review_note"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["chapter", "section", "concept", "definition", "formula", "theorem", "example", "warning", "note"] },
+        "title": { "type": "string", "minLength": 1 },
+        "body": { "type": "string" },
+        "latex": { "type": ["string", "null"] },
+        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } },
+        "importance": { "enum": ["critical", "high", "normal", "low"] },
+        "origin": { "enum": ["source", "gpt_candidate", "user_edit", "gpt_correction"] },
+        "parent_id": { "type": ["string", "null"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "verified": { "type": "boolean" },
+        "review_note": { "type": ["string", "null"] }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to", "type", "label", "anchors"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["contains", "depends_on", "related", "example_of", "contradicts"] },
+        "label": { "type": ["string", "null"] },
+        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } }
+      }
+    },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "node_id", "field", "before", "after", "reason", "anchors", "accepted", "reverted", "created_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "node_id": { "$ref": "#/$defs/id" },
+        "field": { "enum": ["title", "body", "latex", "anchors"] },
+        "before": { "type": "string" },
+        "after": { "type": "string" },
+        "reason": { "type": "string" },
+        "anchors": { "type": "array", "items": { "$ref": "#/$defs/anchor" } },
+        "accepted": { "type": "boolean" },
+        "reverted": { "type": "boolean" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "unverified": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "node_id", "kind", "text", "reason"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "node_id": { "type": ["string", "null"] },
+        "kind": { "enum": ["formula", "missing_anchor", "ocr", "contradiction"] },
+        "text": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}

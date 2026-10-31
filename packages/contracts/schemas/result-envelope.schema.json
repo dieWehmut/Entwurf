@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://entwurf.local/schemas/result-envelope.schema.json",
+  "title": "Entwurf Result Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "revision",
+    "ir_patch",
+    "visual_plan",
+    "corrections",
+    "image_path",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ir_patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "add_nodes",
+        "update_nodes",
+        "add_edges",
+        "remove_node_ids"
+      ],
+      "properties": {
+        "add_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "knowledge-ir.schema.json#/$defs/node"
+          }
+        },
+        "update_nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "knowledge-ir.schema.json#/$defs/id"
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "body": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latex": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "importance": {
+                "enum": [
+                  "critical",
+                  "high",
+                  "normal",
+                  "low",
+                  null
+                ]
+              }
+            }
+          }
+        },
+        "add_edges": {
+          "type": "array",
+          "items": {
+            "$ref": "knowledge-ir.schema.json#/$defs/edge"
+          }
+        },
+        "remove_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "visual_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page_count",
+        "groups",
+        "notes"
+      ],
+      "properties": {
+        "page_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "node_ids",
+              "page"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "knowledge-ir.schema.json#/$defs/id"
+              },
+              "title": {
+                "type": "string"
+              },
+              "node_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "knowledge-ir.schema.json#/$defs/id"
+                }
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "node_id",
+          "field",
+          "before",
+          "after",
+          "reason",
+          "anchors"
+        ],
+        "properties": {
+          "node_id": {
+            "$ref": "knowledge-ir.schema.json#/$defs/id"
+          },
+          "field": {
+            "enum": [
+              "title",
+              "body",
+              "latex",
+              "anchors"
+            ]
+          },
+          "before": {
+            "type": "string"
+          },
+          "after": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "anchors": {
+            "type": "array",
+            "items": {
+              "$ref": "knowledge-ir.schema.json#/$defs/anchor"
+            }
+          }
+        }
+      }
+    },
+    "image_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
