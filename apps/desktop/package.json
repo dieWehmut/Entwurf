@@ -12,7 +12,7 @@
     "tauri": "tauri",
     "desktop:dev": "tauri dev -- --locked",
     "desktop:build": "tauri build -- --locked",
-    "web:assets": "node scripts/prepare-web-assets.mjs && node ../../scripts/release/package-browser-companion.mjs",
+    "web:assets": "node scripts/prepare-web-assets.mjs && node ../../scripts/release/package-browser-companion.mjs && node ../../scripts/release/generate-notices.mjs --web",
     "web:build": "pnpm web:assets && tsc -b && vite build",
     "web:dev": "pnpm web:assets && vite --host 127.0.0.1"
   },

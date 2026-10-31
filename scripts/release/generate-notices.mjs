@@ -5,7 +5,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { renderNotices, validateInventory } from './notices-lib.mjs';
+import { renderNotices, selectCargoTreePackages, validateInventory } from './notices-lib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = p => fs.readFileSync(p, 'utf8');
@@ -31,7 +31,9 @@ for (const notice of fontNotices) {
 }
 const args = process.argv.slice(2);
 const check = args.includes('--check');
-const output = path.join(root, 'apps/desktop/src-tauri/resources/licenses');
+const web = args.includes('--web');
+const target = web ? 'wasm32-unknown-unknown' : 'x86_64-pc-windows-msvc';
+const output = path.join(root, web ? 'apps/desktop/public/licenses' : 'apps/desktop/src-tauri/resources/licenses');
 const texts = {};
 const packages = [];
 const upstream = path.join(root, 'docs/licenses/upstream');
@@ -66,17 +68,22 @@ function addUpstreamNotices(key, files, provenance) {
     files.push(file); provenance.push(o.source);
   }
 }
-const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--offline', '--locked', '--format-version', '1', '--filter-platform', 'x86_64-pc-windows-msvc'], { cwd: root, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' }));
+const cargo = command => execFileSync('cargo', command, { cwd: root, maxBuffer: 64 * 1024 * 1024, encoding: 'utf8' });
+// Full package metadata supplies host build-dependency details too. The selected
+// tree, not workspace-wide feature unification, defines the browser inventory.
+const metadata = JSON.parse(cargo(['metadata', '--offline', '--locked', '--format-version', '1', ...(web ? [] : ['--filter-platform', target])]));
 const nodes = new Map(metadata.resolve.nodes.map(n => [n.id, n]));
-const start = metadata.packages.find(p => p.name === 'entwurf-desktop');
-if (!start) throw new Error('desktop package missing');
+const start = metadata.packages.find(p => p.name === (web ? 'entwurf-wasm' : 'entwurf-desktop'));
+if (!start) throw new Error('entry package missing');
 const reachable = new Set();
 function visit(id) {
   if (reachable.has(id)) return;
   reachable.add(id);
   for (const dep of nodes.get(id).deps) if (dep.dep_kinds.some(k => k.kind !== 'dev')) visit(dep.pkg);
 }
-visit(start.id);
+if (web) {
+  for (const p of selectCargoTreePackages(metadata, cargo(['tree', '--offline', '--locked', '-p', 'entwurf-wasm', '--target', target, '--edges', 'normal,build', '--prefix', 'none', '--format', '{p}', '--no-dedupe']))) reachable.add(p.id);
+} else visit(start.id);
 for (const p of metadata.packages.filter(p => p.source && reachable.has(p.id))) {
   const dir = path.dirname(p.manifest_path);
   const files = licenseFiles(dir);
@@ -110,30 +117,32 @@ function npm(dir) {
 }
 const desktop = path.join(root, 'apps/desktop');
 for (const name of Object.keys(json(path.join(desktop, 'package.json')).dependencies)) npm(resolvePackage(desktop, name));
-const nuget = process.env.NUGET_PACKAGES || path.join(os.homedir(), '.nuget/packages');
-const bridge = path.join(root, 'apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json');
-for (const id of Object.keys(json(bridge).libraries).filter(id => !id.startsWith('Entwurf.'))) {
-  const [name, version] = id.replace(/^runtimepack\./, '').split('/');
-  const dir = path.join(nuget, name.toLowerCase(), version);
-  const spec = read(path.join(dir, fs.readdirSync(dir).find(f => f.endsWith('.nuspec'))));
-  const license = spec.match(/<license type="expression">([^<]+)<\/license>/)?.[1]
-    ?? (spec.includes('<license type="file">') ? 'SEE-LICENSE-FILE' : 'UNKNOWN');
-  const source = `https://www.nuget.org/packages/${name}/${version}`;
-  const files = licenseFiles(dir);
-  add({ ecosystem: 'nuget', name, version, license, source }, files, files.map(f => `${source}#${posix(path.relative(dir, f))}`));
+if (!web) {
+  const bridge = path.join(root, 'apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json');
+  const nuget = process.env.NUGET_PACKAGES || path.join(os.homedir(), '.nuget/packages');
+  for (const id of Object.keys(json(bridge).libraries).filter(id => !id.startsWith('Entwurf.'))) {
+    const [name, version] = id.replace(/^runtimepack\./, '').split('/');
+    const dir = path.join(nuget, name.toLowerCase(), version);
+    const spec = read(path.join(dir, fs.readdirSync(dir).find(f => f.endsWith('.nuspec'))));
+    const license = spec.match(/<license type="expression">([^<]+)<\/license>/)?.[1]
+      ?? (spec.includes('<license type="file">') ? 'SEE-LICENSE-FILE' : 'UNKNOWN');
+    const source = `https://www.nuget.org/packages/${name}/${version}`;
+    const files = licenseFiles(dir);
+    add({ ecosystem: 'nuget', name, version, license, source }, files, files.map(f => `${source}#${posix(path.relative(dir, f))}`));
+  }
+  const pdfium = path.join(root, 'apps/desktop/src-tauri/resources/pdfium');
+  const pdf = json(path.join(pdfium, 'manifest.json'));
+  const pdfFiles = [path.join(pdfium, 'LICENSE'), ...fs.readdirSync(path.join(pdfium, 'licenses')).map(f => path.join(pdfium, 'licenses', f))];
+  add({ ecosystem: 'binary', name: 'PDFium', version: pdf.version, license: pdf.license, source: pdf.distributor }, pdfFiles, [pdf.distributor]);
 }
-const pdfium = path.join(root, 'apps/desktop/src-tauri/resources/pdfium');
-const pdf = json(path.join(pdfium, 'manifest.json'));
-const pdfFiles = [path.join(pdfium, 'LICENSE'), ...fs.readdirSync(path.join(pdfium, 'licenses')).map(f => path.join(pdfium, 'licenses', f))];
-add({ ecosystem: 'binary', name: 'PDFium', version: pdf.version, license: pdf.license, source: pdf.distributor }, pdfFiles, [pdf.distributor]);
 add({ ecosystem: 'font', name: 'LXGW WenKai', version: 'bundled', license: 'OFL-1.1', source: 'https://github.com/lxgw/LxgwWenKai' }, [path.join(root, 'assets/fonts/OFL.txt')], ['assets/fonts/OFL.txt']);
 const typstAssets = metadata.packages.find(p => p.name === 'typst-assets');
 if (typstAssets && reachable.has(typstAssets.id)) add({ ecosystem: 'font', name: 'Typst bundled fonts', version: typstAssets.version, license: 'SEE-NOTICE', source: `https://crates.io/crates/typst-assets/${typstAssets.version}` }, [path.join(root, 'assets/fonts/Typst-NOTICE.txt')], ['assets/fonts/Typst-NOTICE.txt']);
 add({ ecosystem: 'font', name: 'DejaVu', version: 'bundled', license: 'Bitstream-Vera AND public-domain', source: 'https://dejavu-fonts.github.io/' }, [path.join(root, 'assets/fonts/DejaVu-LICENSE.txt')], ['assets/fonts/DejaVu-LICENSE.txt']);
 packages.sort((a, b) => `${a.ecosystem}:${a.name}@${a.version}`.localeCompare(`${b.ecosystem}:${b.name}@${b.version}`, 'en'));
 const inventory = {
-  schema_version: 1, target: 'x86_64-pc-windows-msvc',
-  scope: 'desktop normal/build Cargo closure; pnpm production closure; published self-contained sidecar; fonts; PDFium',
+  schema_version: 1, target,
+  scope: web ? 'entwurf-wasm wasm32 normal/build Cargo closure; pnpm production closure; browser PDF/OCR assets; bundled fonts' : 'desktop normal/build Cargo closure; pnpm production closure; published self-contained sidecar; fonts; PDFium',
   tools: { package_manager: json(path.join(desktop, 'package.json')).packageManager, distributed: false },
   attribution_notes: [
     'License declarations are preserved as published; alternative license expressions are not rewritten.',
@@ -145,15 +154,16 @@ const inventory = {
     '@tesseract.js-data/eng and @tesseract.js-data/chi_sim 1.0.0 publish MIT package declarations but omit full MIT notices. Those declarations are preserved separately from their 4.0.0 traineddata, which matches tesseract-ocr/tessdata 4.0.0 byte-for-byte after decompression and is covered by its pinned COPYING and Apache-2.0 text. The accompanying Entwurf provenance note is not an upstream license or an invented copyright notice.',
     'PDFium freetype.txt uses ISO-8859-1. Its copyright character is losslessly transcoded to UTF-8 in the consolidated text; the hash references original bytes, also shipped verbatim in PDFium resources.',
     'Native Tesseract, ChatGPT and WebView2 are detected external applications/runtimes and are not included in this inventory. Bundled tesseract.js, its core and traineddata packages are included in the production npm closure.',
-  ],
+  ].filter(note => !web || (!note.startsWith('FlaUI ') && !note.startsWith('PDFium '))),
   input_hash_normalization: 'UTF-8, CRLF normalized to LF for identical Windows and Unix checkouts',
-  inputs: Object.fromEntries(['Cargo.lock', 'apps/desktop/pnpm-lock.yaml', 'apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json'].map(p => [p, digest(read(path.join(root, p)).replace(/\r\n/g, '\n'))])),
+  inputs: Object.fromEntries(['Cargo.lock', 'apps/desktop/pnpm-lock.yaml', ...(web ? ['apps/desktop/package.json', 'crates/entwurf-wasm/Cargo.toml', 'crates/entwurf-core/Cargo.toml', 'docs/licenses/upstream/index.json'] : ['apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json'])].map(p => [p, digest(read(path.join(root, p)).replace(/\r\n/g, '\n'))])),
+  ...(web ? { font_files: Object.fromEntries(['assets/fonts/LXGWWenKai-Regular.ttf', 'apps/desktop/public/fonts/LXGWWenKai-Regular.ttf', 'apps/desktop/public/fonts/DejaVuSansMono.ttf'].map(p => [p, digest(fs.readFileSync(path.join(root, p)))])) } : {}),
   package_count: packages.length,
   unresolved: packages.filter(p => p.license === 'UNKNOWN' || !p.notices.length).map(p => `${p.ecosystem}:${p.name}@${p.version}`),
   packages,
 };
 fs.mkdirSync(output, { recursive: true });
-for (const [file, data] of [['dependency-inventory.json', JSON.stringify(inventory, null, 2) + '\n'], ['THIRD-PARTY-NOTICES.txt', renderNotices(packages, texts)]]) {
+for (const [file, data] of [['dependency-inventory.json', JSON.stringify(inventory, null, 2) + '\n'], ['THIRD-PARTY-NOTICES.txt', renderNotices(packages, texts, { web })]]) {
   const destination = path.join(output, file);
   if (check) { if (!fs.existsSync(destination) || read(destination) !== data) throw new Error(`stale generated resource: ${file}`); }
   else fs.writeFileSync(destination, data);

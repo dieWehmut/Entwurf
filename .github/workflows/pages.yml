@@ -40,7 +40,10 @@ jobs:
       - name: Test frontend
         run: pnpm --dir apps/desktop test
       - name: Prepare bundled PDF and OCR assets
-        run: pnpm --dir apps/desktop web:assets
+        run: |
+          cargo fetch --locked
+          pnpm --dir apps/desktop web:assets
+          node scripts/release/generate-notices.mjs --web --check
       - name: Build under the repository Pages path
         working-directory: apps/desktop
         run: |

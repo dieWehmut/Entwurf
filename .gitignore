@@ -18,6 +18,7 @@
 /apps/desktop/public/vendor/
 /apps/desktop/public/wasm/
 /apps/desktop/public/companion/
+/apps/desktop/public/licenses/
 /apps/desktop/dist-local/
 
 # Tool and editor caches.
