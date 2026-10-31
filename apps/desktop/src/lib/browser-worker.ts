@@ -9,7 +9,7 @@ interface WasmCore {
   browser_list_files(): string;
   browser_call(command: string, args: string): string;
 }
-interface Request { id: number; type: "call" | "upload" | "read" | "artifact"; command?: string; args?: unknown; path?: string; files?: { path: string; bytes: Uint8Array }[] }
+interface Request { id: number; type: "call" | "upload" | "read" | "artifact"; command?: string; args?: unknown; cleanupPaths?: string[]; path?: string; files?: { path: string; bytes: Uint8Array }[] }
 const context = self as unknown as { onmessage: (event: MessageEvent<Request>) => void; postMessage(value: unknown): void; location: Location };
 const database = new BrowserStore();
 let core: WasmCore;
@@ -63,6 +63,7 @@ async function execute(request: Request) {
       result = null;
     } else {
       result = JSON.parse(core.browser_call(request.command!, JSON.stringify(request.args ?? {})));
+      for (const path of request.cleanupPaths ?? []) if (path.startsWith("/uploads/")) core.browser_delete_file(path);
       const snapshot = result as { root?: string; selected_task_id?: string | null } | null;
       if (snapshot?.root) active = { root: snapshot.root, ...(snapshot.selected_task_id ? { taskId: snapshot.selected_task_id } : {}) };
       if (request.command === "import_sources" || request.command === "import_style_images") {

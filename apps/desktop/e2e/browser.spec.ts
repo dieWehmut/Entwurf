@@ -27,6 +27,9 @@ test("real WASM project imports Markdown and survives reload with original sourc
   await page.getByRole("button", { name: "选择本机文件并导入" }).click();
   await (await chooser).setFiles({ name: "sets.md", mimeType: "text/markdown", buffer: Buffer.from("# 集合\n\n集合是确定对象组成的整体。\n\n## 映射\n\n映射将定义域中的元素对应到值域中的元素。\n") });
   await expect(page.getByText("sets.md", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "重新解析原件" }).click();
+  await expect(page.getByText("重新解析原件完成", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await nav(page, "结果");
   await expect(page.getByLabel("节点标题")).toBeVisible();
   await page.getByLabel("节点标题").fill("已保存的集合定义");
@@ -94,6 +97,11 @@ test("real PDF text and image OCR keep original sources and review evidence", as
   await page.reload();
   await nav(page, "资料与风格");
   for (const name of ["two-pages.pdf", "bilingual.png", "scanned.pdf"]) await expect(page.getByText(name, { exact: true })).toBeVisible();
+  for (const name of ["two-pages.pdf", "bilingual.png"]) {
+    await page.locator("article.source-record").filter({ has: page.getByText(name, { exact: true }) }).getByRole("button", { name: "重新解析原件" }).click();
+    await expect(page.getByText("重新解析原件完成", { exact: true })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  }
   expect(externalRequests).toEqual([]);
 });
 

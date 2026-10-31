@@ -1,7 +1,7 @@
 import type { Commands, WorkspaceClient, WorkspaceSnapshot } from "./workspace";
 import { chooseFiles, chooseJson, download, sourceAccept } from "./web-files";
 
-type Request = { type: "call"; command: string; args?: unknown } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact"; args: unknown };
+type Request = { type: "call"; command: string; args?: unknown; cleanupPaths?: string[] } | { type: "upload"; files: { path: string; bytes: Uint8Array }[] } | { type: "read"; path: string } | { type: "artifact"; args: unknown };
 export function createBrowserClient(): WorkspaceClient {
   const worker = new Worker(new URL("./browser-worker.ts", import.meta.url), { type: "module" });
   let sequence = 0;
@@ -60,10 +60,15 @@ export function createBrowserClient(): WorkspaceClient {
         const snapshot = await invoke<WorkspaceSnapshot>("workspace_snapshot", { taskId });
         const source = snapshot.current_version?.ir.sources.find(item => item.id === sourceId);
         if (source) {
-          const bytes = await request<Uint8Array>({ type: "read", path: `${snapshot.root}/${source.stored_path}` });
+          const path = source.stored_path.startsWith("/") ? source.stored_path : `${snapshot.root}/${source.stored_path}`;
+          const bytes = await request<Uint8Array>({ type: "read", path });
           const { extractBinary } = await import("./browser-extraction");
           const extraction = await extractBinary(new File([new Uint8Array(bytes).buffer], source.original_name), snapshot.project.settings.ocr_languages);
-          if (extraction) await invoke("register_extraction", { path: `${snapshot.root}/${source.stored_path}`, extraction });
+          if (extraction) {
+            const extractedPath = `/uploads/${crypto.randomUUID()}/${source.original_name.replaceAll(/[\\/]/g, "_")}`;
+            await request({ type: "upload", files: [{ path: extractedPath, bytes }] });
+            await request({ type: "call", command: "register_extraction", args: { path: extractedPath, extraction }, cleanupPaths: [extractedPath] });
+          }
         }
         return invoke(command, args);
       }
