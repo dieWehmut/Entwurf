@@ -154,9 +154,15 @@ impl Drop for Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        Self::with_database(None).await
+    }
+    async fn with_database(database: Option<Value>) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let dir = tempfile::tempdir().unwrap();
+        if let Some(database) = database {
+            std::fs::write(dir.path().join("automation.json"), database.to_string()).unwrap();
+        }
         let state = AutomationState::new(dir.path(), port).unwrap();
         let router = state.router();
         let token = state.issue_access("owner", ORIGIN).unwrap();
@@ -864,4 +870,273 @@ async fn failed_artifact_storage_disconnects_and_reconnect_retries_bytes_not_pro
         json!({"type":"artifact_accepted","run_id":"run-1"})
     );
     reconnected.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn legacy_database_migrates_stable_independent_native_credential() {
+    let f = Fixture::with_database(Some(json!({
+        "schema_version":1,"extension_token":"legacy-browser-token","access":[],"runs":{}
+    })))
+    .await;
+    assert_eq!(f.state.status().unwrap()["provider"], "browser");
+    let disk: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    assert_eq!(disk["provider"], "browser");
+    let native = disk["native_token"]
+        .as_str()
+        .expect("migration must persist native credential");
+    assert_eq!(native.len(), 64);
+    assert_ne!(native, "legacy-browser-token");
+    let reopened = AutomationState::new(f.dir.path(), f.port).unwrap();
+    assert_eq!(
+        reopened.pairing_info().extension_token,
+        "legacy-browser-token"
+    );
+    let second: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    assert_eq!(second["native_token"], native);
+}
+
+#[tokio::test]
+async fn selected_native_provider_rejects_browser_token_before_peer_claim() {
+    let f = Fixture::with_database(Some(json!({
+        "schema_version":1,"extension_token":"browser-token","native_token":"native-token",
+        "provider":"windows","access":[],"runs":{}
+    })))
+    .await;
+    let mut wrong = f.socket().await;
+    wrong
+        .send(Message::Text(
+            json!({"type":"authenticate","token":"browser-token"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        read(&mut wrong).await,
+        json!({"type":"error","code":"unauthorized"})
+    );
+    assert_eq!(f.state.status().unwrap()["connected"], false);
+    let mut native = f.socket().await;
+    native
+        .send(Message::Text(
+            json!({"type":"authenticate","token":"native-token"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(read(&mut native).await["type"], "authenticated");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), native.next())
+            .await
+            .is_err(),
+        "authentication must not send start"
+    );
+    native.close(None).await.unwrap();
+}
+
+async fn authenticate_token(f: &Fixture, token: &str, accepted: bool) -> Socket {
+    let mut socket = f.socket().await;
+    socket
+        .send(Message::Text(
+            json!({"type":"authenticate","token":token})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let response = read(&mut socket).await;
+    if accepted {
+        assert_eq!(response, json!({"type":"authenticated"}));
+    } else {
+        assert_eq!(response, json!({"type":"error","code":"unauthorized"}));
+    }
+    socket
+}
+
+async fn closed_without_start(socket: &mut Socket) {
+    let closed = tokio::time::timeout(Duration::from_secs(2), socket.next()).await;
+    assert!(
+        matches!(
+            closed,
+            Ok(None) | Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_)))
+        ),
+        "provider switch must disconnect the old peer without start: {closed:?}"
+    );
+}
+
+#[tokio::test]
+async fn provider_switch_disconnects_old_peer_and_gates_reconnect_with_independent_tokens() {
+    let f = Fixture::new().await;
+    let browser = f.state.pairing_info().extension_token;
+    let native = f.state.native_pairing_info().extension_token;
+    assert_ne!(browser, native);
+    let mut wrong_native = authenticate_token(&f, &native, false).await;
+    closed_without_start(&mut wrong_native).await;
+    let mut old = f.ready().await;
+    f.state.set_provider("windows").unwrap();
+    assert_eq!(f.state.provider().unwrap(), "windows");
+    assert_eq!(
+        f.state.status().unwrap(),
+        json!({"provider":"windows","connected":false,"available":false,"reason":"provider_changed"})
+    );
+    // New peer may connect before the old socket finishes disconnecting.
+    let mut current = authenticate_token(&f, &native, true).await;
+    closed_without_start(&mut old).await;
+    let mut wrong_browser = authenticate_token(&f, &browser, false).await;
+    closed_without_start(&mut wrong_browser).await;
+    assert_eq!(
+        f.state.status().unwrap()["connected"],
+        true,
+        "late old-peer disconnect must not clear the new peer"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), current.next())
+            .await
+            .is_err()
+    );
+    let restored = AutomationState::new(f.dir.path(), f.port).unwrap();
+    assert_eq!(restored.provider().unwrap(), "windows");
+    assert_eq!(restored.native_pairing_info().extension_token, native);
+    assert_eq!(restored.pairing_info().extension_token, browser);
+    f.state.set_provider("browser").unwrap();
+    closed_without_start(&mut current).await;
+    let mut wrong_native = authenticate_token(&f, &native, false).await;
+    closed_without_start(&mut wrong_native).await;
+    let mut browser = f.authenticated().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), browser.next())
+            .await
+            .is_err()
+    );
+    browser.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn provider_change_rejects_queued_paused_and_pending_import_but_same_provider_recovers() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    for _ in 0..2 {
+        assert_eq!(f.state.set_provider("windows").unwrap_err().0, "run_active");
+        f.state.set_provider("browser").unwrap();
+    }
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    socket.close(None).await.unwrap();
+    f.phase("paused").await;
+    assert_eq!(f.state.set_provider("windows").unwrap_err().0, "run_active");
+    f.state.set_provider("browser").unwrap();
+    let mut socket = f.authenticated().await;
+    assert_eq!(
+        read(&mut socket).await,
+        json!({"type":"status","run_id":"run-1"})
+    );
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), socket.next())
+            .await
+            .is_err(),
+        "same provider recovery must not replay start"
+    );
+    let (_, sha, artifact) = image();
+    socket
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    assert_eq!(f.state.set_provider("windows").unwrap_err().0, "run_active");
+    f.state.set_provider("browser").unwrap();
+    assert_eq!(f.state.provider().unwrap(), "browser");
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs/run-1/ack",
+            &f.token,
+            json!({"sha256":sha,"image_id":"retained-image"})
+        )
+        .await
+        .1["phase"],
+        "completed"
+    );
+    assert_eq!(read(&mut socket).await["type"], "artifact_accepted");
+    f.state.set_provider("windows").unwrap();
+    closed_without_start(&mut socket).await;
+}
+
+#[tokio::test]
+async fn failed_provider_persistence_preserves_old_connection_and_ready_state() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    let before = f.state.status().unwrap();
+    let path = f.dir.path().join("automation.json");
+    let backup = f.dir.path().join("saved-automation.json");
+    std::fs::rename(&path, &backup).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(
+        f.state.set_provider("windows").unwrap_err().0,
+        "automation_storage_failed"
+    );
+    assert_eq!(f.state.provider().unwrap(), "browser");
+    assert_eq!(f.state.status().unwrap(), before);
+    f.state.set_provider("browser").unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), socket.next())
+            .await
+            .is_err(),
+        "failed switch must keep the old WebSocket"
+    );
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(&backup, &path).unwrap();
+    let persisted: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(persisted["provider"], "browser");
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        read(&mut socket).await["type"],
+        "start",
+        "old provider must remain usable after failed switch"
+    );
+    socket.close(None).await.unwrap();
+}
+
+#[test]
+fn unsupported_provider_never_changes_persistent_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AutomationState::new(dir.path(), 48123).unwrap();
+    let path = dir.path().join("automation.json");
+    let before = std::fs::read(&path).unwrap();
+    for provider in ["", "native", "Windows", "browser ", "http://remote"] {
+        assert_eq!(
+            state.set_provider(provider).unwrap_err().0,
+            "invalid_provider"
+        );
+        assert_eq!(state.provider().unwrap(), "browser");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    let mut invalid: Value = serde_json::from_slice(&before).unwrap();
+    invalid["provider"] = json!("unknown");
+    std::fs::write(&path, invalid.to_string()).unwrap();
+    assert!(
+        matches!(AutomationState::new(dir.path(), 48123), Err(e) if e.0 == "invalid_automation_state")
+    );
 }

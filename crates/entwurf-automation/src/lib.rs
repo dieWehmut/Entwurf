@@ -38,6 +38,10 @@ struct Peer {
 struct Database {
     schema_version: u32,
     extension_token: String,
+    #[serde(default = "token")]
+    native_token: String,
+    #[serde(default = "default_provider")]
+    provider: String,
     access: Vec<Access>,
     runs: BTreeMap<String, StoredRun>,
 }
@@ -81,6 +85,12 @@ pub(crate) struct StartRun {
 pub(crate) struct Acknowledge {
     sha256: String,
     image_id: String,
+}
+fn default_provider() -> String {
+    "browser".into()
+}
+fn valid_provider(provider: &str) -> bool {
+    matches!(provider, "browser" | "windows")
 }
 fn token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
@@ -152,12 +162,14 @@ impl AutomationState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Database {
                 schema_version: 1,
                 extension_token: token(),
+                native_token: token(),
+                provider: default_provider(),
                 access: vec![],
                 runs: BTreeMap::new(),
             },
             Err(_) => return Err(AutomationError("automation_storage_failed")),
         };
-        if database.schema_version != 1 {
+        if database.schema_version != 1 || !valid_provider(&database.provider) {
             return Err(AutomationError("invalid_automation_state"));
         }
         let state = Self(Arc::new(Shared {
@@ -184,6 +196,35 @@ impl AutomationState {
     }
     pub fn router(&self) -> axum::Router {
         router::router(self.clone())
+    }
+    pub fn provider(&self) -> Result<String> {
+        Ok(self.lock()?.database.provider.clone())
+    }
+    pub fn set_provider(&self, provider: &str) -> Result<()> {
+        if !valid_provider(provider) {
+            return Err(AutomationError("invalid_provider"));
+        }
+        let mut inner = self.lock()?;
+        if inner.database.provider == provider {
+            return Ok(());
+        }
+        if inner
+            .database
+            .runs
+            .values()
+            .any(|run| active(&run.view.phase))
+        {
+            return Err(AutomationError("run_active"));
+        }
+        let mut database = inner.database.clone();
+        database.provider = provider.into();
+        // Keep authentication and starts excluded until the durable selection and
+        // peer removal agree. A failed write must preserve the previous session.
+        self.commit(&mut inner, database)?;
+        inner.peer = None; // Drops the only sender, waking the old socket to exit.
+        inner.available = false;
+        inner.reason = "provider_changed".into();
+        Ok(())
     }
     pub fn issue_access(&self, owner: &str, allowed_origin: &str) -> Result<String> {
         if !valid_id(owner) {
@@ -235,6 +276,17 @@ impl AutomationState {
             websocket_url: format!("ws://127.0.0.1:{}/api/automation/extension", self.0.port),
         }
     }
+    pub fn native_pairing_info(&self) -> PairingInfo {
+        let inner = self
+            .0
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        PairingInfo {
+            extension_token: inner.database.native_token.clone(),
+            websocket_url: format!("ws://127.0.0.1:{}/api/automation/extension", self.0.port),
+        }
+    }
     fn lock(&self) -> Result<MutexGuard<'_, Inner>> {
         self.0
             .inner
@@ -269,7 +321,7 @@ impl AutomationState {
     pub fn status(&self) -> Result<Value> {
         let i = self.lock()?;
         Ok(
-            json!({"connected":i.peer.is_some(),"available":i.peer.is_some() && i.available,"reason":i.reason}),
+            json!({"connected":i.peer.is_some(),"available":i.peer.is_some() && i.available,"reason":i.reason,"provider":i.database.provider}),
         )
     }
     fn list(&self, owner: &str, task: Option<&str>) -> Result<Vec<RunView>> {
