@@ -14,8 +14,10 @@ try {
         Invoke-CheckedNative 'pnpm' @('install', '--frozen-lockfile')
         Invoke-CheckedNative 'pnpm' @('build')
     } finally { Pop-Location }
-    Invoke-CheckedNative 'cargo' @('build', '--locked', '--workspace', '--release', '--target', 'x86_64-pc-windows-msvc')
-    # Sources are restored by the build above; attribution generation stays offline.
+    # Tauri builds the shipped desktop with its custom-protocol feature below.
+    # Restore metadata/notices without a second LTO build of the internal CLI
+    # and the desktop's development-protocol variant.
+    Invoke-CheckedNative 'cargo' @('fetch', '--locked')
     Invoke-CheckedNative 'node' @('scripts/release/generate-notices.mjs')
     Push-Location (Join-Path $root 'apps\desktop')
     try {
