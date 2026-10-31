@@ -19,6 +19,14 @@ it("reports server rejection without treating it as a saved snapshot", async () 
   await expect(client.call("create_task", { title: "test" })).rejects.toThrow("stale version");
 });
 
+it("opens automation setup on the current local HTTP port", async () => {
+  const opened = vi.spyOn(window, "open").mockReturnValue(null);
+  try {
+    await createHttpClient({ session_token: "secret" } as never).call("open_automation_setup", undefined);
+    expect(opened).toHaveBeenCalledWith("/pair.html", "_blank", "noopener,noreferrer");
+  } finally { opened.mockRestore(); }
+});
+
 it("creates a new document identity even when sessionStorage is cloned", async () => {
   sessionStorage.setItem("entwurf.http-client.v1", "inherited-id");
   const first = (await import("./http-client")).httpClientId();
@@ -33,4 +41,22 @@ it("restores only project selection into the new server session", async () => {
   const call = vi.fn().mockResolvedValue(null);
   await restoreHttpSelection({ call } as never);
   expect(call.mock.calls).toEqual([["load_existing_project", { root: "/projects/p" }], ["workspace_snapshot", { taskId: "task-a" }]]);
+});
+
+it("stages generated image bytes before the domain import and forwards the opaque handle", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([{ path: "/uploads/opaque", name: "generated-image" }]))).mockResolvedValueOnce(new Response(JSON.stringify({ project: {} }))).mockResolvedValueOnce(new Response("null"));
+  vi.stubGlobal("fetch", fetcher);
+  await createHttpClient({ session_token: "secret" } as never).call("import_generated_image", { taskId: "t", baseVersionId: "v", runId: "r", promptSha256: "p", bytes: [1,2], expectedSha256: "s", mimeType: "image/png" });
+  expect(fetcher.mock.calls[0][0]).toBe("/api/uploads");
+  expect(fetcher.mock.calls[0][1].body).toBeInstanceOf(FormData);
+  const command = JSON.parse(fetcher.mock.calls[1][1].body);
+  expect(command.args.path).toBe("/uploads/opaque");
+  expect(command.args.bytes).toBeUndefined();
+  expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({command: "discard_uploads", args: {paths: ["/uploads/opaque"]}});
+});
+it("discards the owned temporary upload after a rejected image import", async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([{path:"/uploads/owned/image"}]))).mockResolvedValueOnce(new Response(JSON.stringify({error:"stale version"}),{status:409})).mockResolvedValueOnce(new Response("null"));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(createHttpClient({session_token:"secret"} as never).call("import_generated_image",{taskId:"t",baseVersionId:"old",runId:"r",promptSha256:"p",bytes:[1],expectedSha256:"s",mimeType:"image/png"})).rejects.toThrow("stale version");
+  expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({command:"discard_uploads",args:{paths:["/uploads/owned/image"]}});
 });

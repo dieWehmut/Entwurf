@@ -1,3 +1,4 @@
+import { GeneratedImageGallery } from "../components/AutomationPanel";
 import { useState, type Dispatch, type SetStateAction } from "react";
 import type { Run } from "../App";
 import type { KnowledgeNode, TaskVersion } from "../lib/types";
@@ -56,6 +57,7 @@ export function ResultPage({ snapshot, client, run, locked, busy, draft, setDraf
     </article>)}
   </section>}
   {!!version.ir.corrections.length && <section className="panel"><h2>可撤销纠错记录</h2>{version.ir.corrections.map(c => <article className="source-record" key={c.id}><strong>{c.field} · {c.node_id}</strong><pre className="json-view">{c.before}</pre><pre className="json-view">{c.after}</pre><p>{c.reason}</p><p className="muted">{c.created_at} · {c.reverted ? "已撤销" : "已记录"}</p><button className="secondary-button" disabled={locked || c.reverted || !c.accepted} onClick={() => { void run("撤销纠错", () => client.call("revert_correction", { ...actions, baseVersionId: version.id, correctionId: c.id })); }}>撤销这条纠错</button></article>)}</section>}
+  <GeneratedImageGallery snapshot={snapshot} client={client} />
   <section className="panel"><h2>导出文件</h2><p className="muted">导出会重新执行本地编译与校验。仅通过门禁的当前版本可生成文件。</p><button className="primary-button" disabled={locked || !!blocking || !!version.ir.unverified.length} onClick={() => { void run("导出文件", () => client.call("export_current", actions), undefined, exportOutcomeError); }}>导出 SVG / PNG / PDF</button>
   {version.artifacts ? <div className="artifact-list">{(['svg', 'png', 'pdf', 'manifest', 'ir'] as const).flatMap(kind => { const paths = version.artifacts![kind]; return (Array.isArray(paths) ? paths : [paths]).map((path, index) => <div className="source-record" key={`${kind}-${index}`}><strong>{kind.toUpperCase()}</strong><p className="path-text">{path}</p><button className="secondary-button" disabled={busy} onClick={() => { void run("打开导出文件", () => client.call("open_export", { ...actions, kind, index })); }}>打开 {kind.toUpperCase()}{Array.isArray(paths) ? ` ${index + 1}` : ""}</button></div>); })}</div> : <p className="empty-note">当前版本尚未产生导出文件。</p>}</section></div>;
 }

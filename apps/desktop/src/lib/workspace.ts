@@ -32,6 +32,10 @@ export type NodeEdit = Pick<KnowledgeNode, "id" | "title" | "body" | "latex" | "
 type TaskArgs = { taskId: string };
 type VersionArgs = TaskArgs & { baseVersionId: string };
 export interface Commands {
+  automation_access: [undefined, { token: string; base_url: string }];
+  open_automation_setup: [undefined, null];
+  import_generated_image: [{ taskId: string; baseVersionId: string; runId: string; promptSha256: string; bytes: number[]; expectedSha256: string; mimeType: string }, WorkspaceSnapshot];
+  generated_image_bytes: [{ taskId: string; imageId: string }, number[]];
   bootstrap: [undefined, Capabilities];
   workspace_snapshot: [{ taskId?: string }, WorkspaceSnapshot];
   create_project: [{ root: string; name: string }, WorkspaceSnapshot];

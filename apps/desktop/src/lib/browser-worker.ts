@@ -9,7 +9,7 @@ interface WasmCore {
   browser_list_files(): string;
   browser_call(command: string, args: string): string;
 }
-interface Request { id: number; type: "call" | "upload" | "read" | "artifact"; command?: string; args?: unknown; cleanupPaths?: string[]; path?: string; files?: { path: string; bytes: Uint8Array }[] }
+interface Request { id: number; type: "call" | "upload" | "read" | "artifact" | "generated_image"; command?: string; args?: unknown; cleanupPaths?: string[]; path?: string; files?: { path: string; bytes: Uint8Array }[] }
 const context = self as unknown as { onmessage: (event: MessageEvent<Request>) => void; postMessage(value: unknown): void; location: Location };
 const database = new BrowserStore();
 let core: WasmCore;
@@ -51,6 +51,10 @@ async function execute(request: Request) {
   if (loadedRevision !== before.revision) restore(before);
   const previousActive = active;
   if (request.type === "read") return core.browser_get_file(request.path!);
+  if (request.type === "generated_image") {
+    const path = JSON.parse(core.browser_call("generated_image_path", JSON.stringify(request.args))) as string;
+    return core.browser_get_file(path);
+  }
   if (request.type === "artifact") {
     const path = JSON.parse(core.browser_call("artifact_path", JSON.stringify(request.args))) as string;
     return { path, bytes: core.browser_get_file(path) };
@@ -62,8 +66,8 @@ async function execute(request: Request) {
       for (const file of request.files ?? []) core.browser_put_file(file.path, file.bytes);
       result = null;
     } else {
+      for (const file of request.files ?? []) core.browser_put_file(file.path, file.bytes);
       result = JSON.parse(core.browser_call(request.command!, JSON.stringify(request.args ?? {})));
-      for (const path of request.cleanupPaths ?? []) if (path.startsWith("/uploads/")) core.browser_delete_file(path);
       const snapshot = result as { root?: string; selected_task_id?: string | null } | null;
       if (snapshot?.root) active = { root: snapshot.root, ...(snapshot.selected_task_id ? { taskId: snapshot.selected_task_id } : {}) };
       if (request.command === "import_sources" || request.command === "import_style_images") {
@@ -71,6 +75,10 @@ async function execute(request: Request) {
       }
     }
   } catch (error) { commandError = error; }
+  finally {
+    const retained = new Set(JSON.parse(core.browser_list_files()) as string[]);
+    for (const path of request.cleanupPaths ?? []) if (path.startsWith("/uploads/") && retained.has(path)) core.browser_delete_file(path);
+  }
   // Rejected ResultEnvelopes can persist correction counters and audit records.
   const after = capture();
   if (!equalFiles(before.files, after) || JSON.stringify(before.active) !== JSON.stringify(active)) {

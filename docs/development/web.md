@@ -47,3 +47,15 @@ pnpm exec playwright test --config playwright.web.config.ts --workers 1
 `.github/workflows/pages.yml` 在 `feat/v0.1` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。仓库 Pages 的发布来源需设为 GitHub Actions。部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许发布分支。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
 
 本工作流只发布静态应用与引擎资源，不运行用户任务、不上传本地资料，也不连接 ChatGPT 账号。
+
+## 图片自动化
+
+任务页保留人工 TaskEnvelope/ResultEnvelope 流程，同时提供独立的图片生成提示和单次启动按钮。网页通过本机配对窗口取得范围受限的访问凭据；仅接受指定本机来源与当前配对窗口的消息。桌面与本机 HTTP 页面通过各自工作区命令取得访问凭据。
+
+本机 HTTP 页面的自动化连接和扩展设置使用服务实际监听端口，支持 CLI `--port`。访问地址仅允许 HTTP 回环主机，不接受凭据、额外路径、查询或片段；静态网页配对与桌面内置服务继续使用默认 48123。
+
+启动请求携带唯一运行 ID、任务 ID 和当前知识版本 ID。状态轮询和页面刷新只读取已有运行，不重复提交。停止观察不会撤回已经发送的 ChatGPT 请求。图片就绪且仍匹配当前任务与知识版本时自动导入一次：校验下载哈希、提交项目存储、再次读取并校验已持久化的图片字节，再确认自动化服务。失败后保留手动重试，不随轮询无限重试；版本已变化时不自动入库。若确认请求中断，重试仍须通过已保存字节的核心校验，损坏或缺失时不释放服务端副本。失败的图片导入会清理临时上传。暂停和等待导入的运行均可停止，明确的提交拒绝不会留下虚假的排队运行。
+
+生成图片显示在任务页与结果页，标明 ChatGPT 来源、运行、基础知识版本和文件哈希，可下载原始字节。生成图片不修改知识节点、来源锚点或知识版本。仓库自动化 UI 测试使用本地响应夹具配合真实 WASM/IndexedDB，验证单次提交、刷新续接、保存后确认及原图下载，不调用真实 ChatGPT。
+
+隔离的本机服务运行在 48123 时，可用 `ENTWURF_HTTP_TEST_URL=http://127.0.0.1:48123 ENTWURF_HTTP_TEST_DATA_DIR=<隔离数据目录> pnpm exec playwright test --config playwright.http.config.ts -g 'real HTTP coordinator' --workers 1` 验证真实 HTTP、SQLite 和自动化协调器。测试连接一个本地 WebSocket 扩展夹具，交付已有 PNG 字节，验证自动入库后确认、原图下载、过期版本拒绝和上传文件清理；不操作 ChatGPT。
