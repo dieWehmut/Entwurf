@@ -17,6 +17,7 @@
 *.tsbuildinfo
 /apps/desktop/public/vendor/
 /apps/desktop/public/wasm/
+/apps/desktop/public/companion/
 /apps/desktop/dist-local/
 
 # Tool and editor caches.

@@ -1451,8 +1451,11 @@ dependencies = [
 name = "entwurf-desktop"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "entwurf-core",
+ "entwurf-web",
  "getrandom 0.3.4",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
@@ -1464,11 +1467,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "entwurf-wasm"
+version = "0.1.0"
+dependencies = [
+ "entwurf-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "entwurf-web"
 version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "entwurf-automation",
  "entwurf-core",
  "futures-util",
  "serde",
@@ -1479,16 +1493,6 @@ dependencies = [
  "tower",
  "tower-http",
  "uuid",
-]
-
-[[package]]
-name = "entwurf-wasm"
-version = "0.1.0"
-dependencies = [
- "entwurf-core",
- "serde",
- "serde_json",
- "wasm-bindgen",
 ]
 
 [[package]]

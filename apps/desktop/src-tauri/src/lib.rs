@@ -1,4 +1,5 @@
 mod bridge;
+mod companion;
 use entwurf_core::{
     ingest::IngestOptions,
     workspace::{NodeEdit, Workspace, WorkspaceSnapshot},
@@ -566,6 +567,69 @@ async fn open_export(
     .map(|_| ())
 }
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn import_generated_image(
+    app: tauri::AppHandle,
+    task_id: String,
+    base_version_id: String,
+    run_id: String,
+    prompt_sha256: String,
+    bytes: Vec<u8>,
+    expected_sha256: String,
+    mime_type: String,
+) -> Result<WorkspaceSnapshot, String> {
+    workspace_call(app, move |ws| {
+        ws.import_generated_image(
+            &task_id,
+            &base_version_id,
+            &run_id,
+            &prompt_sha256,
+            &bytes,
+            &expected_sha256,
+            &mime_type,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn generated_image_bytes(
+    app: tauri::AppHandle,
+    task_id: String,
+    image_id: String,
+) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let state = state.lock().map_err(|e| e.to_string())?;
+        let path = state
+            .as_ref()
+            .ok_or("no project is open")?
+            .generated_image_path(&task_id, &image_id)
+            .map_err(|e| e.to_string())?;
+        std::fs::read(path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn automation_access(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<serde_json::Value, String> {
+    companion::access(&app, &companion::native_origin(&window)?).await
+}
+
+#[tauri::command]
+async fn open_automation_setup(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    companion::access(&app, &companion::native_origin(&window)?).await?;
+    app.opener()
+        .open_url("http://127.0.0.1:48123/pair.html", None::<&str>)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 async fn open_chatgpt() -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -583,6 +647,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::new(None))
         .manage(CapabilityState::default())
+        .manage(companion::CompanionState::default())
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             open_workspace,
@@ -613,6 +678,10 @@ pub fn run() {
             choose_ir_file,
             copy_prompt,
             open_export,
+            import_generated_image,
+            generated_image_bytes,
+            automation_access,
+            open_automation_setup,
             open_chatgpt
         ])
         .run(tauri::generate_context!())

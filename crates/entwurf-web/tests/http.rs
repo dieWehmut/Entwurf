@@ -293,6 +293,17 @@ async fn uploaded_source_is_owned_until_import_then_staging_is_removed() {
         "/api/command",
         "b",
         Some(token),
+        json!({"command":"discard_uploads","args":{"paths":[path]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(staged.exists());
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "b",
+        Some(token),
         json!({"command":"create_project","args":{"root":"/projects/b","name":"Other"}}),
     )
     .await;
@@ -328,4 +339,255 @@ async fn uploaded_source_is_owned_until_import_then_staging_is_removed() {
         !staged.exists(),
         "retained core copy makes upload staging unnecessary"
     );
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"discard_uploads","args":{"paths":[path]}}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "cleanup is idempotent after successful import"
+    );
+    let (_, pending) = multipart(
+        &app,
+        token,
+        &[("pending.png", b"unsupported image fixture")],
+    )
+    .await;
+    let handle = pending[0]["path"].as_str().unwrap();
+    let staged = temp.path().join(handle.trim_start_matches('/'));
+    let (status, _) = request(&app, "POST", "/api/command", "a", Some(token), json!({"command":"import_generated_image","args":{"path":handle,"taskId":task_id,"baseVersionId":"stale","runId":"stale-run","promptSha256":"a".repeat(64),"expectedSha256":"b".repeat(64),"mimeType":"image/png"}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"discard_uploads","args":{"paths":[handle]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!staged.exists());
+}
+
+#[tokio::test]
+async fn image_delivery_commits_once_and_reads_identical_bytes_after_restart() {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let app = application(temp.path());
+    let (_, caps) = request(&app, "GET", "/api/bootstrap", "a", None, Value::Null).await;
+    let token = caps["session_token"].as_str().unwrap();
+    request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"create_project","args":{"root":"/projects/images","name":"Images"}}),
+    )
+    .await;
+    let (_, task) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"create_task","args":{"title":"Public fixture"}}),
+    )
+    .await;
+    let task_id = task["selected_task_id"].as_str().unwrap();
+    let (_, files) = multipart(
+        &app,
+        token,
+        &[(
+            "probability.md",
+            b"# Probability\nProbability is between zero and one.\n",
+        )],
+    )
+    .await;
+    let (status, imported) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"import_sources","args":{"taskId":task_id,"paths":[files[0]["path"]]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{imported}");
+    let original_version = imported["current_version"].clone();
+    let png = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR4nGP4DwYMEAoAU7oL9ZisIGcAAAAASUVORK5CYII=").unwrap();
+    let sha = format!("{:x}", Sha256::digest(&png));
+    let mut image_id = String::new();
+    for _ in 0..2 {
+        let (_, files) = multipart(&app, token, &[("generated.png", &png)]).await;
+        let (status, delivered) = request(&app, "POST", "/api/command", "a", Some(token), json!({"command":"import_generated_image","args":{
+            "taskId":task_id,"baseVersionId":original_version["id"],"runId":"run-unique","promptSha256":"a".repeat(64),
+            "path":files[0]["path"],"expectedSha256":sha,"mimeType":"image/png"
+        }})).await;
+        assert_eq!(status, StatusCode::OK, "{delivered}");
+        assert_eq!(delivered["current_version"], original_version);
+        assert_eq!(
+            delivered["project"]["generated_images"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        image_id = delivered["project"]["generated_images"][0]["id"]
+            .as_str()
+            .unwrap()
+            .into();
+    }
+    drop(app);
+    let app = application(temp.path());
+    let (_, caps) = request(&app, "GET", "/api/bootstrap", "a", None, Value::Null).await;
+    let token = caps["session_token"].as_str().unwrap();
+    let (status, bytes) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(token),
+        json!({"command":"generated_image_bytes","args":{"taskId":task_id,"imageId":image_id}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bytes}");
+    assert_eq!(serde_json::from_value::<Vec<u8>>(bytes).unwrap(), png);
+}
+
+async fn automation_get(app: &axum::Router, token: &str, origin: Option<&str>) -> StatusCode {
+    let mut request = Request::builder()
+        .uri("/api/automation/status")
+        .header("Host", "127.0.0.1:48123")
+        .header("Authorization", format!("Bearer {token}"));
+    if let Some(origin) = origin {
+        request = request.header("Origin", origin);
+    }
+    app.clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn pairing_separates_workspace_session_from_origin_bound_automation_access() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = application(temp.path());
+    let (_, caps) = request(&app, "GET", "/api/bootstrap", "a", None, Value::Null).await;
+    let session = caps["session_token"].as_str().unwrap();
+    assert_eq!(
+        automation_get(&app, session, None).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, local) = request(
+        &app,
+        "POST",
+        "/api/command",
+        "a",
+        Some(session),
+        json!({"command":"automation_access"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{local}");
+    let local = local["token"].as_str().unwrap();
+    assert_eq!(automation_get(&app, local, None).await, StatusCode::OK);
+    assert_eq!(
+        automation_get(&app, local, Some("https://diewehmut.github.io")).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/automation/pair",
+        "a",
+        Some(session),
+        json!({"origin":"https://evil.example"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, pages) = request(
+        &app,
+        "POST",
+        "/api/automation/pair",
+        "a",
+        Some(session),
+        json!({"origin":"https://diewehmut.github.io"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pages}");
+    let pages = pages["token"].as_str().unwrap();
+    assert_eq!(
+        automation_get(&app, pages, Some("https://diewehmut.github.io")).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        automation_get(&app, pages, None).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let (status, _) = request(&app, "GET", "/api/projects", "a", Some(pages), Value::Null).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, native) = request(
+        &app,
+        "POST",
+        "/api/automation/access",
+        "a",
+        Some(session),
+        json!({"origin":"http://tauri.localhost"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{native}");
+    assert_eq!(
+        automation_get(
+            &app,
+            native["token"].as_str().unwrap(),
+            Some("http://tauri.localhost")
+        )
+        .await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn embedded_assets_serve_the_same_app_without_exposing_filesystem_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = ServerState::new(ServerConfig::new(temp.path().into(), "".into())).unwrap();
+    let app = entwurf_web::router_with_assets(
+        state,
+        std::sync::Arc::new(|path| {
+            assert!(!path.contains("..") && !path.contains('%'));
+            (path == "/").then(|| {
+                (
+                    b"<!doctype html><title>Shared Entwurf</title>".to_vec(),
+                    "text/html".into(),
+                )
+            })
+        }),
+    );
+    for (path, expected) in [
+        ("/", StatusCode::OK),
+        ("/%2e%2e/private", StatusCode::NOT_FOUND),
+        ("/missing", StatusCode::NOT_FOUND),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("Host", "127.0.0.1:48123")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
 }

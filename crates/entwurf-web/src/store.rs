@@ -129,6 +129,49 @@ impl Store {
             }
         }
     }
+    fn discard_handles(&self, client: &str, args: &Value) -> Result<(), String> {
+        access::component(client)?;
+        let paths = args
+            .get("paths")
+            .and_then(Value::as_array)
+            .ok_or("paths array is required")?;
+        if paths.len() > 64 {
+            return Err("too many upload handles".into());
+        }
+        let directories = paths
+            .iter()
+            .map(|value| {
+                let prefix = format!("/uploads/{client}/");
+                let relative = value
+                    .as_str()
+                    .ok_or("invalid upload handle")?
+                    .strip_prefix(&prefix)
+                    .ok_or("upload belongs to another client")?;
+                let (id, name) = relative.split_once('/').ok_or("invalid upload handle")?;
+                access::component(id)?;
+                access::upload_name(name)?;
+                let directory = self.data.join("uploads").join(client).join(id);
+                match fs::canonicalize(&directory) {
+                    Ok(actual) if actual != directory => {
+                        return Err("upload escaped staging directory".into())
+                    }
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(error.to_string())
+                    }
+                    _ => {}
+                }
+                Ok(directory)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        for directory in directories {
+            match fs::remove_dir_all(directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Ok(())
+    }
     fn remove_staging(paths: &[PathBuf]) {
         for path in paths {
             if let Some(directory) = path.parent() {
@@ -204,6 +247,10 @@ impl Store {
         if command == "list_projects" {
             return self.projects();
         }
+        if command == "discard_uploads" {
+            self.discard_handles(client, &args)?;
+            return Ok(Value::Null);
+        }
         let root = if matches!(command, "create_project" | "load_existing_project") {
             text(&args, "root")?.to_owned()
         } else {
@@ -214,6 +261,8 @@ impl Store {
         };
         let paths = if matches!(command, "import_sources" | "import_style_images") {
             self.upload_paths(client, &args)?
+        } else if command == "import_generated_image" {
+            self.upload_paths(client, &json!({"paths":[text(&args, "path")?]}))?
         } else {
             Vec::new()
         };
@@ -242,6 +291,22 @@ impl Store {
             ),
             "import_sources" => workspace.import_sources(text(&args, "taskId")?, &paths, options),
             "import_style_images" => workspace.import_style_images(&paths),
+            "import_generated_image" => workspace.import_generated_image(
+                text(&args, "taskId")?,
+                text(&args, "baseVersionId")?,
+                text(&args, "runId")?,
+                text(&args, "promptSha256")?,
+                &fs::read(&paths[0]).map_err(|e| e.to_string())?,
+                text(&args, "expectedSha256")?,
+                text(&args, "mimeType")?,
+            ),
+            "generated_image_bytes" => {
+                let path = workspace
+                    .generated_image_path(text(&args, "taskId")?, text(&args, "imageId")?)
+                    .map_err(|e| e.to_string())?;
+                return serde_json::to_value(fs::read(path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string());
+            }
             "import_ir" => workspace.import_ir(
                 text(&args, "taskId")?,
                 optional(&args, "baseVersionId"),

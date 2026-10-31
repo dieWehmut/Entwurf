@@ -7,7 +7,7 @@ use axum::{
     extract::{DefaultBodyLimit, Multipart, Query, Request, State},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -29,6 +29,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub pdfium_dir: Option<PathBuf>,
     pub tesseract_dir: Option<PathBuf>,
+    pub pages_origin: String,
 }
 impl ServerConfig {
     pub fn new(data_dir: PathBuf, frontend_dir: PathBuf) -> Self {
@@ -38,6 +39,7 @@ impl ServerConfig {
             port: 48123,
             pdfium_dir: None,
             tesseract_dir: None,
+            pages_origin: "https://diewehmut.github.io".into(),
         }
     }
 }
@@ -47,10 +49,16 @@ pub struct ServerState {
     session_token: String,
     store: Mutex<store::Store>,
     ocr_languages: tokio::sync::OnceCell<Vec<String>>,
+    pub automation: entwurf_automation::AutomationState,
 }
 impl ServerState {
     pub fn new(config: ServerConfig) -> Result<Arc<Self>, String> {
         let store = store::Store::new(config.data_dir.clone())?;
+        let automation = entwurf_automation::AutomationState::new(
+            config.data_dir.join("automation"),
+            config.port,
+        )
+        .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
             config,
             session_token: format!(
@@ -60,6 +68,7 @@ impl ServerState {
             ),
             store: Mutex::new(store),
             ocr_languages: tokio::sync::OnceCell::new(),
+            automation,
         }))
     }
     fn ingestion(&self) -> IngestOptions {
@@ -107,6 +116,7 @@ impl ServerState {
             .clone()
     }
     fn diagnostic_capabilities(&self) -> entwurf_core::diagnostics::DiagnosticCapabilities {
+        let status = self.automation.status().unwrap_or_default();
         entwurf_core::diagnostics::DiagnosticCapabilities {
             pdfium_available: self.config.pdfium_dir.as_ref().is_some_and(|dir| {
                 ["pdfium.dll", "libpdfium.so", "libpdfium.dylib"]
@@ -117,7 +127,9 @@ impl ServerState {
                 .ocr_languages
                 .get()
                 .is_some_and(|languages| !languages.is_empty()),
-            ..Default::default()
+            bridge_available: status["connected"].as_bool().unwrap_or(false),
+            chatgpt_detected: status["available"].as_bool().unwrap_or(false),
+            automation_enabled: status["available"].as_bool().unwrap_or(false),
         }
     }
 }
@@ -186,11 +198,46 @@ async fn protect(
     response
         .headers_mut()
         .insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        "frame-ancestors 'none'".parse().unwrap(),
+    );
     Ok(response)
 }
 
 pub fn router(state: Arc<ServerState>) -> Router {
     let frontend = state.config.frontend_dir.clone();
+    workspace_router(state.clone())
+        .fallback_service(ServeDir::new(frontend).append_index_html_on_directories(true))
+        .layer(middleware::from_fn_with_state(state.clone(), protect))
+        .merge(state.automation.router())
+}
+
+pub type AssetProvider = Arc<dyn Fn(&str) -> Option<(Vec<u8>, String)> + Send + Sync>;
+
+pub fn router_with_assets(state: Arc<ServerState>, assets: AssetProvider) -> Router {
+    workspace_router(state.clone())
+        .fallback(move |uri: axum::http::Uri| {
+            let assets = assets.clone();
+            async move {
+                // Reject traversal before invoking Tauri's filesystem fallback in dev builds.
+                let path = uri.path();
+                if path.contains("..") || path.contains('%') || path.contains('\\') {
+                    return StatusCode::NOT_FOUND.into_response();
+                }
+                match assets(path) {
+                    Some((bytes, mime)) => {
+                        ([(header::CONTENT_TYPE, mime)], Body::from(bytes)).into_response()
+                    }
+                    None => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        })
+        .layer(middleware::from_fn_with_state(state.clone(), protect))
+        .merge(state.automation.router())
+}
+
+fn workspace_router(state: Arc<ServerState>) -> Router {
     Router::new()
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/projects", get(projects))
@@ -200,18 +247,93 @@ pub fn router(state: Arc<ServerState>) -> Router {
             post(uploads).layer(DefaultBodyLimit::max(MAX_UPLOAD * 64 + 1024 * 1024)),
         )
         .route("/api/artifacts", get(artifact))
-        .fallback_service(ServeDir::new(frontend).append_index_html_on_directories(true))
+        .route(
+            "/pair.html",
+            get(|| async { Html(include_str!("pair.html")) }),
+        )
+        .route("/api/automation/pairing", get(extension_pairing))
+        .route("/api/automation/pair", post(pair_pages))
+        .route("/api/automation/access", post(pair_native))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD + 1024 * 1024))
-        .layer(middleware::from_fn_with_state(state.clone(), protect))
         .with_state(state)
+}
+
+pub fn native_origin(origin: &str) -> bool {
+    matches!(
+        origin,
+        "tauri://localhost"
+            | "http://tauri.localhost"
+            | "https://tauri.localhost"
+            | "http://127.0.0.1:1420"
+            | "http://localhost:1420"
+    )
+}
+
+fn access_value(state: &ServerState, owner: &str, origin: &str) -> Result<Value, ApiError> {
+    let token = state
+        .automation
+        .issue_access(owner, origin)
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(json!({"token":token,"base_url":format!("http://127.0.0.1:{}",state.config.port)}))
+}
+
+fn local_automation_access(state: &ServerState, headers: &HeaderMap) -> Result<Value, ApiError> {
+    let origin = header_text(headers, "origin")
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "http://{}",
+                header_text(headers, "host").unwrap_or_default()
+            )
+        });
+    access_value(state, "local", &origin)
+}
+
+async fn extension_pairing(
+    State(state): State<Arc<ServerState>>,
+) -> Json<entwurf_automation::PairingInfo> {
+    Json(state.automation.pairing_info())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PairRequest {
+    origin: String,
+}
+
+async fn pair_pages(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<PairRequest>,
+) -> Result<Json<Value>, ApiError> {
+    if request.origin != state.config.pages_origin {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "此网页来源未配置为 Entwurf Pages。".into(),
+        ));
+    }
+    Ok(Json(access_value(&state, "pages", &request.origin)?))
+}
+
+async fn pair_native(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<PairRequest>,
+) -> Result<Json<Value>, ApiError> {
+    if !native_origin(&request.origin) {
+        return Err(ApiError(
+            StatusCode::FORBIDDEN,
+            "此窗口不是受支持的本机 Entwurf 窗口。".into(),
+        ));
+    }
+    Ok(Json(access_value(&state, "desktop", &request.origin)?))
 }
 
 async fn bootstrap(State(state): State<Arc<ServerState>>) -> Json<Value> {
     let token = state.session_token.clone();
     let languages = state.languages().await;
+    let status = state.automation.status().unwrap_or_default();
     Json(
         json!({"version":entwurf_core::VERSION,"platform":std::env::consts::OS,"runtime":"local-http","storage":"sqlite","session_token":token,
-        "tesseract_available":!languages.is_empty(),"ocr_languages":languages,"automation_enabled":false,"bridge_status":"not_connected","bridge_detail":"请连接已登录的 ChatGPT 会话。"}),
+        "tesseract_available":!languages.is_empty(),"ocr_languages":languages,"automation_enabled":status["available"],"bridge_status":if status["available"]==true {"ready"} else {"not_connected"},"bridge_detail":"通过本机伴随服务连接已登录的 ChatGPT 浏览器会话。"}),
     )
 }
 
@@ -246,6 +368,9 @@ async fn command(
     Json(request): Json<CommandRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let client = client(&headers)?;
+    if request.command == "automation_access" {
+        return Ok(Json(local_automation_access(&state, &headers)?));
+    }
     if request.command == "export_diagnostics" {
         state.languages().await;
     }
