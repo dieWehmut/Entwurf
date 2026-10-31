@@ -1,6 +1,7 @@
 //! Verify source bytes and exact formula history, independently of visual quality.
+use crate::files as fs;
 use crate::{ingest::hash_bytes, ir::*};
-use std::{collections::BTreeMap, fs};
+use std::collections::BTreeMap;
 
 fn blocked(report: &mut ValidationReport, code: &str, message: impl Into<String>) {
     report.push(code, Severity::Blocking, message);

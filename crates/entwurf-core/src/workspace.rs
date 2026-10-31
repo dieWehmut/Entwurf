@@ -1,4 +1,5 @@
 //! GUI-independent durable desktop workflows. Canonical types are preserved in snapshots.
+use crate::files as fs;
 use crate::{
     error::{EntwurfError, Result},
     ingest::{ingest_project_paths, IngestOptions},
@@ -10,7 +11,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -84,7 +84,7 @@ impl Workspace {
         if paths.root.as_os_str().is_empty() {
             return Err(invalid("project directory is required"));
         }
-        if paths.database_file().exists() || paths.project_file().exists() {
+        if fs::exists(paths.database_file()) || fs::exists(paths.project_file()) {
             return Err(invalid("project already exists; open it instead"));
         }
         let project = Project::new(name.trim());
@@ -1039,13 +1039,10 @@ impl Workspace {
         let directory = manifest_path
             .parent()
             .ok_or_else(|| invalid("invalid export directory"))?;
-        let canonical_path = path
-            .canonicalize()
-            .map_err(|e| EntwurfError::read(&path, e))?;
+        let canonical_path = fs::canonicalize(&path).map_err(|e| EntwurfError::read(&path, e))?;
         let mut selected = kind == "manifest"
             && canonical_path
-                == manifest_path
-                    .canonicalize()
+                == fs::canonicalize(&manifest_path)
                     .map_err(|e| EntwurfError::read(&manifest_path, e))?;
         for file in &manifest.files {
             if Path::new(&file.path).components().count() != 1
@@ -1063,9 +1060,7 @@ impl Workspace {
                     "exported file changed outside Entwurf; export again",
                 ));
             }
-            if candidate
-                .canonicalize()
-                .map_err(|e| EntwurfError::read(&candidate, e))?
+            if fs::canonicalize(&candidate).map_err(|e| EntwurfError::read(&candidate, e))?
                 == canonical_path
             {
                 selected = true;
@@ -1084,7 +1079,7 @@ impl Workspace {
     }
     fn read_handoff(&self, task_id: &str, version: &str) -> Result<Option<StoredHandoff>> {
         let path = self.handoff_path(task_id, version);
-        if !path.exists() {
+        if !fs::exists(&path) {
             return Ok(None);
         }
         let bytes = fs::read(&path).map_err(|e| EntwurfError::read(&path, e))?;
