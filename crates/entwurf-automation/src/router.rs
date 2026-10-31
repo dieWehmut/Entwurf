@@ -232,6 +232,11 @@ async fn session(state: AutomationState, mut socket: WebSocket) {
     let (sender, mut receiver) = mpsc::channel::<Value>(16);
     let accepted = (|| -> Result<Vec<String>> {
         let mut i = state.lock()?;
+        let selected_token = if i.database.provider == "windows" {
+            &i.database.native_token
+        } else {
+            &i.database.extension_token
+        };
         if auth
             .as_ref()
             .and_then(|v| v.get("type"))
@@ -241,7 +246,7 @@ async fn session(state: AutomationState, mut socket: WebSocket) {
                 .as_ref()
                 .and_then(|v| v.get("token"))
                 .and_then(Value::as_str)
-                .is_some_and(|t| equal_token(t, &i.database.extension_token))
+                .is_some_and(|t| equal_token(t, selected_token))
         {
             return Err(AutomationError("unauthorized"));
         }

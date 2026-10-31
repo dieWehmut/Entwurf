@@ -10,7 +10,10 @@ let automation = entwurf_automation::AutomationState::new(data_dir, 48123)?;
 let app = existing_router.merge(automation.router());
 // Call only from a host endpoint already protected by the local application session.
 let access = automation.issue_access("local", "http://127.0.0.1:48123")?;
-let pairing = automation.pairing_info();
+let pairing = automation.pairing_info(); // Browser extension credential.
+// A protected host setting may select the bundled Windows adapter.
+automation.set_provider("windows")?;
+let native_pairing = automation.native_pairing_info();
 ```
 
 `issue_access(owner, exact_origin)` returns and persistently reuses a capability
@@ -28,12 +31,12 @@ the exact paired Origin. When a same-origin request omits Origin, only
 capabilities still require their own exact Origin. Known-origin preflights return explicit CORS headers
 and permit Private Network Access; wildcard origins and unsupported request
 headers are rejected. The extension WebSocket permits no Origin or an exact
-`chrome-extension://<32-letter-id>` origin, and uses its separate persistent token
-in the first frame. No HTTP session or query token is accepted for the socket.
+`chrome-extension://<32-letter-id>` origin, and authenticates in the first frame
+with the credential for the selected provider. No HTTP session or query token is accepted for the socket.
 
 | Endpoint | Response |
 | --- | --- |
-| `GET /status` | `{connected, available, reason}` |
+| `GET /status` | `{connected, available, reason, provider}` |
 | `POST /runs` | `{run_id, task_id, base_version_id, prompt}` → RunView, 202 new / 200 duplicate |
 | `GET /runs?task_id=...` | Array of the caller owner's RunViews |
 | `GET /runs/{id}` | RunView |
@@ -41,6 +44,25 @@ in the first frame. No HTTP session or query token is accepted for the socket.
 | `GET /runs/{id}/artifact` | Original bytes, Content-Type, X-Entwurf-Sha256 |
 | `POST /runs/{id}/ack` | `{sha256, image_id}` → RunView |
 | `GET /extension` | Frozen extension WebSocket protocol |
+
+`provider()` returns the persistent selection, either `browser` or `windows`.
+`pairing_info()` always returns the browser credential; `native_pairing_info()`
+returns an independent native credential in the same `extension_token` field and
+uses the same WebSocket URL. Pass the native credential to the adapter through
+its protected stdin configuration, never through a URL. Only the selected
+provider's token can authenticate, so a reconnecting browser extension cannot
+occupy the native adapter's connection.
+
+`set_provider(provider)` is a host API, not a public automation HTTP operation.
+Selecting the same value is idempotent even while a run is active. A different
+value is rejected with `run_active` until every run is terminal, including paused
+runs and results awaiting import. Successful changes persist first, then disconnect
+the old peer and report `available: false`, `reason: provider_changed`. Failed
+persistence leaves the prior selection and connection intact. Connection changes
+never send a new `start`. Old databases default to `browser` and receive a stable,
+persisted native credential when opened; an existing selection survives restart.
+The host may choose `windows` for a fresh installation with a native bundle but
+must preserve the selection when reopening an existing database.
 
 RunView contains `run_id`, `task_id`, `base_version_id`, `prompt_sha256`, `phase`,
 `reason`, `sha256`, and `mime_type`. Optional metadata is JSON null until present.
@@ -85,4 +107,5 @@ cargo test -p entwurf-automation
 
 Tests cover localhost WebSockets, authentication, Host/Origin boundaries, CORS,
 durable capabilities, no replay, owner isolation, byte/hash preservation, restart
-recovery, rejected artifacts, import acknowledgements and failed durable writes.
+recovery, rejected artifacts, import acknowledgements, provider/token isolation,
+provider changes, legacy state migration and failed durable writes.
