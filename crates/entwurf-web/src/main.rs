@@ -28,8 +28,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .into(),
                 )
             }
+            "--native-adapter" => {
+                config.native_adapter = Some(
+                    args.next()
+                        .ok_or("--native-adapter needs the packaged Entwurf.Bridge.exe path")?
+                        .into(),
+                );
+            }
             "--help" | "-h" => {
-                println!("entwurf-web [--data-dir DIR] [--frontend DIST] [--port 48123] [--pdfium-dir DIR] [--tesseract-dir DIR]");
+                println!("entwurf-web [--data-dir DIR] [--frontend DIST] [--port 48123] [--pdfium-dir DIR] [--tesseract-dir DIR] [--native-adapter EXE]");
                 return Ok(());
             }
             _ => return Err(format!("unknown argument: {argument}").into()),
@@ -40,9 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.port = listener.local_addr()?.port();
     let state = ServerState::new(config.clone()).map_err(std::io::Error::other)?;
     println!("Entwurf local WebUI: http://127.0.0.1:{}", config.port);
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(async {
+    axum::serve(listener, router(state.clone()))
+        .with_graceful_shutdown(async move {
             let _ = tokio::signal::ctrl_c().await;
+            state.shutdown().await;
         })
         .await?;
     Ok(())

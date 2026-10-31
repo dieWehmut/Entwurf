@@ -1,5 +1,6 @@
 //! Shared local HTTP boundary. UI clients never supply native filesystem paths.
 pub mod access;
+mod native_host;
 mod store;
 
 use axum::{
@@ -16,7 +17,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use tower_http::services::ServeDir;
 
@@ -30,6 +34,7 @@ pub struct ServerConfig {
     pub pdfium_dir: Option<PathBuf>,
     pub tesseract_dir: Option<PathBuf>,
     pub pages_origin: String,
+    pub native_adapter: Option<PathBuf>,
 }
 impl ServerConfig {
     pub fn new(data_dir: PathBuf, frontend_dir: PathBuf) -> Self {
@@ -40,6 +45,7 @@ impl ServerConfig {
             pdfium_dir: None,
             tesseract_dir: None,
             pages_origin: "https://diewehmut.github.io".into(),
+            native_adapter: None,
         }
     }
 }
@@ -50,15 +56,33 @@ pub struct ServerState {
     store: Mutex<store::Store>,
     ocr_languages: tokio::sync::OnceCell<Vec<String>>,
     pub automation: entwurf_automation::AutomationState,
+    native: Mutex<native_host::NativeHost>,
+    stopping: AtomicBool,
 }
 impl ServerState {
     pub fn new(config: ServerConfig) -> Result<Arc<Self>, String> {
         let store = store::Store::new(config.data_dir.clone())?;
+        let first_launch = !config.data_dir.join("automation/automation.json").exists();
+        let mut native = native_host::NativeHost::new(
+            config.native_adapter.clone(),
+            config.data_dir.join("automation/windows"),
+        );
         let automation = entwurf_automation::AutomationState::new(
             config.data_dir.join("automation"),
             config.port,
         )
         .map_err(|e| e.to_string())?;
+        if first_launch && native.available() {
+            automation
+                .set_provider("windows")
+                .map_err(|e| e.to_string())?;
+        }
+        if automation.provider().map_err(|e| e.to_string())? == "windows" {
+            // Already-paired Pages clients reuse their saved capability after a
+            // service restart. Restore the selected adapter without requiring
+            // another pairing or submitting any saved run again.
+            let _ = native.start(automation.native_pairing_info());
+        }
         Ok(Arc::new(Self {
             config,
             session_token: format!(
@@ -69,6 +93,8 @@ impl ServerState {
             store: Mutex::new(store),
             ocr_languages: tokio::sync::OnceCell::new(),
             automation,
+            native: Mutex::new(native),
+            stopping: AtomicBool::new(false),
         }))
     }
     fn ingestion(&self) -> IngestOptions {
@@ -132,6 +158,38 @@ impl ServerState {
             automation_enabled: status["available"].as_bool().unwrap_or(false),
         }
     }
+    async fn ensure_provider(self: &Arc<Self>) {
+        let state = self.clone();
+        let _ = tokio::task::spawn_blocking(move || -> Result<(), String> {
+            // Provider selection takes this same lock; read the selected provider
+            // only after acquiring it so a stale access request cannot restart a
+            // native adapter that a concurrent switch has just stopped.
+            let mut native = state
+                .native
+                .lock()
+                .map_err(|_| "native_adapter_lock_failed")?;
+            if !state.stopping.load(Ordering::Acquire)
+                && state.automation.provider().map_err(|e| e.to_string())? == "windows"
+            {
+                native.start(state.automation.native_pairing_info())?;
+            }
+            Ok(())
+        })
+        .await;
+        // Access to saved runs must remain available even when a UI adapter is unavailable.
+    }
+
+    pub async fn shutdown(self: &Arc<Self>) {
+        self.stopping.store(true, Ordering::Release);
+        let _ = self.automation.shutdown();
+        let state = self.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(mut native) = state.native.lock() {
+                native.stop();
+            }
+        })
+        .await;
+    }
 }
 
 pub struct ApiError(pub StatusCode, pub String);
@@ -172,6 +230,12 @@ async fn protect(
     request: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    if state.stopping.load(Ordering::Acquire) {
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server_shutting_down".into(),
+        ));
+    }
     let headers = request.headers();
     if !header_text(headers, "host")
         .is_some_and(|host| access::permitted_host(host, state.config.port))
@@ -254,6 +318,10 @@ fn workspace_router(state: Arc<ServerState>) -> Router {
         .route("/api/automation/pairing", get(extension_pairing))
         .route("/api/automation/pair", post(pair_pages))
         .route("/api/automation/access", post(pair_native))
+        .route(
+            "/api/automation/provider",
+            get(provider).post(select_provider),
+        )
         .layer(DefaultBodyLimit::max(MAX_UPLOAD + 1024 * 1024))
         .with_state(state)
 }
@@ -311,6 +379,7 @@ async fn pair_pages(
             "此网页来源未配置为 Entwurf Pages。".into(),
         ));
     }
+    state.ensure_provider().await;
     Ok(Json(access_value(&state, "pages", &request.origin)?))
 }
 
@@ -324,7 +393,79 @@ async fn pair_native(
             "此窗口不是受支持的本机 Entwurf 窗口。".into(),
         ));
     }
+    state.ensure_provider().await;
     Ok(Json(access_value(&state, "desktop", &request.origin)?))
+}
+
+async fn provider(State(state): State<Arc<ServerState>>) -> Result<Json<Value>, ApiError> {
+    let provider = state
+        .automation
+        .provider()
+        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(
+        state
+            .native
+            .lock()
+            .map_err(|_| {
+                ApiError(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "native_adapter_lock_failed".into(),
+                )
+            })?
+            .view(provider),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderRequest {
+    provider: String,
+}
+
+async fn select_provider(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<ProviderRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let value = tokio::task::spawn_blocking(move || -> Result<Value, ApiError> {
+        let mut native = state.native.lock().map_err(|_| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "native_adapter_lock_failed".into(),
+            )
+        })?;
+        if state.stopping.load(Ordering::Acquire) {
+            return Err(ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_shutting_down".into(),
+            ));
+        }
+        if request.provider == "windows" && !native.available() {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "native_adapter_unavailable".into(),
+            ));
+        }
+        let previous = state
+            .automation
+            .provider()
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        state
+            .automation
+            .set_provider(&request.provider)
+            .map_err(|e| ApiError(StatusCode::CONFLICT, e.to_string()))?;
+        if request.provider == "windows" {
+            if let Err(error) = native.start(state.automation.native_pairing_info()) {
+                let _ = state.automation.set_provider(&previous);
+                return Err(ApiError(StatusCode::INTERNAL_SERVER_ERROR, error));
+            }
+        } else {
+            native.stop();
+        }
+        Ok(native.view(request.provider))
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(value))
 }
 
 async fn bootstrap(State(state): State<Arc<ServerState>>) -> Json<Value> {
@@ -333,7 +474,7 @@ async fn bootstrap(State(state): State<Arc<ServerState>>) -> Json<Value> {
     let status = state.automation.status().unwrap_or_default();
     Json(
         json!({"version":entwurf_core::VERSION,"platform":std::env::consts::OS,"runtime":"local-http","storage":"sqlite","session_token":token,
-        "tesseract_available":!languages.is_empty(),"ocr_languages":languages,"automation_enabled":status["available"],"bridge_status":if status["available"]==true {"ready"} else {"not_connected"},"bridge_detail":"通过本机伴随服务连接已登录的 ChatGPT 浏览器会话。"}),
+        "tesseract_available":!languages.is_empty(),"ocr_languages":languages,"automation_enabled":status["available"],"bridge_status":if status["available"]==true {"ready"} else {"not_connected"},"bridge_detail":"通过本机伴随服务连接已登录的 ChatGPT 客户端或浏览器会话。"}),
     )
 }
 
@@ -369,6 +510,7 @@ async fn command(
 ) -> Result<Json<Value>, ApiError> {
     let client = client(&headers)?;
     if request.command == "automation_access" {
+        state.ensure_provider().await;
         return Ok(Json(local_automation_access(&state, &headers)?));
     }
     if request.command == "export_diagnostics" {

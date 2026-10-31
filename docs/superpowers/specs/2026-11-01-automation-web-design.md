@@ -61,7 +61,8 @@ own file pickers, clipboard and downloads. The shared project picker accepts
 ## Automation and image ownership
 
 A narrow local run coordinator serves all three entry points. Each run records
-`run_id`, `task_id`, `base_version_id`, prompt and prompt SHA-256 before submission.
+`run_id`, `task_id`, `base_version_id` and prompt SHA-256 before submission.
+The prompt travels in the active start command and is not persisted in run logs.
 It retains durable phase and result state; reconnection never replays a submission.
 Phases are queued, preparing, submitting, generating, downloading, awaiting_import,
 completed, paused, failed and cancelled.
@@ -69,9 +70,13 @@ completed, paused, failed and cancelled.
 An independently implemented MV3 extension can control an existing signed-in
 `chatgpt.com` browser session without copying profiles, cookies or tokens. It may
 open a new conversation/tab in that same profile, preserving the user's drafts.
-The actual locally signed-in entry is still being identified; if it is only the
-Windows client, a verified native adapter is also required. An unavailable adapter
-is an incomplete requirement, not grounds to rename manual mode as automation.
+The local Windows client exposes the ChatGPT product mode and Images page; a
+native UI Automation adapter is therefore required for the user's existing account.
+It uses the packaged bridge with an inherited stdin bootstrap, separate native
+credential and parent/EOF lifetime. Only the selected provider may authenticate.
+Durable submit intent prevents retyping or resending after reconnect/restart.
+Recovery may observe a submitted response only when its saved UI identity still
+matches. Live original-image controls remain subject to real-account acceptance.
 
 The extension connects to `/api/automation/extension` by WebSocket. Its first frame
 authenticates with a locally paired credential. Only start, status and cancel are
@@ -96,6 +101,7 @@ Structured ResultEnvelope planning remains a separate operation.
 | `feat/browser-core` | core agent | portable filesystem/storage, WASM bridge, extraction contract, native regressions |
 | `feat/shared-web` | frontend agent | shared runtime clients/UI, worker/IndexedDB, PDF/OCR integration, Pages workflow |
 | `feat/chatgpt-automation` | automation agent | existing-session adapter/extension, durable submission and capture, fixtures |
+| `feat/chatgpt-windows` | native agent | existing Windows ChatGPT Images surface, durable observation and original download |
 
 Each branch uses its own managed worktree. Agents may commit their tested chunks;
 root reviews, pushes branches and integrates. Preserve the existing Windows checkout,

@@ -26,6 +26,12 @@ pub async fn access(app: &tauri::AppHandle, origin: &str) -> Result<serde_json::
                     .join("resources/pdfium"),
             );
             config.tesseract_dir = super::tesseract_dir();
+            config.native_adapter = Some(
+                app.path()
+                    .resource_dir()
+                    .map_err(|e| e.to_string())?
+                    .join("resources/gpt-bridge/Entwurf.Bridge.exe"),
+            );
             let server = entwurf_web::ServerState::new(config)?;
             let resolver = app.asset_resolver();
             let assets: entwurf_web::AssetProvider = Arc::new(move |path| {

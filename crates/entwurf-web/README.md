@@ -20,6 +20,13 @@ checks exact Host and Origin, then requires the bootstrap session token and
 document client ID on workspace APIs. Restarting changes the session token;
 the UI reloads its saved project selection through a fresh client.
 
+On Windows, `--native-adapter PATH/Entwurf.Bridge.exe` selects the packaged
+native adapter executable. The installed desktop supplies this path automatically.
+The local connection page selects Windows client or browser extension; the saved
+selection survives service restart. Each provider has its own credential, and an
+active run must finish or be cancelled before switching. Adapter startup alone
+does not submit a prompt. Its inherited stdin and parent process own its lifetime.
+
 Uploads allow up to 64 files, each at most 32 MiB. Failed batches are removed;
 successful imports remove staging only after the core has retained the source
 and committed the database. Unused staging older than 24 hours is removed on

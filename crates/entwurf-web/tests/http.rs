@@ -41,6 +41,33 @@ fn application(data: &std::path::Path) -> axum::Router {
 }
 
 #[tokio::test]
+async fn shutdown_rejects_local_requests_and_keeps_persisted_pairing() {
+    let temp = tempfile::tempdir().unwrap();
+    let config = ServerConfig::new(temp.path().into(), "".into());
+    let state = ServerState::new(config.clone()).unwrap();
+    let pairing = state.automation.native_pairing_info();
+    let app = router(state.clone());
+    state.shutdown().await;
+    let (status, _) = request(&app, "GET", "/api/bootstrap", "one", None, Value::Null).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let restarted = ServerState::new(config).unwrap();
+    assert_eq!(
+        restarted.automation.native_pairing_info().extension_token,
+        pairing.extension_token
+    );
+    let (status, _) = request(
+        &router(restarted),
+        "GET",
+        "/api/bootstrap",
+        "one",
+        None,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn cross_origin_cannot_acquire_session_and_commands_require_token() {
     let temp = tempfile::tempdir().unwrap();
     let app = application(temp.path());
@@ -590,4 +617,74 @@ async fn embedded_assets_serve_the_same_app_without_exposing_filesystem_paths() 
             .unwrap();
         assert_eq!(response.status(), expected);
     }
+}
+
+#[tokio::test]
+async fn provider_setup_requires_local_session_and_preserves_selection_on_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = application(temp.path());
+    let (_, caps) = request(&app, "GET", "/api/bootstrap", "a", None, Value::Null).await;
+    let session = caps["session_token"].as_str().unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/automation/provider")
+                .header("Host", "127.0.0.1:48123")
+                .header("X-Entwurf-Session", session)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let value: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 2048).await.unwrap()).unwrap();
+    assert_eq!(value["provider"], "browser");
+    assert_eq!(value["native_available"], false);
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/automation/provider",
+        "a",
+        None,
+        json!({"provider":"browser"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, value) = request(
+        &app,
+        "POST",
+        "/api/automation/provider",
+        "a",
+        Some(session),
+        json!({"provider":"windows"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{value}");
+    let (status, value) = request(
+        &app,
+        "POST",
+        "/api/automation/provider",
+        "a",
+        Some(session),
+        json!({"provider":"browser"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["provider"], "browser");
+    drop(app);
+    let restarted = application(temp.path());
+    let (_, caps) = request(&restarted, "GET", "/api/bootstrap", "a", None, Value::Null).await;
+    let (status, value) = request(
+        &restarted,
+        "GET",
+        "/api/automation/provider",
+        "a",
+        caps["session_token"].as_str(),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["provider"], "browser");
 }

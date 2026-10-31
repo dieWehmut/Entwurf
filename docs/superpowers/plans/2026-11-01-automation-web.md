@@ -24,30 +24,30 @@
 Files: `crates/entwurf-core/src/{lib,error,storage,workspace,ingest,compiler,provenance,ir_import}.rs`, new filesystem/storage modules, `crates/entwurf-wasm/**`, `scripts/build-wasm.sh`, Cargo manifests/lock.
 
 - [ ] Capture a failing executable WASM smoke test importing Markdown/TeX, resolving literal source reviews, compiling and retrieving actual SVG/PNG/PDF bytes.
-- [ ] Introduce default native and browser features; share domain invariants and add a virtual filesystem/storage implementation.
-- [ ] Export the frozen WASM methods and browser transcript registration with verified original/transcript hashes and pending OCR/formula review.
-- [ ] Run the real WASM smoke including reopen/tamper detection, then native regression tests for the altered seam.
-- [ ] Commit the tested portable-core branch and provide exact build/worker artifacts to the frontend owner.
+- [x] Introduce default native and browser features; share domain invariants and add a virtual filesystem/storage implementation.
+- [x] Export the frozen WASM methods and browser transcript registration with verified original/transcript hashes and pending OCR/formula review.
+- [x] Run the real WASM smoke including reopen/tamper detection, then native regression tests for the altered seam.
+- [x] Commit the tested portable-core branch and provide exact build/worker artifacts to the frontend owner.
 
 ## Task 2: Local WebUI service
 
 Files: new `crates/entwurf-web/**`, Cargo workspace entry, local launcher scripts and service tests.
 
-- [ ] Add HTTP boundary tests for Host/Origin/session rejection, opaque path confinement, two clients opening different projects, upload ownership and artifact identity.
-- [ ] Implement the frozen bootstrap/projects/command/uploads/artifacts endpoints, shared Workspace dispatch and static frontend serving on loopback port 48123.
-- [ ] Verify a real public-source import/edit/export and server restart with SQLite files retained beneath the configured data directory.
-- [ ] Commit the local service, preserving browser-only storage independence.
+- [x] Add HTTP boundary tests for Host/Origin/session rejection, opaque path confinement, two clients opening different projects, upload ownership and artifact identity.
+- [x] Implement the frozen bootstrap/projects/command/uploads/artifacts endpoints, shared Workspace dispatch and static frontend serving on loopback port 48123.
+- [x] Verify a real public-source import/edit/export and server restart with SQLite files retained beneath the configured data directory.
+- [x] Commit the local service, preserving browser-only storage independence.
 
 ## Task 3: Shared browser/HTTP frontend and persistence
 
 Files: `apps/desktop/src/lib/**`, runtime worker, shared project picker, existing App/components, package/Vite configuration and browser tests.
 
-- [ ] Export typed commands, add runtime clients and remove the native-only browser lockout.
-- [ ] Implement native/HTTP/browser file selection and artifact download through backend-owned handles.
-- [ ] Commit WASM virtual files and metadata atomically to IndexedDB, retaining immutable bytes and guarding quota/stale-tab failures.
-- [ ] Integrate real PDF/OCR browser extraction and the core transcript hook.
-- [ ] Run genuine browser-mode project/import/review/compile/export/reload tests without injected native IPC mocks, then local HTTP UI checks against the same pages.
-- [ ] Commit the shared frontend branch.
+- [x] Export typed commands, add runtime clients and remove the native-only browser lockout.
+- [x] Implement native/HTTP/browser file selection and artifact download through backend-owned handles.
+- [x] Commit WASM virtual files and metadata atomically to IndexedDB, retaining immutable bytes and guarding quota/stale-tab failures.
+- [x] Integrate real PDF/OCR browser extraction and the core transcript hook.
+- [x] Run genuine browser-mode project/import/review/compile/export/reload tests without injected native IPC mocks, then local HTTP UI checks against the same pages.
+- [x] Commit the shared frontend branch.
 
 ## Task 4: Existing-session ChatGPT adapter
 
@@ -63,19 +63,19 @@ Files: `sidecars/chatgpt-browser/**`; native adapter files only if required by t
 
 Files: local service automation modules, core/project/contracts image metadata, Tauri integration, shared UI automation controls/image result display.
 
-- [ ] Add version-bound generated asset records and tested trusted byte import; reject tampering and stale automatic replacement.
-- [ ] Persist run state and staging in the local coordinator; authenticate paired extension and origin-bound Pages capability.
-- [ ] Connect start/status/cancel/download/ack from all three Workspace clients, including refresh recovery and exact-once database import.
-- [ ] Verify complete flows with deterministic adapter fixtures before touching the real account.
-- [ ] Commit and integrate each reviewed branch, resolving shared schema/Cargo changes explicitly.
+- [x] Add version-bound generated asset records and tested trusted byte import; reject tampering and stale automatic replacement.
+- [x] Persist run state and staging in the local coordinator; authenticate paired extension and origin-bound Pages capability.
+- [x] Connect start/status/cancel/download/ack from all three Workspace clients, including refresh recovery and exact-once database import.
+- [x] Verify complete flows with deterministic adapter fixtures before touching the real account.
+- [x] Commit and integrate each reviewed branch, resolving shared schema/Cargo changes explicitly.
 
 ## Task 6: Pages build and deployment
 
 Files: `.github/workflows/**`, WASM/frontend build scripts and deployment acceptance.
 
-- [ ] Build WASM and the actual browser app at `/Entwurf/`, testing fonts, worker and assets under the subpath.
-- [ ] Add Pages artifact upload/deploy jobs on the stable `feat/v0.1` branch with minimal explicit token permissions.
-- [ ] Enable Pages Actions publishing when the deployable artifact is concrete; push and inspect the actual run/deployment status.
+- [x] Build WASM and the actual browser app at `/Entwurf/`, testing fonts, worker and assets under the subpath.
+- [x] Add Pages artifact upload/deploy jobs on the stable `feat/v0.1` branch with minimal explicit token permissions.
+- [x] Enable Pages Actions publishing when the deployable artifact is concrete; push and inspect the actual run/deployment status.
 - [ ] Open the live site and verify real project persistence and local companion pairing; record deployment URL/commit.
 
 ## Task 7: Coordinated real acceptance and final delivery
