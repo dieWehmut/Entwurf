@@ -115,7 +115,7 @@ it('creates projects and tasks through native dialogs and commands', async () =>
   await user.type(screen.getByLabelText('任务标题'), '新任务'); await user.type(screen.getByLabelText('章节（可选）'), '第一章');
   await user.click(screen.getByRole('button', { name: '创建任务' }));
   await waitFor(() => expect(call).toHaveBeenCalledWith('create_task', { title: '新任务', chapter: '第一章' }));
-  expect(screen.getByRole('heading', { name: '先确认来源，再决定构图。' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '资料与风格', level: 1 })).toBeVisible();
 });
 it('requires a review note and sends one explicit review item with its base version', async () => {
   const { user, state } = setup((command, args, state) => {
@@ -143,7 +143,7 @@ it('quick jump works from keyboard and restores focus on Escape', async () => {
   await user.keyboard('{Control>}k{/Control}'); expect(await screen.findByRole('dialog')).toBeVisible();
   await user.keyboard('{Escape}'); expect(trigger).toHaveFocus();
   await user.click(trigger); await user.type(screen.getByLabelText('搜索页面'), '设置'); await user.keyboard('{Enter}');
-  expect(screen.getByRole('heading', { name: '本地、可观测、可回退。' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
 });
 
 describe('review regressions: authoritative export outcomes', () => {
@@ -187,7 +187,7 @@ describe('review regressions: pending form inputs', () => {
       return structuredClone(state);
     });
     await screen.findByLabelText('当前任务');
-    if (page === 'settings') await user.click(screen.getByRole('button', { name: '打开设置' })); else await navigate(user, page);
+    if (page === 'settings') { await user.click(screen.getByRole('button', { name: '打开设置' })); await user.click(screen.getByRole('button', { name: 'OCR' })); } else await navigate(user, page);
     if (command === 'import_result') await user.click(screen.getByRole('button', { name: '生成 TaskEnvelope' }));
     const input = screen.getByLabelText(field);
     await user.clear(input); await user.type(input, value); await user.click(screen.getByRole('button', { name: button }));
@@ -249,6 +249,7 @@ it.each([false, true])('renders native ChatGPT discovery and four gates (window 
   const call = vi.fn(async (command: string) => command === 'bootstrap' ? detected : fixture());
   render(<App client={{ available: true, call } as WorkspaceClient} />);
   await screen.findByLabelText('当前任务'); await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+  await userEvent.click(screen.getByRole('button', { name: 'ChatGPT 连接' }));
   expect(screen.getByText(found ? '检测到 ChatGPT 窗口' : '未检测到 ChatGPT 窗口')).toBeVisible();
   const gates = screen.getByRole('list', { name: '结构化规划接口兼容性门槛' });
   expect(within(gates).getAllByRole('listitem')).toHaveLength(4);
@@ -320,6 +321,7 @@ describe('visual repair and diagnostics release flows', () => {
     render(<App client={{ available: true, call } as WorkspaceClient} />);
     await waitFor(() => expect(screen.getByRole('button', { name: '打开设置' })).toBeEnabled());
     await userEvent.click(screen.getByRole('button', { name: '打开设置' }));
+    await userEvent.click(screen.getByRole('button', { name: '存储与诊断' }));
     const button = screen.getByRole('button', { name: '导出脱敏诊断' });
     expect(button).toBeEnabled(); await userEvent.click(button);
     expect(await screen.findByText('已保存：C:\\公开诊断\\report.json')).toBeVisible();
@@ -333,6 +335,7 @@ describe('visual repair and diagnostics release flows', () => {
   it('does not report a diagnostics file when native writing fails', async () => {
     const { user } = setup(command => { if (command === 'export_diagnostics') throw new Error('diagnostics write failed'); });
     await screen.findByLabelText('当前任务'); await user.click(screen.getByRole('button', { name: '打开设置' }));
+    await user.click(screen.getByRole('button', { name: '存储与诊断' }));
     await user.click(screen.getByRole('button', { name: '导出脱敏诊断' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('diagnostics write failed');
     expect(screen.queryByText(/已保存：/)).not.toBeInTheDocument();
@@ -402,7 +405,7 @@ it('shows the persisted GPT proposal, advisory fallback, ignored edits and unret
   expect(screen.getByText('手工修改节点的更新已忽略')).toBeVisible();
   expect(screen.getByText('方案与手工顺序不兼容，使用本地顺序排版')).toBeVisible();
   expect(screen.getByText('结果包含图片引用；图片尚未取回，也未用于当前页面。')).toBeVisible();
-  expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  expect(within(screen.getByRole('main')).queryByRole('img')).not.toBeInTheDocument();
   expect(call.mock.calls.some(([command]) => command === 'open_export')).toBe(false);
 });
 
@@ -421,4 +424,21 @@ it('updates visual-plan adoption only from the latest compiler snapshot', async 
   await navigate(user, '结果'); await user.click(screen.getByRole('button', { name: '编译预览' }));
   await navigate(user, '任务'); expect(screen.getByText('部分采用')).toBeVisible();
   expect(screen.getByText('部分分页建议超出页数上限，已使用本地分页')).toBeVisible();
+});
+
+
+it('keeps settings drafts across categories and changes theme only through settings', async () => {
+  const { user } = setup();
+  await screen.findByLabelText('当前任务');
+  expect(screen.queryByLabelText('界面主题')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '打开设置' }));
+  await user.selectOptions(screen.getByLabelText('界面主题'), 'light');
+  await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'light'));
+  expect(localStorage.getItem('entwurf.theme')).toBe('light');
+  await user.click(screen.getByRole('button', { name: 'OCR' }));
+  await user.clear(screen.getByLabelText('OCR 语言')); await user.type(screen.getByLabelText('OCR 语言'), 'eng');
+  await user.click(screen.getByRole('button', { name: '存储与诊断' }));
+  expect(screen.getByRole('button', { name: '导出脱敏诊断' })).toBeEnabled();
+  await user.click(screen.getByRole('button', { name: 'OCR' }));
+  expect(screen.getByLabelText('OCR 语言')).toHaveValue('eng');
 });

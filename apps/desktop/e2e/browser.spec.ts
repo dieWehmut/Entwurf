@@ -60,6 +60,7 @@ test("real WASM project imports Markdown and survives reload with original sourc
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: "/tmp/entwurf-browser-mobile.png", fullPage: false });
   await page.getByRole("button", { name: "打开设置", exact: true }).click();
+  await page.getByLabel("设置分类", { exact: true }).selectOption("storage");
   const diagnosticsDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "导出脱敏诊断", exact: true }).click();
   const diagnostics = await readFile((await (await diagnosticsDownload).path())!, "utf8");
@@ -147,4 +148,38 @@ test("EXIF-rotated JPEGs retain raw dimensions for source anchor validation", as
   await nav(page, "结果");
   await expect(page.getByLabel("来源锚点 JSON")).toContainText('"width": 400');
   await expect(page.getByLabel("来源锚点 JSON")).toContainText('"height": 160');
+});
+
+test("settings categories preserve OCR drafts and save real browser preferences across reload", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("./"); await createProject(page, "设置分类验收");
+  await page.getByRole("button", { name: "打开设置", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeInViewport();
+  await page.getByRole("button", { name: "OCR", exact: true }).click();
+  await page.getByLabel("OCR 语言").fill("eng");
+  await page.getByRole("button", { name: "存储与诊断", exact: true }).click();
+  await page.getByRole("button", { name: "OCR", exact: true }).click();
+  await expect(page.getByLabel("OCR 语言")).toHaveValue("eng");
+  await page.getByRole("button", { name: "保存 OCR 设置", exact: true }).click();
+  await expect(page.getByText("保存 OCR 设置完成", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "ChatGPT 连接", exact: true }).click();
+  await expect(page.getByRole("button", { name: "ChatGPT 连接设置", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel("设置分类", { exact: true }).selectOption("general");
+  await page.getByLabel("界面主题", { exact: true }).selectOption("light");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await page.getByLabel("设置分类", { exact: true }).selectOption("storage");
+  await expect(page.getByRole("link", { name: "网页依赖清单", exact: true })).toHaveAttribute("href", "/Entwurf/licenses/dependency-inventory.json");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await nav(page, "项目");
+  await expect(page.getByRole("heading", { name: "你的知识工作台", exact: true })).toBeInViewport();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "打开设置", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "打开设置", exact: true }).click();
+  await page.getByLabel("设置分类", { exact: true }).selectOption("ocr");
+  await expect(page.getByLabel("OCR 语言")).toHaveValue("eng");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  expect(errors).toEqual([]);
 });

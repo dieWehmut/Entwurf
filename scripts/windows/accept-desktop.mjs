@@ -523,6 +523,7 @@ try {
     });
     await step('Settings exports only sanitized diagnostics through native Save As and cancels without false success', async () => {
       await page.getByRole('button', { name: '打开设置', exact: true }).click();
+      await page.getByRole('button', { name: '存储与诊断', exact: true }).click();
       const current = await snapshot();
       const filename = `diagnostics-cycle-${config.cycle}-${Date.now()}.json`;
       const diagnosticsPath = path.join(evidence, filename);
@@ -552,7 +553,9 @@ try {
   await step('installed five pages render with both themes', async () => {
     for (const theme of ['dark', 'light']) {
       if (await page.locator('html').getAttribute('data-theme') !== theme) {
-        await page.getByRole('main').getByRole('button', { name: /切换到.*主题/ }).click();
+        await page.getByRole('button', { name: '打开设置', exact: true }).click();
+        await page.getByRole('button', { name: '常规', exact: true }).click();
+        await page.getByLabel('界面主题', { exact: true }).selectOption(theme);
       }
       for (const [id, label] of [['project', '项目'], ['sources', '资料与风格'], ['tasks', '任务'], ['result', '结果'], ['settings', '打开设置']]) {
         if (id === 'settings') await page.getByRole('button', { name: label, exact: true }).click();
