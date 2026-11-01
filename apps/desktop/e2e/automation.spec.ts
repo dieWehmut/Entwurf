@@ -147,7 +147,7 @@ for (const scenario of ["success", "corrupt", "stale", "reject", "paused", "unkn
         tx.oncomplete=()=>{db.close();resolve();};tx.onabort=()=>reject(tx.error);
       });
     });
-    await page.getByRole("button",{name:"继续导入图片"}).click();
+    await page.getByRole("button",{name:"确认已保存图片"}).click();
     await expect(page.getByRole("alert").filter({hasText:/retained image|image.*changed/i})).toBeVisible();
     expect(acks).toBe(1); expect(artifactRequests).toBe(1);
     return;
