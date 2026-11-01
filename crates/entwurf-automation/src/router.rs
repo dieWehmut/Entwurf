@@ -21,6 +21,10 @@ pub(super) fn router(state: AutomationState) -> Router {
         .route("/api/automation/runs", get(list).post(start))
         .route("/api/automation/runs/{id}", get(run))
         .route("/api/automation/runs/{id}/cancel", post(cancel))
+        .route(
+            "/api/automation/runs/{id}/resume-pre-submit",
+            post(resume_pre_submit),
+        )
         .route("/api/automation/runs/{id}/artifact", get(artifact))
         .route("/api/automation/runs/{id}/ack", post(acknowledge))
         .route("/api/automation/extension", get(upgrade))
@@ -40,6 +44,7 @@ impl IntoResponse for AutomationError {
             | "automation_unavailable"
             | "invalid_acknowledgement"
             | "run_completed" => StatusCode::CONFLICT,
+            "resume_not_allowed" | "resume_limit_reached" => StatusCode::CONFLICT,
             "automation_storage_failed" | "artifact_invalid" => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::BAD_REQUEST,
         };
@@ -191,6 +196,23 @@ async fn cancel(
 ) -> Result<Json<RunView>> {
     Ok(Json(s.cancel(&owner.0, &id)?))
 }
+async fn resume_pre_submit(
+    State(s): State<AutomationState>,
+    Extension(owner): Extension<Owner>,
+    Path(id): Path<String>,
+    Json(request): Json<ResumeRun>,
+) -> Result<Response> {
+    let (new, view) = s.resume_pre_submit(&owner.0, &id, request)?;
+    Ok((
+        if new {
+            StatusCode::ACCEPTED
+        } else {
+            StatusCode::OK
+        },
+        Json(view),
+    )
+        .into_response())
+}
 async fn acknowledge(
     State(s): State<AutomationState>,
     Extension(owner): Extension<Owner>,
@@ -336,6 +358,8 @@ fn disconnect(state: &AutomationState, id: &str) {
             i.reason = "extension_disconnected".into();
             let mut database = i.database.clone();
             for r in database.runs.values_mut() {
+                r.view.pre_submit_retryable = false;
+                r.pending_resume = None;
                 if active(&r.view.phase) && r.view.phase != "awaiting_import" {
                     r.view.phase = "paused".into();
                     r.view.reason = Some("extension_disconnected".into());
@@ -363,6 +387,16 @@ fn reason(value: Option<&Value>) -> String {
         .unwrap_or("adapter_unavailable")
         .into()
 }
+fn diagnostic_name(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 80
+                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
+        .map(str::to_owned)
+}
 fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Result<()> {
     let mut i = state.lock()?;
     let mut database = i.database.clone();
@@ -374,6 +408,22 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
             i.available = value.get("available") == Some(&Value::Bool(true));
             i.reason = reason(value.get("reason"));
             return Ok(());
+        }
+        "resume_rejected" => {
+            let id = field(&value, "run_id")?;
+            let request_id = field(&value, "request_id")?;
+            let r = database
+                .runs
+                .get_mut(id)
+                .ok_or(AutomationError("run_not_found"))?;
+            if !active(&r.view.phase) || r.pending_resume.as_deref() != Some(request_id) {
+                return Ok(());
+            }
+            r.pending_resume = None;
+            r.view.phase = "paused".into();
+            r.view.pre_submit_retryable = false;
+            r.view.reason = Some(reason(value.get("reason")));
+            return state.commit(&mut i, database);
         }
         "status" => {
             let id = field(&value, "run_id")?;
@@ -402,7 +452,21 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
                 }
                 return Ok(());
             }
-            if r.view.sha256.is_some() || r.view.phase == "paused" {
+            if r.view.sha256.is_some() {
+                return Ok(());
+            }
+            if let Some(pending) = &r.pending_resume {
+                // Late status from the previous attempt cannot release a newly
+                // accepted request. Only this request's native receipt can do so.
+                if value.get("resume_request_id").and_then(Value::as_str) != Some(pending) {
+                    return Ok(());
+                }
+                r.pending_resume = None;
+            }
+            let retryable = i.database.provider == "windows"
+                && phase == "paused"
+                && value.get("pre_submit_retryable") == Some(&Value::Bool(true));
+            if r.view.phase == "paused" && phase != "paused" {
                 return Ok(());
             }
             let order = [
@@ -421,6 +485,20 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
             if valid {
                 r.view.phase = phase.into();
                 r.view.reason = value.get("detail").map(|d| reason(Some(d)));
+                r.view.pre_submit_retryable = retryable;
+                r.view.stage = diagnostic_name(value.get("stage"));
+                r.view.exception_type = diagnostic_name(value.get("exception_type"));
+                r.view.failure_method = diagnostic_name(value.get("failure_method"));
+                r.view.exception_types = value
+                    .get("exception_types")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .take(3)
+                            .filter_map(|v| diagnostic_name(Some(v)))
+                            .collect()
+                    });
                 state.commit(&mut i, database)?;
             }
             return Ok(());
@@ -485,6 +563,8 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
     r.view.sha256 = Some(digest);
     r.view.mime_type = Some(mime.into());
     r.view.phase = "awaiting_import".into();
+    r.view.pre_submit_retryable = false;
+    r.pending_resume = None;
     r.view.reason = None;
     state.commit(&mut i, database)
 }

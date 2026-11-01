@@ -4,6 +4,8 @@ export type AutomationPhase = "queued" | "preparing" | "submitting" | "generatin
 export interface AutomationRun {
   run_id: string; task_id: string; base_version_id: string; prompt_sha256: string;
   phase: AutomationPhase; reason?: string; sha256?: string; mime_type?: string;
+  pre_submit_retryable?: boolean; resume_request_id?: string;
+  stage?: string; exception_type?: string; exception_types?: string[]; failure_method?: string;
 }
 export const automationOrigin = "http://127.0.0.1:48123";
 const reasonLabels: Record<string, string> = {
@@ -24,6 +26,9 @@ const reasonLabels: Record<string, string> = {
   submission_uncertain: "无法确认提示是否已发送，请先查看 ChatGPT，避免重复提交。",
   adapter_restarted: "连接程序已重启，请检查这次运行的状态。",
   cancelled: "观察已停止。",
+  resume_not_allowed: "尚未确认这次运行从未发送，请继续查询原运行。",
+  resume_limit_reached: "这次运行已达到恢复次数上限。",
+  run_identity_conflict: "恢复请求与原任务或提示不一致，已停止。",
 };
 export function automationReason(reason?: string): string {
   if (!reason) return "等待连接状态。";
@@ -73,11 +78,12 @@ export function createAutomationService(access: AutomationAccess) {
     return response.status === 204 ? null : response.json();
   }
   return {
-    status: () => request("/status") as Promise<{ connected: boolean; available: boolean; reason: string }>,
+    status: () => request("/status") as Promise<{ connected: boolean; available: boolean; reason: string; provider?: string }>,
     list: (taskId: string) => request(`/runs?task_id=${encodeURIComponent(taskId)}`) as Promise<AutomationRun[]>,
     get: (id: string) => request(`/runs/${encodeURIComponent(id)}`) as Promise<AutomationRun>,
     start: (run: { run_id: string; task_id: string; base_version_id: string; prompt: string }) => request("/runs", run) as Promise<AutomationRun>,
     cancel: (id: string) => request(`/runs/${encodeURIComponent(id)}/cancel`, {}) as Promise<AutomationRun>,
+    resume: (id: string, body: { request_id: string; task_id: string; base_version_id: string; prompt: string }) => request(`/runs/${encodeURIComponent(id)}/resume-pre-submit`, body) as Promise<AutomationRun>,
     ack: (id: string, body: { sha256: string; image_id: string }) => request(`/runs/${encodeURIComponent(id)}/ack`, body),
     artifact: async (id: string) => {
       const response = await fetch(`${access.base_url}/api/automation/runs/${encodeURIComponent(id)}/artifact`, { headers: { Authorization: `Bearer ${access.token}` }, signal: AbortSignal.timeout(30_000) });
@@ -90,6 +96,50 @@ export function createAutomationService(access: AutomationAccess) {
   };
 }
 export type AutomationService = ReturnType<typeof createAutomationService>;
+
+interface ResumeIntent { request_id: string; prompt_sha256: string; task_id: string; base_version_id: string; pending: boolean }
+const resumeKey = (run: AutomationRun) => `entwurf.resume-pre-submit.v1:${run.run_id}`;
+function readResumeIntent(run: AutomationRun): ResumeIntent | null {
+  const raw = localStorage.getItem(resumeKey(run));
+  if (!raw) return null;
+  const value = JSON.parse(raw) as ResumeIntent;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.request_id)
+    || value.task_id !== run.task_id || value.base_version_id !== run.base_version_id
+    || value.prompt_sha256 !== run.prompt_sha256 || typeof value.pending !== "boolean") throw new Error("恢复请求记录与原运行不一致。");
+  return value;
+}
+export function resumePending(run: AutomationRun): boolean {
+  try { return readResumeIntent(run)?.pending ?? false; } catch { return true; }
+}
+export function reconcileResumeIntent(run: AutomationRun): void {
+  try {
+    const intent = readResumeIntent(run);
+    if (intent?.pending && intent.request_id === run.resume_request_id) {
+      localStorage.setItem(resumeKey(run), JSON.stringify({ ...intent, pending: false }));
+    }
+  } catch { /* Keep an unreadable/unsaved intent blocked instead of replacing its ID. */ }
+}
+export async function resumeUnsubmittedRun(service: AutomationService, run: AutomationRun, prompt: string): Promise<AutomationRun> {
+  if (run.phase !== "paused" || run.pre_submit_retryable !== true || run.sha256 || run.mime_type) throw new Error("尚未确认这次运行从未发送。");
+  if (resumePending(run)) throw new Error("上次恢复请求尚未确认，将继续查询原运行，不会重新发送。");
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prompt))), v => v.toString(16).padStart(2, "0")).join("");
+  if (digest !== run.prompt_sha256) throw new Error("请输入与这次运行完全相同的原提示，校验通过后才能继续。");
+  // Recheck after hashing, so simultaneous clicks in this document cannot both claim.
+  if (resumePending(run)) throw new Error("上次恢复请求尚未确认，将继续查询原运行。");
+  const intent: ResumeIntent = { request_id: crypto.randomUUID(), task_id: run.task_id, base_version_id: run.base_version_id, prompt_sha256: run.prompt_sha256, pending: true };
+  try { localStorage.setItem(resumeKey(run), JSON.stringify(intent)); }
+  catch { throw new Error("无法保存恢复请求记录，尚未发送恢复请求。"); }
+  try {
+    const updated = await service.resume(run.run_id, { request_id: intent.request_id, task_id: run.task_id, base_version_id: run.base_version_id, prompt });
+    reconcileResumeIntent(updated);
+    return updated;
+  } catch (cause) {
+    if (cause instanceof AutomationHttpError && cause.status >= 400 && cause.status < 500) {
+      try { localStorage.setItem(resumeKey(run), JSON.stringify({ ...intent, pending: false })); } catch { /* Retain the conservative pending guard. */ }
+    }
+    throw cause;
+  }
+}
 export async function importAutomationImage(service: AutomationService, run: AutomationRun, client: WorkspaceClient): Promise<WorkspaceSnapshot> {
   if (!run.sha256 || !run.mime_type) throw new Error("图片尚未准备好，等待下载完成后再导入。");
   let snapshot = await client.call("workspace_snapshot", { taskId: run.task_id });

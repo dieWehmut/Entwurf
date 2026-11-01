@@ -41,6 +41,7 @@ with the credential for the selected provider. No HTTP session or query token is
 | `GET /runs?task_id=...` | Array of the caller owner's RunViews |
 | `GET /runs/{id}` | RunView |
 | `POST /runs/{id}/cancel` | RunView; external generation is not claimed stopped |
+| `POST /runs/{id}/resume-pre-submit` | `{request_id, task_id, base_version_id, prompt}` → same RunView, 202 accepted / 200 already consumed |
 | `GET /runs/{id}/artifact` | Original bytes, Content-Type, X-Entwurf-Sha256 |
 | `POST /runs/{id}/ack` | `{sha256, image_id}` → RunView |
 | `GET /extension` | Frozen extension WebSocket protocol |
@@ -104,6 +105,18 @@ rejected (`server_shutting_down`, HTTP 503 for submissions); duplicate submissio
 can still read their original state. Shutdown does not write the database, remove
 images, change run phases or replay a prompt, and works when storage is unwritable.
 Reopening the database uses the normal restart recovery rules.
+
+Pre-submit recovery requires an explicit user action and the selected Windows
+peer's fresh `pre_submit_retryable: true` status for a paused run. Owner, task,
+version and prompt hash remain unchanged. Each canonical UUID request ID is
+durably consumed before its `resume_pre_submit` WebSocket command is sent; up to
+64 receipts per run are retained without eviction. Duplicate IDs, reconnects and
+ordinary Start/status calls never replay recovery. The native adapter must check
+its own explicit unsubmitted evidence and idle worker again, persist the receipt
+before execution, and include `resume_request_id` in status; a race rejection uses
+`resume_rejected` followed by its current status. Missing/old eligibility is false,
+and disconnect/restart requires a new authoritative report. The frontend retains
+an uncertain request ID across reloads and only queries its original run.
 
 State updates publish to memory only after atomic persistence succeeds. State and
 image files use private creation permissions where supported; state credentials

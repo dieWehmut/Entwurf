@@ -58,6 +58,10 @@ struct StoredRun {
     view: RunView,
     owner: String,
     image_id: Option<String>,
+    #[serde(default)]
+    resume_requests: Vec<String>,
+    #[serde(default)]
+    pending_resume: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunView {
@@ -69,6 +73,18 @@ pub struct RunView {
     pub reason: Option<String>,
     pub sha256: Option<String>,
     pub mime_type: Option<String>,
+    #[serde(default)]
+    pub pre_submit_retryable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exception_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exception_types: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_method: Option<String>,
 }
 #[derive(Serialize)]
 pub struct PairingInfo {
@@ -78,6 +94,13 @@ pub struct PairingInfo {
 #[derive(Deserialize)]
 pub(crate) struct StartRun {
     run_id: String,
+    task_id: String,
+    base_version_id: String,
+    prompt: String,
+}
+#[derive(Deserialize)]
+pub(crate) struct ResumeRun {
+    request_id: String,
     task_id: String,
     base_version_id: String,
     prompt: String,
@@ -187,6 +210,8 @@ impl AutomationState {
         {
             let mut inner = state.lock()?;
             for run in inner.database.runs.values_mut() {
+                run.view.pre_submit_retryable = false;
+                run.pending_resume = None;
                 if active(&run.view.phase) && run.view.phase != "awaiting_import" {
                     run.view.phase = "paused".into();
                     run.view.reason = Some("server_restarted".into());
@@ -397,6 +422,12 @@ impl AutomationState {
             reason: None,
             sha256: None,
             mime_type: None,
+            pre_submit_retryable: false,
+            resume_request_id: None,
+            stage: None,
+            exception_type: None,
+            exception_types: None,
+            failure_method: None,
         };
         let mut database = i.database.clone();
         database.runs.insert(
@@ -405,6 +436,8 @@ impl AutomationState {
                 view: view.clone(),
                 owner: owner.into(),
                 image_id: None,
+                resume_requests: vec![],
+                pending_resume: None,
             },
         );
         self.commit(&mut i, database)?;
@@ -414,6 +447,102 @@ impl AutomationState {
             view.reason = Some("extension_disconnected".into());
             let mut database = i.database.clone();
             database.runs.get_mut(&view.run_id).unwrap().view = view.clone();
+            self.commit(&mut i, database)?;
+        }
+        Ok((true, view))
+    }
+    fn resume_pre_submit(
+        &self,
+        owner: &str,
+        id: &str,
+        request: ResumeRun,
+    ) -> Result<(bool, RunView)> {
+        if Uuid::parse_str(&request.request_id)
+            .ok()
+            .is_none_or(|id| id.to_string() != request.request_id)
+            || request.prompt.trim().is_empty()
+            || request.prompt.len() > 200_000
+            || request.prompt.contains('\0')
+        {
+            return Err(AutomationError("invalid_run"));
+        }
+        let mut i = self.lock()?;
+        let old = i
+            .database
+            .runs
+            .get(id)
+            .filter(|r| r.owner == owner)
+            .ok_or(AutomationError("run_not_found"))?;
+        if old.view.task_id != request.task_id
+            || old.view.base_version_id != request.base_version_id
+            || old.view.prompt_sha256 != hash(request.prompt.as_bytes())
+        {
+            return Err(AutomationError("run_conflict"));
+        }
+        // Consumed requests never retransmit, including after cancellation or restart.
+        if old.resume_requests.contains(&request.request_id) {
+            return Ok((false, old.view.clone()));
+        }
+        if i.database
+            .runs
+            .values()
+            .any(|r| r.resume_requests.contains(&request.request_id))
+        {
+            return Err(AutomationError("run_conflict"));
+        }
+        if *self.0.shutdown.borrow() {
+            return Err(AutomationError("server_shutting_down"));
+        }
+        if i.database.provider != "windows"
+            || !i.available
+            || i.peer.is_none()
+            || old.view.phase != "paused"
+            || !old.view.pre_submit_retryable
+            || old.view.sha256.is_some()
+            || old.view.mime_type.is_some()
+            || old.pending_resume.is_some()
+        {
+            return Err(AutomationError("resume_not_allowed"));
+        }
+        if i.database
+            .runs
+            .iter()
+            .any(|(other, r)| other != id && active(&r.view.phase))
+        {
+            return Err(AutomationError("run_active"));
+        }
+        if old.resume_requests.len() >= 64 {
+            return Err(AutomationError("resume_limit_reached"));
+        }
+        let command = json!({"type":"resume_pre_submit","request_id":request.request_id,"run":{
+            "run_id":id,"task_id":request.task_id,"base_version_id":request.base_version_id,
+            "prompt":request.prompt,"prompt_sha256":old.view.prompt_sha256}});
+        let mut database = i.database.clone();
+        let record = database.runs.get_mut(id).unwrap();
+        record.resume_requests.push(request.request_id.clone());
+        record.pending_resume = Some(request.request_id.clone());
+        record.view.resume_request_id = Some(request.request_id);
+        record.view.pre_submit_retryable = false;
+        record.view.phase = "queued".into();
+        record.view.reason = None;
+        record.view.stage = None;
+        record.view.exception_type = None;
+        record.view.exception_types = None;
+        record.view.failure_method = None;
+        let mut view = record.view.clone();
+        self.commit(&mut i, database)?;
+        if i.peer.as_ref().unwrap().sender.try_send(command).is_err() {
+            // Dropping the transport discards any undelivered command. Reconnect
+            // only asks for authoritative status; it never replays this request.
+            i.peer = None;
+            i.available = false;
+            i.reason = "extension_disconnected".into();
+            let mut database = i.database.clone();
+            let record = database.runs.get_mut(id).unwrap();
+            record.pending_resume = None;
+            record.view.phase = "paused".into();
+            record.view.reason = Some("extension_disconnected".into());
+            view = record.view.clone();
             self.commit(&mut i, database)?;
         }
         Ok((true, view))
@@ -430,6 +559,8 @@ impl AutomationState {
             return Err(AutomationError("run_completed"));
         }
         r.view.phase = "cancelled".into();
+        r.view.pre_submit_retryable = false;
+        r.pending_resume = None;
         r.view.reason = Some("external_generation_not_stopped".into());
         let view = r.view.clone();
         self.commit(&mut i, database)?;
@@ -478,6 +609,8 @@ impl AutomationState {
         }
         r.image_id = Some(ack.image_id);
         r.view.phase = "completed".into();
+        r.view.pre_submit_retryable = false;
+        r.pending_resume = None;
         r.view.reason = None;
         let view = r.view.clone();
         self.commit(&mut i, database)?;

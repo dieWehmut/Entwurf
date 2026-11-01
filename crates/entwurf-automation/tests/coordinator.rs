@@ -279,6 +279,419 @@ async fn read(socket: &mut Socket) -> Value {
 fn start_request() -> Value {
     json!({"run_id":"run-1","task_id":"task-1","base_version_id":"version-1","prompt":"Make one fixture image."})
 }
+
+// Exercise the public HTTP boundary over a real loopback socket, alongside the
+// real WebSocket peer. No application UI or external account is involved.
+async fn network_resume(f: &Fixture, capability: &str, body: Value) -> (u16, Value) {
+    let port = f.port;
+    let capability = capability.to_owned();
+    tokio::task::spawn_blocking(move || {
+        use std::io::{Read, Write};
+        let body = body.to_string();
+        let mut socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        write!(socket, "POST /api/automation/runs/run-1/resume-pre-submit HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {ORIGIN}\r\nAuthorization: Bearer {capability}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+        let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, serde_json::from_str(body).unwrap_or(Value::Null))
+    }).await.unwrap()
+}
+fn resume_request(id: &str) -> Value {
+    json!({"request_id":id,"task_id":"task-1","base_version_id":"version-1","prompt":"Make one fixture image."})
+}
+async fn native_ready(f: &Fixture) -> Socket {
+    f.state.set_provider("windows").unwrap();
+    let mut socket = f.socket().await;
+    socket
+        .send(Message::Text(
+            json!({"type":"authenticate","token":f.state.native_pairing_info().extension_token})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(read(&mut socket).await["type"], "authenticated");
+    socket
+        .send(Message::Text(
+            json!({"type":"probe","available":true,"reason":"ready"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if f.state.status().unwrap()["available"] == true {
+            return socket;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("native peer did not become ready");
+}
+async fn paused_native(f: &Fixture, socket: &mut Socket, retryable: bool) {
+    socket.send(Message::Text(json!({"type":"status","run_id":"run-1","phase":"paused","detail":"automation_unavailable","pre_submit_retryable":retryable}).to_string().into())).await.unwrap();
+    for _ in 0..100 {
+        let view = f.phase("paused").await;
+        if view["pre_submit_retryable"] == retryable {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("native eligibility was not reflected");
+}
+
+#[tokio::test]
+async fn explicit_resume_uses_same_identity_once_and_survives_restart_without_replay() {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["type"], "start");
+    paused_native(&f, &mut socket, true).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = resume_request(&id);
+    let (code, view) = network_resume(&f, &f.token, request.clone()).await;
+    assert_eq!(code, 202);
+    assert_eq!(view["run_id"], "run-1");
+    assert_eq!(view["resume_request_id"], id);
+    assert_eq!(view["pre_submit_retryable"], false);
+    let command = read(&mut socket).await;
+    assert_eq!(command["type"], "resume_pre_submit");
+    assert_eq!(command["request_id"], id);
+    assert_eq!(command["run"]["prompt"], start_request()["prompt"]);
+    assert_eq!(network_resume(&f, &f.token, request.clone()).await.0, 200);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), socket.next())
+            .await
+            .is_err()
+    );
+    let database = std::fs::read_to_string(f.dir.path().join("automation.json")).unwrap();
+    assert!(!database.contains("Make one fixture image"));
+    assert!(database.contains(&id));
+    let reopened = Fixture::with_database(Some(serde_json::from_str(&database).unwrap())).await;
+    assert_eq!(
+        network_resume(&reopened, &reopened.token, request).await.0,
+        200
+    );
+    assert_eq!(
+        network_resume(
+            &reopened,
+            &reopened.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+}
+
+#[tokio::test]
+async fn resume_rejects_unknown_native_evidence_wrong_owner_identity_and_request_uuid() {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, false).await;
+    let request = resume_request(&uuid::Uuid::new_v4().to_string());
+    assert_eq!(network_resume(&f, &f.token, request.clone()).await.0, 409);
+    paused_native(&f, &mut socket, true).await;
+    let other = f.state.issue_access("another-owner", ORIGIN).unwrap();
+    assert_eq!(network_resume(&f, &other, request.clone()).await.0, 404);
+    for field in ["task_id", "base_version_id", "prompt"] {
+        let mut changed = request.clone();
+        changed[field] = json!("different");
+        assert_eq!(network_resume(&f, &f.token, changed).await.0, 409);
+    }
+    assert_eq!(
+        network_resume(&f, &f.token, resume_request("not-a-uuid"))
+            .await
+            .0,
+        400
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), socket.next())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn resume_disk_failure_preserves_eligibility_and_does_not_send_or_consume_request() {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    let path = f.dir.path().join("automation.json");
+    let before = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let request = resume_request(&uuid::Uuid::new_v4().to_string());
+    assert_eq!(network_resume(&f, &f.token, request.clone()).await.0, 500);
+    assert_eq!(f.phase("paused").await["pre_submit_retryable"], true);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), socket.next())
+            .await
+            .is_err()
+    );
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, before).unwrap();
+    assert_eq!(network_resume(&f, &f.token, request).await.0, 202);
+    assert_eq!(read(&mut socket).await["type"], "resume_pre_submit");
+}
+
+#[tokio::test]
+async fn resume_is_native_only_and_missing_or_revoked_evidence_never_authorizes_it() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused","pre_submit_retryable":true})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(f.phase("paused").await["pre_submit_retryable"], false);
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    paused_native(&f, &mut socket, false).await;
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+    paused_native(&f, &mut socket, true).await;
+    f.http(
+        "POST",
+        "/api/automation/runs/run-1/cancel",
+        &f.token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(read(&mut socket).await["type"], "cancel");
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+}
+
+#[tokio::test]
+async fn resume_ignores_stale_status_and_rejection_then_allows_a_fresh_authoritative_manual_attempt(
+) {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    assert_eq!(
+        network_resume(&f, &f.token, resume_request(&id)).await.0,
+        202
+    );
+    read(&mut socket).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused","pre_submit_retryable":true})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    socket.send(Message::Text(json!({"type":"resume_rejected","run_id":"run-1","request_id":uuid::Uuid::new_v4().to_string(),"reason":"resume_not_allowed"}).to_string().into())).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(f.phase("queued").await["pre_submit_retryable"], false);
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+    socket.send(Message::Text(json!({"type":"resume_rejected","run_id":"run-1","request_id":id,"reason":"resume_not_allowed"}).to_string().into())).await.unwrap();
+    assert_eq!(f.phase("paused").await["pre_submit_retryable"], false);
+    paused_native(&f, &mut socket, true).await;
+    assert_eq!(
+        network_resume(&f, &f.token, resume_request(&id)).await.0,
+        200
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), socket.next())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        202
+    );
+    assert_eq!(read(&mut socket).await["type"], "resume_pre_submit");
+}
+
+#[tokio::test]
+async fn resume_limit_does_not_evict_old_receipts_or_bypass_other_active_runs() {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    let mut database: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    let ids: Vec<String> = (0..64).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+    database["runs"]["run-1"]["resume_requests"] = json!(ids);
+    let f = Fixture::with_database(Some(database.clone())).await;
+    let mut socket = native_ready(&f).await;
+    assert_eq!(read(&mut socket).await["type"], "status");
+    paused_native(&f, &mut socket, true).await;
+    assert_eq!(
+        network_resume(&f, &f.token, resume_request(&ids[0]))
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .1["error"],
+        "resume_limit_reached"
+    );
+    database["runs"]["run-1"]["resume_requests"] = json!([]);
+    let mut other = database["runs"]["run-1"].clone();
+    other["run_id"] = json!("another-run");
+    database["runs"]["another-run"] = other;
+    let f = Fixture::with_database(Some(database)).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+}
+
+#[tokio::test]
+async fn resume_requires_fresh_evidence_after_disconnect_and_clears_missing_fields() {
+    let f = Fixture::new().await;
+    let mut socket = native_ready(&f).await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    read(&mut socket).await;
+    paused_native(&f, &mut socket, true).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if f.phase("paused").await["pre_submit_retryable"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+    paused_native(&f, &mut socket, true).await;
+    socket.close(None).await.unwrap();
+    for _ in 0..100 {
+        if f.state.status().unwrap()["connected"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(f.phase("paused").await["pre_submit_retryable"], false);
+    let mut socket = native_ready(&f).await;
+    assert_eq!(read(&mut socket).await["type"], "status");
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        409
+    );
+    paused_native(&f, &mut socket, true).await;
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .0,
+        202
+    );
+    assert_eq!(read(&mut socket).await["type"], "resume_pre_submit");
+}
 async fn generating(socket: &mut Socket) {
     socket
         .send(Message::Text(
