@@ -26,6 +26,8 @@ Entwurf 是本地优先的知识图工具，提供 Windows 10/11 x64 桌面应�
 
 若 Windows 任务在发送前暂停，连接恢复后可重新填入原提示，点击「继续未发送的任务」。该按钮只在本机适配器确认从未发送时启用，并继续原运行；刷新或重连不会代替你点击。已经发送或无法确认发送状态的任务继续观察原结果。
 
+生成期间若修改了任务版本，可查看、下载本机服务保留的原图；停止观察后也能取回。若图片已经入库但确认中断，可点击「确认已保存图片」完成确认，原图和知识修改都会保留。
+
 ## 开发
 
 Windows 原生开发需要 Rust MSVC、Visual Studio C++ Build Tools 与 Windows SDK、Node.js 22.12+、pnpm、.NET 10 SDK、WebView2 Runtime。Tesseract 与 `chi_sim`/`eng` 数据为可选 OCR 能力。

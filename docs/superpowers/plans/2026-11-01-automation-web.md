@@ -72,7 +72,7 @@ Files: local service automation modules, core/project/contracts image metadata, 
 - [x] Connect start/status/cancel/download/ack from all three Workspace clients, including refresh recovery and exact-once database import.
 - [x] Verify complete flows with deterministic adapter fixtures before touching the real account.
 - [x] Commit and integrate each reviewed branch, resolving shared schema/Cargo changes explicitly.
-- [ ] Complete the final-review fix for preview/download of staged stale originals, including after stopping observation, while preserving import version guards and ACK boundaries.
+- [x] Complete the final-review fix for preview/download of staged stale originals, including after stopping observation, while preserving import version guards and ACK boundaries.
 
 ## Task 6: Pages build and deployment
 

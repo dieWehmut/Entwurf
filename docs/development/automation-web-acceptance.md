@@ -121,13 +121,30 @@ reported the locked Windows session. Preparation issued zero generation requests
 left the original submission-intent state unchanged, and produced a new screenshot
 that root inspected.
 
-The final implementation review found one required workflow gap: an original image
+The final implementation review found a required workflow gap: an original image
 staged against an older task version could not be previewed or downloaded, and
-stopping observation also blocked its retrieval. The core correctly rejects its
-stale import. A scoped fix is in progress to retain authenticated original-image
-review/download without changing knowledge, acknowledging an import or resending
-the request. Final release acceptance remains open until that fix is reviewed and
-the affected deployed and installed artifacts are verified.
+stopping observation also blocked its retrieval. The scoped fix is integrated at
+`8286a11` and independently approved. It provides authenticated, hash/MIME-bound
+original preview/download and keeps captured bytes readable after cancellation,
+while retaining the core's stale-import rejection and cancelled-run ACK/update
+guards. Viewing or downloading changes neither knowledge nor delivery state.
+
+The same review caught and resolved a recovery regression in the initial fix:
+images already saved before an interrupted ACK still need explicit confirmation
+after a later knowledge edit. The final action requires matching run/task/base,
+prompt, image hash and MIME, then independently rereads destination bytes before
+ACK. The reviewer exercised the actual new control against real WASM state and
+verified one ACK, no new import/download and unchanged knowledge.
+
+All 97 frontend tests pass on the integrated tree. The fix also passed all 28
+coordinator tests, six real-WASM browser automation scenarios and the isolated
+real HTTP/SQLite browser scenario, with the final confirmation-label adjustment
+checked in the affected corruption scenario. Tests cover exact retained downloads
+after edit/reload/stop/reload, owner/origin boundaries, corrupt/oversized bytes,
+late-result rejection and no extra submission or ACK during review. The HTTP
+scenario preserves direct stale-import rejection and explicit upload-cleanup
+checks, uses its own data directory and refuses the installed service's port.
+Final artifacts containing this fix still require deployment and reinstall checks.
 
 ## Remaining release gates
 
