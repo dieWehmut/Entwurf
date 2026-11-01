@@ -7,6 +7,14 @@ Generated binaries are ignored. `scripts/windows/build.ps1` runs this preparatio
 before any Cargo/Tauri build; no startup download or runtime package installation
 is performed. Missing resources safely leave manual handoff available.
 
-The desktop parent launches `Entwurf.Bridge.exe` only for bounded, authenticated,
-read-only discovery and then closes/reaps it. The current bridge cannot pass all
-four automation gates and performs no ChatGPT input, submit, or capture actions.
+The desktop uses `--automation-stdin` for the separate original-image workflow.
+Its inherited framed stdin contains the local transport capability and owned
+state directory, never account credentials. EOF or parent exit ends this child.
+Submission requires an explicit new run and a verified interactive ChatGPT image
+surface. Durable intent prevents repeated input or submission after reconnect;
+original bytes remain staged until the destination project acknowledges them.
+
+The older bounded, read-only discovery protocol remains available for structured
+TaskEnvelope/ResultEnvelope planning. Its compatibility gates are independent of
+the original-image workflow. Real-account acceptance is recorded in
+`docs/development/automation-web-acceptance.md`.

@@ -15,5 +15,5 @@ try {
     # Remove stale generated DLLs after a successful publish; preserve tracked docs.
     Get-ChildItem $destination -Force | Where-Object { $_.Name -notin @('.gitignore', 'README.md') } | Remove-Item -Recurse -Force
     Copy-Item (Join-Path $stage '*') $destination -Recurse -Force
-    Write-Output 'Prepared self-contained Windows x64 GPT bridge for Tauri packaging. Automation remains disabled.'
+    Write-Output 'Prepared self-contained Windows x64 ChatGPT adapter for Tauri packaging. No ChatGPT prompt was sent.'
 } finally { Remove-Item $stage -Recurse -Force }

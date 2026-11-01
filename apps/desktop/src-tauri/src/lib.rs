@@ -633,7 +633,7 @@ async fn open_automation_setup(
 async fn open_chatgpt() -> Result<(), String> {
     #[cfg(windows)]
     {
-        tauri::async_runtime::spawn_blocking(||{use std::os::windows::process::CommandExt;let output=std::process::Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command","[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $apps=@(Get-StartApps | Where-Object { ($_.Name -eq 'ChatGPT') -and ($_.AppID -match '^OpenAI[.]ChatGPT(-Desktop)?_2p2nqsd0c76g0!') }); if($apps.Count -ne 1){exit 3}; $apps[0].AppID"]).creation_flags(0x08000000).output().map_err(|e|e.to_string())?;let id=String::from_utf8_lossy(&output.stdout).trim().to_owned();if !output.status.success()||id.is_empty(){return Err("ChatGPT desktop app was not uniquely found. Open it manually from Windows Start.".into());}std::process::Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{id}")).spawn().map_err(|e|e.to_string())?;Ok(())}).await.map_err(|e|e.to_string())?
+        tauri::async_runtime::spawn_blocking(||{use std::os::windows::process::CommandExt;let output=std::process::Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command","[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); $apps=@(Get-StartApps | Where-Object { ($_.Name -eq 'ChatGPT') -and ($_.AppID -match '^(OpenAI[.]ChatGPT(-Desktop)?|OpenAI[.]Codex)_2p2nqsd0c76g0!') }); if($apps.Count -ne 1){exit 3}; $apps[0].AppID"]).creation_flags(0x08000000).output().map_err(|e|e.to_string())?;let id=String::from_utf8_lossy(&output.stdout).trim().to_owned();if !output.status.success()||id.is_empty(){return Err("ChatGPT desktop app was not uniquely found. Open it manually from Windows Start.".into());}std::process::Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{id}")).spawn().map_err(|e|e.to_string())?;Ok(())}).await.map_err(|e|e.to_string())?
     }
     #[cfg(not(windows))]
     {
@@ -648,6 +648,16 @@ pub fn run() {
         .manage(AppState::new(None))
         .manage(CapabilityState::default())
         .manage(companion::CompanionState::default())
+        .setup(|app| {
+            let app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Make the local WebUI and saved Pages pairing available as soon
+                // as the desktop opens, including before any project is selected.
+                // Explicit access retries startup and reports any connection error.
+                let _ = companion::start(&app).await;
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
             open_workspace,

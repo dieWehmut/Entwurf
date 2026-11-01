@@ -26,5 +26,5 @@ try {
         $tauriArguments += @('--', '--locked')
         Invoke-CheckedNative 'pnpm' $tauriArguments
     } finally { Pop-Location }
-    Write-Output 'Build completed with the self-contained GPT bridge bundled as resources. ChatGPT automation remains disabled pending all four real acceptance gates.'
+    Write-Output 'Build completed with the self-contained ChatGPT adapter. Installed-desktop and real-account acceptance are separate release checks.'
 } finally { Pop-Location }
