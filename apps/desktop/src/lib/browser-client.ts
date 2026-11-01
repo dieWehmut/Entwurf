@@ -35,7 +35,7 @@ export function createBrowserClient(): WorkspaceClient {
       case "generated_image_bytes": return Array.from(await request<Uint8Array>({ type: "generated_image", args }));
       case "bootstrap": {
         await invoke("list_projects");
-        return { version: "0.1.0", platform: "浏览器 / WebAssembly", runtime: "browser", storage: "indexeddb", tesseract_available: true, ocr_languages: ["chi_sim", "eng"], automation_enabled: false, bridge_status: "not_connected", bridge_detail: "项目与资料保存在此浏览器。PDF 解析及中英文 OCR 由页面随附组件在本机执行；ChatGPT 自动化尚未连接。" };
+        return { version: "0.1.0", platform: "浏览器 / WebAssembly", runtime: "browser", storage: "indexeddb", tesseract_available: true, ocr_languages: ["chi_sim", "eng"], automation_enabled: false, bridge_status: "not_connected", bridge_detail: "项目与资料保存在此浏览器。PDF 解析及中英文 OCR 由页面随附组件在本机执行；图片生成的连接与运行状态见任务页。" };
       }
       case "choose_directory": return `/projects/${crypto.randomUUID()}`;
       case "choose_sources": {

@@ -15,7 +15,7 @@ interface SidebarProps {
 const navigation: { id: PageId; label: string; icon: IconComponent; hint: string }[] = [
   { id: "project", label: "项目", icon: Icons.folder, hint: "概览与最近任务" },
   { id: "sources", label: "资料与风格", icon: Icons.layers, hint: "导入、锚点与视觉参考" },
-  { id: "tasks", label: "任务", icon: Icons.bot, hint: "GPT 计划与任务版本" },
+  { id: "tasks", label: "任务", icon: Icons.bot, hint: "任务版本、图片生成与结果导入" },
   { id: "result", label: "结果", icon: Icons.grid, hint: "审阅、校验与导出" },
 ];
 
@@ -32,7 +32,7 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="主导航">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true">E</span>
+        <span className="brand-mark" aria-hidden="true"><img src={`${import.meta.env.BASE_URL}icon.png`} alt="" /></span>
         <div>
           <strong>Entwurf</strong>
           <span>可验证知识图</span>
@@ -70,7 +70,7 @@ export function Sidebar({
 
       <div className="sidebar-note">
         <Icons.info size={14} />
-        <span>核心功能离线可用。GPT 自动运行默认关闭。</span>
+        <span>核心功能离线可用。图片生成状态见任务页。</span>
       </div>
 
       <div className="sidebar-footer">
