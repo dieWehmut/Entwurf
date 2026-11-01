@@ -1657,3 +1657,130 @@ async fn shutdown_is_bounded_even_when_persistent_storage_is_unwritable() {
     std::fs::remove_dir(&database).unwrap();
     std::fs::rename(&backup, &database).unwrap();
 }
+
+#[tokio::test]
+async fn cancelled_original_remains_private_hash_verified_and_read_only_after_restart() {
+    let mut f = Fixture::new().await;
+    let other = f.state.issue_access("another-owner", ORIGIN).unwrap();
+    let mut socket = f.ready().await;
+    f.http("POST", "/api/automation/runs", &f.token, start_request())
+        .await;
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    let (bytes, sha, message) = image();
+    socket
+        .send(Message::Text(message.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    f.http(
+        "POST",
+        "/api/automation/runs/run-1/cancel",
+        &f.token,
+        json!({}),
+    )
+    .await;
+    assert_eq!(read(&mut socket).await["type"], "cancel");
+    // Late arrival must remain rejected even when its bytes match the retained original.
+    socket
+        .send(Message::Text(message.to_string().into()))
+        .await
+        .unwrap();
+    assert_eq!(read(&mut socket).await["code"], "artifact_not_expected");
+    for restarted in [false, true] {
+        if restarted {
+            socket.close(None).await.unwrap();
+            f.server.abort();
+            f.state = AutomationState::new(f.dir.path(), f.port).unwrap();
+        }
+        for (token, origin, expected) in [
+            (f.token.as_str(), ORIGIN, StatusCode::OK),
+            (other.as_str(), ORIGIN, StatusCode::NOT_FOUND),
+            ("invalid", ORIGIN, StatusCode::UNAUTHORIZED),
+            (
+                f.token.as_str(),
+                "https://evil.test",
+                StatusCode::UNAUTHORIZED,
+            ),
+        ] {
+            let response = f
+                .state
+                .router()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/automation/runs/run-1/artifact")
+                        .header("host", format!("127.0.0.1:{}", f.port))
+                        .header("origin", origin)
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            if expected == StatusCode::OK {
+                assert_eq!(response.headers()["x-entwurf-sha256"], sha);
+                assert_eq!(response.headers()["content-type"], "image/png");
+                assert_eq!(
+                    &to_bytes(response.into_body(), 1024 * 1024).await.unwrap()[..],
+                    bytes
+                );
+            }
+        }
+        let (_, view) = f
+            .http("GET", "/api/automation/runs/run-1", &f.token, json!(null))
+            .await;
+        assert_eq!(view["phase"], "cancelled");
+        assert_eq!(view["task_id"], "task-1");
+        assert_eq!(view["base_version_id"], "version-1");
+        assert_eq!(view["sha256"], sha);
+        assert_eq!(
+            f.http(
+                "POST",
+                "/api/automation/runs/run-1/ack",
+                &f.token,
+                json!({"sha256":sha,"image_id":"asset-1"})
+            )
+            .await
+            .0,
+            StatusCode::CONFLICT
+        );
+        if !restarted {
+            assert!(
+                tokio::time::timeout(Duration::from_millis(60), socket.next())
+                    .await
+                    .is_err(),
+                "review must not send a provider command or ACK"
+            );
+        }
+    }
+    let path = f.dir.path().join("images/run-1.image");
+    std::fs::write(&path, b"tampered original").unwrap();
+    assert_eq!(
+        f.http(
+            "GET",
+            "/api/automation/runs/run-1/artifact",
+            &f.token,
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(entwurf_automation::MAX_ARTIFACT_BYTES as u64 + 1)
+        .unwrap();
+    assert_eq!(
+        f.http(
+            "GET",
+            "/api/automation/runs/run-1/artifact",
+            &f.token,
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}

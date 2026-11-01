@@ -575,7 +575,10 @@ impl AutomationState {
             .sha256
             .as_deref()
             .ok_or(AutomationError("artifact_unavailable"))?;
-        if !matches!(view.phase.as_str(), "awaiting_import" | "completed") {
+        if !matches!(
+            view.phase.as_str(),
+            "awaiting_import" | "completed" | "cancelled"
+        ) {
             return Err(AutomationError("artifact_unavailable"));
         }
         let path = self.0.directory.join("images").join(format!("{id}.image"));

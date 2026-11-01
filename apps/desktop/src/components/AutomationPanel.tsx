@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Run } from "../App";
 import type { GeneratedImage } from "../lib/types";
 import { errorMessage, type WorkspaceClient, type WorkspaceSnapshot } from "../lib/workspace";
-import { AutomationHttpError, automationReason, createAutomationService, getAutomationAccess, importAutomationImage, pairAutomation, resumeUnsubmittedRun, resumePending, reconcileResumeIntent, type AutomationRun, type AutomationService } from "../lib/automation";
+import { AutomationHttpError, automationReason, createAutomationService, getAutomationAccess, importAutomationImage, reviewAutomationImage, pairAutomation, resumeUnsubmittedRun, resumePending, reconcileResumeIntent, type AutomationRun, type AutomationService } from "../lib/automation";
 import { download } from "../lib/web-files";
 
 const phases = { queued: "等待执行", preparing: "准备 ChatGPT", submitting: "正在提交", generating: "等待生成", downloading: "取回图片", awaiting_import: "等待保存到项目", completed: "图片已入库", paused: "观察已暂停", failed: "执行失败", cancelled: "观察已停止" };
@@ -115,14 +115,39 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     <p className="muted">{version ? `本次生成绑定任务 ${taskId} 的 r${version.revision}。` : "导入资料建立知识版本后可开始生成。"}</p>
     <button className="primary-button" disabled={locked || busy || running || !version || !prompt.trim() || !status?.connected || !status.available} onClick={() => { void start(); }}>启动一次图片生成</button>
     {runs.map(item => <article className="source-record" key={item.run_id}><strong>{phases[item.phase] ?? item.phase}</strong>{item.reason && <p>{automationReason(item.reason)}</p>}<p className="path-text">运行：{item.run_id} · 基础版本：{item.base_version_id}</p>
-      {version && item.base_version_id !== version.id && <p className="muted">此运行绑定其他知识版本；导入时会校验版本，已保存图片仍可查看。</p>}
+      {version && item.base_version_id !== version.id && <p className="muted">此运行绑定其他知识版本，不能导入当前版本；可查看和下载原始图片，当前知识修改保持不变。</p>}
       {canResume(item) && <p className="muted">仅在本地确认从未发送后可继续；不会重发已发送提示。{resumePending(item) ? "恢复请求尚未确认，正在继续查询原运行。" : "如已刷新页面，请重新填写原提示以核对身份。"}</p>}
       <div className="handoff-actions">{activePhases.has(item.phase) && <button className="secondary-button" disabled={locked || busy} onClick={() => { void cancel(item); }}>停止观察</button>}
       {canResume(item) && <button className="primary-button" disabled={locked || busy || !status?.connected || !status.available || !prompt.trim() || resumePending(item)} onClick={() => { void resume(item); }}>继续未发送的任务</button>}
-      {(item.phase === "awaiting_import" || item.sha256) && item.phase !== "completed" && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run("保存生成图片", () => importAutomationImage(service, item, client)); }}>继续导入图片</button>}</div>
+      {item.phase === "awaiting_import" && item.base_version_id === version?.id && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run("保存生成图片", () => importAutomationImage(service, item, client)); }}>继续导入图片</button>}</div>
+      {service && item.sha256 && item.mime_type && ["awaiting_import", "cancelled"].includes(item.phase) && <RetainedImagePreview key={`${item.task_id}:${item.base_version_id}:${item.sha256}:${item.mime_type}`} service={service} item={item} />}
     </article>)}
     <p className="muted">匹配当前任务与版本的图片会自动保存一次；失败后可手动继续导入。停止观察不会撤回已发送到 ChatGPT 的请求，刷新页面不重复提交。</p>
   </section>;
+}
+function RetainedImagePreview({ service, item }: { service: AutomationService; item: AutomationRun }) {
+  const [requested, setRequested] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Polling replaces run objects. Only the immutable identity may reload bytes.
+  const { run_id, task_id, base_version_id, sha256, mime_type } = item;
+  useEffect(() => {
+    if (!requested) return;
+    let alive = true; let objectUrl: string | undefined;
+    setUrl(null); setError(null);
+    void reviewAutomationImage(service, { run_id, sha256, mime_type }).then(bytes => {
+      if (!alive) return;
+      objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mime_type })); setUrl(objectUrl);
+    }).catch(cause => { if (alive) { setError(errorMessage(cause)); setRequested(false); } });
+    return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [requested, service, run_id, task_id, base_version_id, sha256, mime_type]);
+  return <div>
+    <p className="muted">原始图片保留在本机自动化服务；查看和下载不会导入项目，停止观察后仍可取回。</p>
+    <p className="path-text">任务：{task_id} · SHA-256：{sha256}</p>
+    {!url && <button className="secondary-button" disabled={requested} onClick={() => setRequested(true)}>{requested ? "正在校验原始图片…" : "查看原始图片"}</button>}
+    {error && <p role="alert">{error}</p>}
+    {url && <><img className="generated-image" src={url} alt={`原始生成图片 ${run_id}`} /><a className="secondary-button" href={url} download={`${run_id}.${mime_type === "image/jpeg" ? "jpg" : mime_type?.split("/")[1]}`}>下载原始图片</a></>}
+  </div>;
 }
 export function GeneratedImageGallery({ snapshot, client }: Pick<Props, "snapshot" | "client">) {
   const images = snapshot.project.generated_images?.filter(image => image.task_id === snapshot.selected_task_id) ?? [];

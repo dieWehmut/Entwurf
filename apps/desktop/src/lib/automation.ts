@@ -87,15 +87,25 @@ export function createAutomationService(access: AutomationAccess) {
     ack: (id: string, body: { sha256: string; image_id: string }) => request(`/runs/${encodeURIComponent(id)}/ack`, body),
     artifact: async (id: string) => {
       const response = await fetch(`${access.base_url}/api/automation/runs/${encodeURIComponent(id)}/artifact`, { headers: { Authorization: `Bearer ${access.token}` }, signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) throw new Error("生成图片下载失败，可以稍后继续导入。");
+      if (!response.ok) throw new Error("生成图片下载失败，可以稍后重新取回。");
       const bytes = new Uint8Array(await response.arrayBuffer());
       const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), value => value.toString(16).padStart(2, "0")).join("");
       if (response.headers.get("X-Entwurf-Sha256") !== sha256) throw new Error("生成图片的下载校验未通过，请重新取回。");
-      return { bytes, sha256 };
+      return { bytes, sha256, mimeType: response.headers.get("Content-Type")?.split(";")[0].trim() };
     },
   };
 }
 export type AutomationService = ReturnType<typeof createAutomationService>;
+
+// Review is deliberately read-only: bind the authenticated response to the
+// selected immutable run, without touching the workspace or acknowledging it.
+export async function reviewAutomationImage(service: AutomationService, run: Pick<AutomationRun, "run_id" | "sha256" | "mime_type">) {
+  if (!run.sha256 || !run.mime_type || !["image/png", "image/jpeg", "image/webp"].includes(run.mime_type)) throw new Error("原始图片类型无效，无法查看。");
+  const artifact = await service.artifact(run.run_id);
+  if (artifact.sha256 !== run.sha256 || artifact.mimeType !== run.mime_type
+    || !artifact.bytes.length || artifact.bytes.length > 32 * 1024 * 1024) throw new Error("原始图片与生成任务的哈希或类型不一致，已停止查看。");
+  return artifact.bytes;
+}
 
 interface ResumeIntent { request_id: string; prompt_sha256: string; task_id: string; base_version_id: string; pending: boolean }
 const resumeKey = (run: AutomationRun) => `entwurf.resume-pre-submit.v1:${run.run_id}`;
