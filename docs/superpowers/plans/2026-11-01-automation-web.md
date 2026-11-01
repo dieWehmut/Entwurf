@@ -87,11 +87,12 @@ Files: `.github/workflows/**`, WASM/frontend build scripts and deployment accept
 
 - [ ] Use one bounded public image-generation prompt from each of Pages, local WebUI and the installed desktop, on the same existing account; verify returned original images appear and persist in the correct database.
 - [ ] Record run IDs/hashes/timing privately, with no account identifiers or private images committed.
-- [ ] Rebuild the Windows installer and perform two actual uninstall/reinstall cycles, preserving project and generated-image data.
+- [x] Rebuild the Windows installer and perform two actual uninstall/reinstall cycles, preserving project and generated-image data.
 - [ ] Audit every explicit requirement against real evidence; unresolved account/selector/deployment checks remain incomplete.
 - [ ] Publish concise usage/setup/test evidence, push final integration and only then mark the goal complete.
 
-Intermediate candidate `64dd4e8` passed native reinstall cycles 5 and 6 and Pages
-deployment `41271982734`. The final-review source fix requires updated artifacts;
-these intermediate successes do not complete the final installed or live-account
-gates. See `docs/development/automation-web-acceptance.md` for detailed evidence.
+Final reviewed candidate `2f27ef9` passed native reinstall cycles 7 and 8 and Pages
+deployment `41274652492`, followed by preserved-project/connection preparation in
+all three entry points. The real-account generation and final main/default-branch
+gates remain open while the Windows session is locked. See
+`docs/development/automation-web-acceptance.md` for detailed evidence.

@@ -20,11 +20,16 @@ These images show an actual public Markdown project with a retained task and sav
 
 1. **P2 — settings could gain an unnecessary fourth column; resolved.** Entering settings now hides the task sidebar without changing its persisted open preference. Leaving settings restores the workspace sidebar. The settings screenshot shows rail → categories → content directly.
 2. **P2 — keyboard focus could leave the help dialog; resolved.** Help traps Tab/Shift+Tab, closes with Escape, and restores focus to its menu trigger. Modal overlays sit above the titlebar. Unit coverage verifies the focus cycle and restoration.
-3. **P2 — native close protection needs the complete Tauri event contract; resolved in implementation.** `onCloseRequested` prevents closing during an operation or unsaved node edit. Tauri's implementation calls `destroy()` after an allowed close, so both close and destroy capabilities are configured. Required permission names were checked against the generated desktop schema. Actual installed-window execution remains part of the final Windows cycle described below.
+3. **P2 — native close protection needs the complete Tauri event contract; resolved and verified installed.** `onCloseRequested` prevents closing during an operation or unsaved node edit. Tauri's implementation calls `destroy()` after an allowed close, so both close and destroy capabilities are configured. Required permission names were checked against the generated desktop schema. Actual installed-window execution passed the final Windows cycles described below.
 
 The final combined comparisons show no remaining actionable P0/P1/P2 visual mismatch in the approved scope. Browser window controls are omitted; native controls are conditional on the real Tauri runtime.
 
 ## Behavior and regression evidence
+
+The following records the initial UI-branch verification. The final integrated
+candidate `2f27ef9`, including automation recovery additions, passes 97 frontend
+tests and the deployed Pages workflow's 12 browser cases. Root also reran the
+separate real-browser shell flow successfully during integration.
 
 - **73 frontend unit tests passed**, including six new shell cases: task sidebar/history, owned task selection with draft protection, real menu callbacks/theme, native API wiring and close prevention, settings column behavior, and help focus restoration. The first four shell cases were demonstrated failing before implementation; the settings/help cases also failed before their fixes.
 - TypeScript and both ordinary and `/Entwurf/` production builds passed. No new frontend dependency was added.
@@ -41,7 +46,15 @@ The final combined comparisons show no remaining actionable P0/P1/P2 visual mism
 2. A real native `closeRequested` event preserves an unsaved node draft and its base version, then the explicit discard action restores the original field.
 3. After all artifact checks and screenshots, the close button exits the owned desktop and its bridge. PID, executable path and creation time are captured before closing; matching surviving processes fail acceptance. The script does not kill a leaked bridge or weaken existing artifact checks.
 
-The acceptance script passes JavaScript syntax validation. These new installed-window checks have not been executed by this UI branch: the root will run them in the final Windows reinstall cycle. Existing earlier reinstall results do not establish the behavior of this new titlebar. No real ChatGPT submission, account inspection or live native-window manipulation was performed for this task.
+Root executed the final candidate `2f27ef9` in actual uninstall/reinstall cycles 7
+and 8 on 2026-11-01. Each passed all 15 installed checks, including the three real
+window cases above, and preserved every project/local-WebUI file hash through
+uninstall. Root opened the final installed task and settings captures in
+`%LOCALAPPDATA%\EntwurfAcceptance\v0.1-20261031\cycle-8`.
+They measure 1282 × 808 CSS pixels at DPR 2 and 2564 × 1616 PNG pixels. OS scaling
+was not changed or independently verified; these results do not claim native
+100/125/150% display-scaling coverage. Actual ChatGPT image generation remains a
+separate, incomplete acceptance gate while Windows is locked.
 
 ## Assets and polish
 

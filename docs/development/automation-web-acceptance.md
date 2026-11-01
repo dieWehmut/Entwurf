@@ -144,7 +144,31 @@ after edit/reload/stop/reload, owner/origin boundaries, corrupt/oversized bytes,
 late-result rejection and no extra submission or ACK during review. The HTTP
 scenario preserves direct stale-import rejection and explicit upload-cleanup
 checks, uses its own data directory and refuses the installed service's port.
-Final artifacts containing this fix still require deployment and reinstall checks.
+Candidate `2f27ef9` contains the reviewed fix. Its new Windows installer has SHA-256
+`4c46e622a33c29fc24788147baad02480c898bbaa884f041ff9387125c7fcc45`.
+The native build passed formatting, contract checks, TypeScript and all 124 .NET
+tests. Final reinstall cycles 7 and 8 each passed all 15 installed-app checks,
+including actual titlebar actions, node-draft close protection, offline editing
+and export, and clean app/bridge exit. Cycle 7 preserved every hash of 742 project
+files and 25 local-WebUI files; cycle 8 preserved all 833 and 25 respectively.
+Root inspected the final installed task and settings screenshots. Generated images
+in these repeated fixture checks remain public test images, not account output.
+
+[Pages run 41274652492](https://github.com/dieWehmut/Entwurf/actions/runs/41274652492)
+successfully built and deployed the same `2f27ef9` source. Its real WASM smoke,
+97 frontend tests and 12 browser tests passed. The public site's original browser
+profile retained its exact project/task/r1 identity and paired with the final
+installed service without network failures or a generation request.
+
+All three entry preparations were checked against the final artifacts. The local
+WebUI reopened and refreshed its original SQLite project and paused run with the
+same task, base version and prompt hash; it issued zero automation write requests
+and left the original intent/state files byte-identical. The desktop reopened its
+preserved public-source task. Before that preparation, its never-submitted test
+identity was refreshed after the reinstall fixtures' global style snapshots;
+the prior setup was retained and knowledge/style hashes were proven unchanged,
+with no native intent or corresponding run in either store. No existing submitted
+run was rebound. Pages and desktop preparations created no generation intent.
 
 ## Remaining release gates
 
@@ -166,6 +190,9 @@ paused before submission with an explicit native `submit_intent: false` and no
 image or conversation binding. Fresh checks briefly confirmed an unlocked session;
 the session then disconnected and locked before the explicit resume click. The
 existing run and its original intent are preserved for continuation.
+After the final reinstall, the local run still has explicit native
+`submit_intent: false`, no binding or image, and zero resume receipts. The latest
+entry checks continue to report `windows_locked`.
 
 No real ChatGPT prompt has been sent in this acceptance run. Local fixtures
 establish protocol behavior, not live generation or account acceptance.

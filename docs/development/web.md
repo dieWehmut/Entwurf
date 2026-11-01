@@ -67,4 +67,4 @@ Windows 适配器明确记录尚未发送的暂停运行，可以通过「继续
 
 生成图片显示在任务页与结果页，标明 ChatGPT 来源、运行、基础知识版本和文件哈希，可下载原始字节。生成图片不修改知识节点、来源锚点或知识版本。仓库自动化 UI 测试使用本地响应夹具配合真实 WASM/IndexedDB，验证单次提交、刷新续接、保存后确认及原图下载，不调用真实 ChatGPT。
 
-隔离的本机服务运行在 48123 时，可用 `ENTWURF_HTTP_TEST_URL=http://127.0.0.1:48123 ENTWURF_HTTP_TEST_DATA_DIR=<隔离数据目录> pnpm exec playwright test --config playwright.http.config.ts -g 'real HTTP coordinator' --workers 1` 验证真实 HTTP、SQLite 和自动化协调器。测试连接一个本地 WebSocket 扩展夹具，交付已有 PNG 字节，验证自动入库后确认、原图下载、过期版本拒绝和上传文件清理；不操作 ChatGPT。
+隔离的本机服务使用单独的数据目录和 48126 等测试端口时，可用 `ENTWURF_HTTP_TEST_URL=http://127.0.0.1:48126 ENTWURF_HTTP_TEST_DATA_DIR=<隔离数据目录> pnpm exec playwright test --config playwright.http.config.ts -g 'real HTTP coordinator' --workers 1` 验证真实 HTTP、SQLite 和自动化协调器。测试要求显式指定数据目录，并拒绝连接桌面应用使用的 48123 端口。测试连接一个本地 WebSocket 扩展夹具，交付已有 PNG 字节，验证自动入库后确认、原图下载、过期版本拒绝和上传文件清理；不操作 ChatGPT。
