@@ -3,8 +3,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
+using FlaUI.Core.Exceptions;
 using FlaUI.UIA3;
 
 namespace Entwurf.Bridge;
@@ -32,24 +34,26 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         public string? PreviewRootId;
     }
 
-    public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken cancellation) => Task.Run(() =>
+    public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken cancellation) => Task.Run(() => ReadProbe(() =>
     {
-        try
+        cancellation.ThrowIfCancellationRequested();
+        if (!DesktopUnlocked()) return new ImageSurfaceProbe(false, "windows_locked");
+        lock (uiGate)
         {
-            cancellation.ThrowIfCancellationRequested();
-            if (!DesktopUnlocked()) return new ImageSurfaceProbe(false, "windows_locked");
-            lock (uiGate)
-            {
-                var target = Discover();
-                var frame = Capture(target, cancellation);
-                return ChatGptProduct(frame) && GlobalImages(frame) is not null
-                    ? new ImageSurfaceProbe(true, "ready") : new ImageSurfaceProbe(false, "chatgpt_mode_required");
-            }
+            var target = Discover();
+            var frame = Capture(target, cancellation);
+            return ChatGptProduct(frame) && GlobalImages(frame) is not null
+                ? new ImageSurfaceProbe(true, "ready") : new ImageSurfaceProbe(false, "chatgpt_mode_required");
         }
+    }), cancellation);
+
+    internal static ImageSurfaceProbe ReadProbe(Func<ImageSurfaceProbe> read)
+    {
+        try { return read(); }
         catch (ImageAutomationException error) { return new ImageSurfaceProbe(false, error.Reason); }
-        catch (Exception error) when (error is COMException or InvalidOperationException or TimeoutException)
+        catch (Exception error) when (error is COMException or InvalidOperationException or TimeoutException or FlaUIException)
         { return new ImageSurfaceProbe(false, "image_surface_unavailable"); }
-    }, cancellation);
+    }
 
     public async Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken cancellation)
     {
@@ -381,7 +385,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (name is "你说：" or "You said:" or "ChatGPT 说：" or "ChatGPT said:")
                 speaker = NativeImageEvidence.SpeakerFromHeading(name, element.Properties.HeadingLevel.ValueOrDefault == HeadingLevel.Level4,
                     element.Properties.AriaRole.ValueOrDefault);
-            nodes.Add(new(id, item.Parent, role, name, !element.IsOffscreen, element.IsEnabled, bounds.Width, bounds.Height, speaker));
+            var availability = ReadAvailability(element.Properties.IsOffscreen, element.Properties.IsEnabled);
+            nodes.Add(new(id, item.Parent, role, name, availability.Visible, availability.Enabled, bounds.Width, bounds.Height, speaker));
             var child = walker.GetFirstChild(element);
             while (child is not null)
             {
@@ -393,6 +398,15 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var documents = nodes.Where(x => x.Role == "Document").ToArray();
         if (documents.Length != 1) throw new ImageAutomationException("image_surface_unavailable");
         return new(nodes, elements, documents[0].Id);
+    }
+
+    internal static (bool Visible, bool Enabled) ReadAvailability(IAutomationProperty<bool> offscreen, IAutomationProperty<bool> enabled)
+    {
+        // The observed top-level Window provider omits IsOffscreen. Keep its children in
+        // the tree, but never make a node with missing visibility/enabled metadata actionable.
+        var visible = offscreen.TryGetValue(out var isOffscreen) && !isOffscreen;
+        var interactive = enabled.TryGetValue(out var isEnabled) && isEnabled;
+        return (visible, interactive);
     }
 
     static bool KnownLabel(string label) => NativeImageEvidence.IsDownload(label) || NativeImageEvidence.IsPreview(label)
