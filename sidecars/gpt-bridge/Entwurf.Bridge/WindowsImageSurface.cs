@@ -277,7 +277,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     public async Task<PreparedImageConversation?> RestoreSubmittedAsync(ImageRunRecord record, JsonElement saved, CancellationToken cancellation)
     {
         var binding = saved.Deserialize<Binding>(ImageAutomationJson.Options) ?? throw new ImageAutomationException("submission_uncertain");
-        if (!record.SubmitIntent || binding.Version != 1 || binding.PromptSha256 != record.PromptSha256 || binding.BeforeIds.Length > 4096
+        if (record.SubmitIntent is not true || binding.Version != 1 || binding.PromptSha256 != record.PromptSha256 || binding.BeforeIds.Length > 4096
             || binding.Window == 0 || binding.ProcessId <= 0) throw new ImageAutomationException("submission_uncertain");
         var target = new Target((nint)binding.Window, binding.ProcessId, new DateTime(binding.ProcessStartedUtcTicks, DateTimeKind.Utc));
         var run = new Conversation(target, binding.DocumentId, binding.EditId, binding.BeforeIds.ToHashSet(StringComparer.Ordinal), null, binding.PromptSha256)

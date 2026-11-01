@@ -45,3 +45,12 @@ Probe reasons include `ready`, `windows_locked`, `chatgpt_not_found`, `ambiguous
 Run the native .NET tests with `dotnet test sidecars/gpt-bridge/Entwurf.Bridge.Tests/Entwurf.Bridge.Tests.csproj`. New tests use fake UI providers, real temporary files, and a localhost WebSocket. The process bootstrap test deliberately withholds authentication success, so it does not inspect or operate ChatGPT.
 
 The structured `TaskEnvelope` bridge remains a separate named-pipe entrypoint; its existing capability gates and protocol are independent of this image executor.
+
+
+### Explicit recovery before submission
+
+`resume_pre_submit` accepts `{request_id, run}` with the original full run identity and prompt hash. It is a separate, explicitly requested operation; ordinary `start`, `status`, and reconnect never retry input. The adapter requires a paused run with an explicitly stored `submit_intent: false`, no UI binding or retained/downloaded original, and no active worker or other nonterminal run. Missing historical intent remains unknown and cannot qualify.
+
+The canonical UUID request ID is retained before UI work, with a maximum of 64 IDs per run and no eviction. Duplicate IDs only report status; IDs previously used by another run are rejected. A rejected request emits `resume_rejected` followed by the current status. Status adds `pre_submit_retryable` and the most recently accepted `resume_request_id`; eligibility is refreshed after the prior worker actually finishes.
+
+Failures retain only the fixed `stage` (`prepare`, `write`, `submit`, `wait`, `download`, `report`), exception type names (at most three), and a fixed `failure_method`. Messages, stacks, prompts, and UI content are not persisted. A reporting failure preserves verified staged original bytes and their awaiting-import state.

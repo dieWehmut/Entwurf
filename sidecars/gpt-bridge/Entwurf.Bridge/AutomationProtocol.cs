@@ -34,7 +34,9 @@ public sealed record ImageAutomationRun(string RunId, string TaskId, string Base
 
 public sealed record ImageRunRecord(string RunId, string TaskId, string BaseVersionId, string PromptSha256,
     string Phase, string? Reason = null, string? Sha256 = null, string? MimeType = null,
-    bool SubmitIntent = false, JsonElement? SurfaceBinding = null)
+    bool? SubmitIntent = null, JsonElement? SurfaceBinding = null,
+    string? Stage = null, string? ExceptionType = null, string[]? ExceptionTypes = null,
+    string? FailureMethod = null, string[]? ResumeRequestIds = null)
 {
     public bool Terminal => Phase is "completed" or "cancelled" or "failed";
     public bool Matches(ImageAutomationRun run) => RunId == run.RunId && TaskId == run.TaskId

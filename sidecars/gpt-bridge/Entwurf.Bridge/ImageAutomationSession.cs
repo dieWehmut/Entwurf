@@ -15,6 +15,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     readonly FileStream ownership;
     readonly CancellationTokenSource lifetime = new();
     Dictionary<string, ImageRunRecord> records;
+    const int MaximumResumeRequests = 64;
     sealed record RunningControl(string Id, CancellationTokenSource Cancellation);
     RunningControl? runningControl;
     Task running = Task.CompletedTask;
@@ -36,6 +37,11 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 : new(StringComparer.Ordinal);
             if (records.Count > 10_000 || records.Any(x => !ImageAutomationRun.ValidId(x.Key) || x.Key != x.Value.RunId))
                 throw new InvalidDataException("invalid_state");
+            var requests = records.Values.SelectMany(record => record.ResumeRequestIds ?? []).ToArray();
+            if (records.Values.Any(record => record.ResumeRequestIds is { Length: > MaximumResumeRequests })
+                || requests.Any(id => !Guid.TryParseExact(id, "D", out var parsed) || id != parsed.ToString("D"))
+                || requests.Distinct(StringComparer.Ordinal).Count() != requests.Length)
+                throw new InvalidDataException("invalid_resume_history");
             foreach (var (id, record) in records.ToArray())
             {
                 if (record.Phase == "awaiting_import")
@@ -63,6 +69,15 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     {
         var type = message.TryGetProperty("type", out var t) ? t.GetString() : null;
         if (type == "probe") { await ProbeAsync(cancellation); return; }
+        if (type == "resume_pre_submit")
+        {
+            var run = message.GetProperty("run").Deserialize<ImageAutomationRun>(ImageAutomationJson.Options) ?? throw new ImageAutomationException("invalid_run");
+            run.Validate();
+            var requestId = message.GetProperty("request_id").GetString();
+            if (!Guid.TryParseExact(requestId, "D", out _)) throw new ImageAutomationException("invalid_request_id");
+            await ResumePreSubmitAsync(run, Guid.Parse(requestId!).ToString("D"), cancellation);
+            return;
+        }
         if (type == "start")
         {
             var run = message.GetProperty("run").Deserialize<ImageAutomationRun>(ImageAutomationJson.Options) ?? throw new ImageAutomationException("invalid_run");
@@ -97,7 +112,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 Save(record); // Never delete bytes or advertise completion before durable application ACK.
                 if (record.Phase == "completed") DeleteOwnedArtifact(record);
             }
-            else if (type == "status" && record.Phase == "paused" && record.SubmitIntent && record.SurfaceBinding is not null && running.IsCompleted)
+            else if (type == "status" && record.Phase == "paused" && record.SubmitIntent is true && record.SurfaceBinding is not null && running.IsCompleted)
             {
                 // Status can resume only observation/capture of an already submitted, durably bound turn.
                 // The recovery path contains no Prepare, prompt-writing, or Submit calls.
@@ -106,12 +121,81 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 var begin = resume.Task;
                 running = Task.Run(async () => { await begin; await RecoverAsync(record, control.Cancellation.Token); });
+                _ = ReportAfterWorkerAsync(running, id);
             }
             report = record;
         }
         finally { gate.Release(); }
         try { if (report is not null) await ReportAsync(report, cancellation); }
         finally { resume?.TrySetResult(); }
+    }
+
+    bool PreSubmitRetryable(ImageRunRecord record)
+    {
+        if (record.Phase != "paused" || record.SubmitIntent is not false || record.SurfaceBinding is not null
+            || record.Sha256 is not null || record.MimeType is not null || !running.IsCompleted
+            || (record.ResumeRequestIds?.Length ?? 0) >= MaximumResumeRequests
+            || records.Values.Any(other => other.RunId != record.RunId && !other.Terminal)) return false;
+        try
+        {
+            var artifact = ArtifactPath(record.RunId);
+            EnsureOrdinaryPath(artifact);
+            if (File.Exists(artifact) || Directory.Exists(artifact)) return false;
+            var downloads = Path.Combine(directory, "downloads", record.RunId);
+            EnsureOrdinaryPath(downloads);
+            return !File.Exists(downloads) && (!Directory.Exists(downloads) || !Directory.EnumerateFileSystemEntries(downloads).Any());
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ImageAutomationException) { return false; }
+    }
+
+    async Task ResumePreSubmitAsync(ImageAutomationRun run, string requestId, CancellationToken cancellation)
+    {
+        ImageRunRecord? report = null;
+        string? rejection = null;
+        TaskCompletionSource? start = null;
+        await gate.WaitAsync(cancellation);
+        try
+        {
+            if (!records.TryGetValue(run.RunId, out report) || !report.Matches(run)) rejection = "run_identity_conflict";
+            else if (report.ResumeRequestIds?.Contains(requestId, StringComparer.Ordinal) is true) { /* Durable duplicate: report only. */ }
+            else if (records.Values.Any(record => record.ResumeRequestIds?.Contains(requestId, StringComparer.Ordinal) is true)) rejection = "run_identity_conflict";
+            else if ((report.ResumeRequestIds?.Length ?? 0) >= MaximumResumeRequests) rejection = "resume_limit_reached";
+            else if (!PreSubmitRetryable(report)) rejection = "resume_not_allowed";
+            else
+            {
+                report = report with { Phase = "preparing", Reason = null, Stage = "prepare", ExceptionType = null,
+                    ExceptionTypes = null, FailureMethod = null, ResumeRequestIds = [.. report.ResumeRequestIds ?? [], requestId] };
+                Save(report); // Consume the explicit request before any UI operation. Never replay it after a restart.
+                var control = new RunningControl(run.RunId, CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token));
+                Interlocked.Exchange(ref runningControl, control)?.Cancellation.Dispose();
+                start = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                var begin = start.Task;
+                running = Task.Run(async () => { await begin; await ExecuteAsync(run, control.Cancellation.Token); });
+                _ = ReportAfterWorkerAsync(running, run.RunId);
+            }
+        }
+        finally { gate.Release(); }
+        try
+        {
+            if (rejection is not null) await send(ImageAutomationJson.Element(new { type = "resume_rejected", run_id = run.RunId, request_id = requestId, reason = rejection }), cancellation);
+            if (report is not null) await ReportAsync(report, cancellation);
+        }
+        finally { start?.TrySetResult(); }
+    }
+
+    async Task ReportAfterWorkerAsync(Task worker, string id)
+    {
+        try
+        {
+            await worker;
+            if (lifetime.IsCancellationRequested) return;
+            ImageRunRecord? record;
+            await gate.WaitAsync(lifetime.Token);
+            try { records.TryGetValue(id, out record); }
+            finally { gate.Release(); }
+            if (record is { Phase: "paused", SubmitIntent: false }) await ReportAsync(record, lifetime.Token);
+        }
+        catch { /* A failed report never schedules work or changes the durable record. */ }
     }
 
     async Task StartAsync(ImageAutomationRun run, CancellationToken cancellation)
@@ -133,13 +217,14 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             }
             else
             {
-                report = new(run.RunId, run.TaskId, run.BaseVersionId, run.PromptSha256, "preparing");
+                report = new(run.RunId, run.TaskId, run.BaseVersionId, run.PromptSha256, "preparing", SubmitIntent: false, Stage: "prepare");
                 Save(report);
                 var control = new RunningControl(run.RunId, CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token));
                 Interlocked.Exchange(ref runningControl, control)?.Cancellation.Dispose();
                 start = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 var begin = start.Task;
                 running = Task.Run(async () => { await begin; await ExecuteAsync(run, control.Cancellation.Token); });
+                _ = ReportAfterWorkerAsync(running, run.RunId);
             }
         }
         finally { gate.Release(); }
@@ -153,8 +238,12 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         var intentWritten = false;
         try
         {
-            prepared = await surface.PrepareAsync(run, cancellation);
-            await surface.WriteAndVerifyPromptAsync(prepared, run.Prompt, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            await SetStageAsync(run.RunId, "prepare", cancellation);
+            prepared = await ObserveMethodAsync("PrepareAsync", () => surface.PrepareAsync(run, cancellation));
+            await SetStageAsync(run.RunId, "write", cancellation);
+            await ObserveMethodAsync("WriteAndVerifyPromptAsync", () => surface.WriteAndVerifyPromptAsync(prepared, run.Prompt, cancellation));
+            await SetStageAsync(run.RunId, "submit", cancellation);
             await ChangeAsync(run.RunId, "submitting", null, cancellation, prepared);
             intentWritten = true;
             await gate.WaitAsync(cancellation);
@@ -163,7 +252,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 cancellation.ThrowIfCancellationRequested();
                 if (records[run.RunId].Terminal) throw new OperationCanceledException(cancellation);
                 // Submission and the durable cancel transition have one ordering. Cancel never completes and then allows a click.
-                await surface.SubmitOnceAsync(prepared, cancellation);
+                await ObserveMethodAsync("SubmitOnceAsync", () => surface.SubmitOnceAsync(prepared, cancellation));
             }
             finally { gate.Release(); }
             await ChangeAsync(run.RunId, "generating", null, cancellation, prepared);
@@ -174,7 +263,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             var reason = error is ImageAutomationException specific ? specific.Reason
                 : error is OperationCanceledException ? (lifetime.IsCancellationRequested ? "adapter_restarted" : "cancelled")
                 : intentWritten ? "submission_uncertain" : "automation_unavailable";
-            await FailSafelyAsync(run.RunId, reason, prepared);
+            await FailSafelyAsync(run.RunId, reason, prepared, error);
         }
         finally
         {
@@ -201,18 +290,20 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             var reason = error is ImageAutomationException known ? known.Reason
                 : error is OperationCanceledException ? (lifetime.IsCancellationRequested ? "adapter_restarted" : "cancelled")
                 : "download_failed";
-            await FailSafelyAsync(run.RunId, reason, prepared);
+            await FailSafelyAsync(run.RunId, reason, prepared, error);
         }
     }
 
     async Task CaptureAsync(string id, PreparedImageConversation prepared, CancellationToken cancellation)
     {
-        await surface.WaitForGeneratedImageAsync(prepared, cancellation);
+        await SetStageAsync(id, "wait", cancellation);
+        await ObserveMethodAsync("WaitForGeneratedImageAsync", () => surface.WaitForGeneratedImageAsync(prepared, cancellation));
         await ChangeAsync(id, "downloading", null, cancellation, prepared);
         var downloadDirectory = Path.Combine(directory, "downloads", id);
         Directory.CreateDirectory(downloadDirectory);
         EnsureOrdinaryPath(downloadDirectory);
-        var download = await surface.DownloadOriginalAsync(prepared, downloadDirectory, cancellation);
+        await SetStageAsync(id, "download", cancellation);
+        var download = await ObserveMethodAsync("DownloadOriginalAsync", () => surface.DownloadOriginalAsync(prepared, downloadDirectory, cancellation));
         var full = Path.GetFullPath(download);
         if (!full.StartsWith(downloadDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new ImageAutomationException("artifact_invalid");
@@ -230,7 +321,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             staged = records[id];
             if (staged.Terminal) return;
             AtomicWrite(ArtifactPath(id), bytes);
-            staged = staged with { Phase = "awaiting_import", Reason = null, Sha256 = hash, MimeType = mime };
+            staged = staged with { Phase = "awaiting_import", Reason = null, Sha256 = hash, MimeType = mime, Stage = "report" };
             Save(staged);
         }
         finally { gate.Release(); }
@@ -248,7 +339,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             cancellation.ThrowIfCancellationRequested();
             record = records[id];
             if (record.Terminal) throw new OperationCanceledException(cancellation);
-            record = record with { Phase = phase, Reason = reason, SubmitIntent = record.SubmitIntent || phase == "submitting",
+            record = record with { Phase = phase, Reason = reason, SubmitIntent = phase == "submitting" ? true : record.SubmitIntent,
                 SurfaceBinding = prepared is null ? record.SurfaceBinding : surface.ExportBinding(prepared) ?? record.SurfaceBinding };
             Save(record);
         }
@@ -256,7 +347,48 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         await ReportAsync(record, cancellation);
     }
 
-    async Task FailSafelyAsync(string id, string reason, PreparedImageConversation? prepared = null)
+    async Task SetStageAsync(string id, string stage, CancellationToken cancellation)
+    {
+        await gate.WaitAsync(cancellation);
+        try
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var record = records[id];
+            if (record.Terminal) throw new OperationCanceledException(cancellation);
+            Save(record with { Stage = stage });
+        }
+        finally { gate.Release(); }
+    }
+
+    static string[] ExceptionTypes(Exception error)
+    {
+        var types = new List<string>();
+        for (Exception? current = error; current is not null && types.Count < 3; current = current.InnerException)
+        {
+            var name = current.GetType().Name;
+            types.Add(name.Length <= 80 && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_') ? name : "Exception");
+        }
+        return types.ToArray();
+    }
+
+    static async Task<T> ObserveMethodAsync<T>(string method, Func<Task<T>> action)
+    {
+        try { return await action(); }
+        catch (Exception error) { error.Data["EntwurfFailureMethod"] = method; throw; }
+    }
+    static async Task ObserveMethodAsync(string method, Func<Task> action)
+    {
+        try { await action(); }
+        catch (Exception error) { error.Data["EntwurfFailureMethod"] = method; throw; }
+    }
+    static string? FailureMethod(Exception error) => (error.Data["EntwurfFailureMethod"] as string) switch
+    {
+        "PrepareAsync" => "PrepareAsync", "WriteAndVerifyPromptAsync" => "WriteAndVerifyPromptAsync",
+        "SubmitOnceAsync" => "SubmitOnceAsync", "WaitForGeneratedImageAsync" => "WaitForGeneratedImageAsync",
+        "DownloadOriginalAsync" => "DownloadOriginalAsync", "ReportAsync" => "ReportAsync", "Persist" => "Persist", _ => null
+    };
+
+    async Task FailSafelyAsync(string id, string reason, PreparedImageConversation? prepared, Exception error)
     {
         ImageRunRecord? report = null;
         await gate.WaitAsync();
@@ -264,12 +396,15 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         {
             if (records.TryGetValue(id, out var record) && !record.Terminal)
             {
-                // A failed report/cleanup or EOF cannot demote a durably staged original to UI recovery.
-                if (record.Phase == "awaiting_import" && ArtifactMatches(record)) return;
-                report = record with { Phase = reason == "cancelled" ? "cancelled" : "paused", Reason = reason,
-                    SurfaceBinding = prepared is null ? record.SurfaceBinding : surface.ExportBinding(prepared) ?? record.SurfaceBinding };
+                var stage = error.Data["EntwurfStage"] as string == "report" ? "report" : record.Stage ?? "prepare";
+                var types = ExceptionTypes(error);
+                var diagnostics = record with { Stage = stage, ExceptionType = types[0], ExceptionTypes = types, FailureMethod = FailureMethod(error) };
+                // Reporting/cleanup failure cannot turn a verified staged original back into a UI retry.
+                report = record.Phase == "awaiting_import" && ArtifactMatches(record) ? diagnostics
+                    : diagnostics with { Phase = reason == "cancelled" ? "cancelled" : "paused", Reason = reason,
+                        SurfaceBinding = prepared is null ? record.SurfaceBinding : surface.ExportBinding(prepared) ?? record.SurfaceBinding };
                 try { Save(report); }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { /* Existing durable intent still prevents replay. */ }
+                catch (Exception storageError) when (storageError is IOException or UnauthorizedAccessException) { /* Existing durable intent still prevents replay. */ }
             }
         }
         finally { gate.Release(); }
@@ -288,15 +423,19 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         try
         {
             await gate.WaitAsync(cancellation);
-            try { record = records[record.RunId]; }
+            bool retryable;
+            try { record = records[record.RunId]; retryable = PreSubmitRetryable(record); }
             finally { gate.Release(); }
-            await ReportCurrentAsync(record, cancellation);
+            await ReportCurrentAsync(record, retryable, cancellation);
         }
+        catch (Exception error) { error.Data["EntwurfStage"] = "report"; error.Data["EntwurfFailureMethod"] = "ReportAsync"; throw; }
         finally { reports.Release(); }
     }
-    async Task ReportCurrentAsync(ImageRunRecord record, CancellationToken cancellation)
+    async Task ReportCurrentAsync(ImageRunRecord record, bool retryable, CancellationToken cancellation)
     {
-        await send(ImageAutomationJson.Element(new { type = "status", run_id = record.RunId, phase = record.Phase, detail = record.Reason }), cancellation);
+        await send(ImageAutomationJson.Element(new { type = "status", run_id = record.RunId, phase = record.Phase, detail = record.Reason,
+            pre_submit_retryable = retryable, resume_request_id = record.ResumeRequestIds?.LastOrDefault(), stage = record.Stage,
+            exception_type = record.ExceptionType, exception_types = record.ExceptionTypes, failure_method = record.FailureMethod }), cancellation);
         if (record.Phase != "awaiting_import") return;
         byte[] bytes;
         await gate.WaitAsync(cancellation);
@@ -317,7 +456,8 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     void Save(ImageRunRecord record)
     {
         var next = new Dictionary<string, ImageRunRecord>(records, StringComparer.Ordinal) { [record.RunId] = record };
-        Persist(next);
+        try { Persist(next); }
+        catch (Exception error) { error.Data["EntwurfFailureMethod"] = "Persist"; throw; }
         records = next;
     }
     void Persist(Dictionary<string, ImageRunRecord> next) => AtomicWrite(Path.Combine(directory, "runs.json"), JsonSerializer.SerializeToUtf8Bytes(next, ImageAutomationJson.Options));

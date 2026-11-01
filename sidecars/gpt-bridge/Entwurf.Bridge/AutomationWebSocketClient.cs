@@ -25,7 +25,9 @@ public sealed class AutomationWebSocketClient(Uri address, string token) : IDisp
                 await socket.ConnectAsync(address, startup.Token);
                 await SendOnAsync(socket, ImageAutomationJson.Element(new { type = "authenticate", token }), startup.Token);
                 using var authentication = await ReceiveAsync(socket, startup.Token);
-                if (authentication is null || authentication.RootElement.GetProperty("type").GetString() != "authenticated")
+                if (authentication is null || authentication.RootElement.ValueKind != JsonValueKind.Object
+                    || !authentication.RootElement.TryGetProperty("type", out var authenticationType)
+                    || authenticationType.ValueKind != JsonValueKind.String || authenticationType.GetString() != "authenticated")
                     throw new ImageAutomationException("unauthorized");
                 Volatile.Write(ref current, socket);
                 await session.ConnectedAsync(cancellation);
