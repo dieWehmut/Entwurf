@@ -11,7 +11,7 @@ interface CommandPaletteProps {
 const items: { page: PageId; label: string; detail: string }[] = [
   { page: "project", label: "项目概览", detail: "最近任务与知识图预览" },
   { page: "sources", label: "资料与风格", detail: "导入来源、检查锚点" },
-  { page: "tasks", label: "任务", detail: "查看版本与自动运行闸门" },
+  { page: "tasks", label: "任务", detail: "任务版本、图片生成与结果导入" },
   { page: "result", label: "结果与导出", detail: "审阅、校验、导出" },
   { page: "settings", label: "设置", detail: "主题、能力报告、隐私" },
 ];

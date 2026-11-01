@@ -14,8 +14,8 @@ const titles: Record<PageId, { eyebrow: string; title: string; description: stri
   },
   tasks: {
     eyebrow: "工作台 / 任务",
-    title: "任务有版本，自动运行有闸门。",
-    description: "每次显式开始只运行一个任务。观察不到控件就暂停并交给人工，不进行坐标盲控。",
+    title: "管理任务，生成图片与导入结果。",
+    description: "图片绑定当前知识版本，完成后保存到项目；结构化规划结果仍可手动导入。",
   },
   result: {
     eyebrow: "工作台 / 结果",
