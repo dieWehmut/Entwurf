@@ -37,6 +37,19 @@ async function step(name, action) {
 const invoke = (command, args = {}) => page.evaluate(
   ({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args), { command, args });
 const snapshot = () => invoke('workspace_snapshot');
+const windowCommand = command => invoke(`plugin:window|${command}`, { label: 'main' });
+async function ownedProcesses() {
+  assert(Number.isSafeInteger(config.process_id) && config.process_id > 0);
+  const result = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `$parent = Get-CimInstance Win32_Process -Filter "ProcessId = ${config.process_id}"; ` +
+    `$children = @(Get-CimInstance Win32_Process -Filter "Name = 'Entwurf.Bridge.exe' AND ParentProcessId = ${config.process_id}"); ` +
+    `@(@($parent) + $children | Where-Object { $_ } | ForEach-Object { ` +
+    `[pscustomobject]@{ pid = $_.ProcessId; parent = $_.ParentProcessId; path = $_.ExecutablePath; created = $_.CreationDate.ToUniversalTime().ToString('o') } }) | ConvertTo-Json -Compress`],
+    { timeout: 15_000, windowsHide: true });
+  const records = JSON.parse(result.stdout.trim() || '[]');
+  return Array.isArray(records) ? records : [records];
+}
+
 const idle = () => expect(page.getByRole('main')).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 });
 const navigate = label => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${label}`) }).click();
 async function nativeDialog(arguments_) {
@@ -221,6 +234,22 @@ try {
     assert(capabilities.ocr_languages.includes('eng'));
     report.capabilities = capabilities;
   });
+  await step('native titlebar maximizes, restores and minimizes the actual window', async () => {
+    assert.equal(await windowCommand('is_decorated'), false);
+    assert.equal(await windowCommand('is_resizable'), true);
+    const initialMaximized = await windowCommand('is_maximized');
+    await page.getByRole('button', { name: '切换窗口最大化', exact: true }).click();
+    await expect.poll(() => windowCommand('is_maximized')).toBe(!initialMaximized);
+    await page.getByRole('button', { name: '切换窗口最大化', exact: true }).click();
+    await expect.poll(() => windowCommand('is_maximized')).toBe(initialMaximized);
+    await page.getByRole('button', { name: '最小化窗口', exact: true }).click();
+    await expect.poll(() => windowCommand('is_minimized')).toBe(true);
+    await windowCommand('unminimize');
+    await expect.poll(() => windowCommand('is_minimized')).toBe(false);
+    assert.equal(await windowCommand('is_maximized'), initialMaximized);
+    report.native_window = { decorations: false, resizable: true, initial_maximized: initialMaximized,
+      maximized_and_restored: true, minimized_and_restored: true };
+  });
   await step('installed desktop serves the local WebUI before a project is opened', async () => {
     const base = 'http://127.0.0.1:48123';
     await expect.poll(async () => {
@@ -326,6 +355,26 @@ try {
       await idle();
     }
     assert.equal((await snapshot()).current_version.ir.unverified.length, 0);
+  });
+  await step('native close requests preserve an unsaved node draft', async () => {
+    const before = await snapshot();
+    const field = page.getByRole('textbox', { name: '节点正文', exact: true });
+    const original = await field.inputValue();
+    const draft = `${original}\n关闭保护验收：这段未保存草稿必须仍在界面。`;
+    await field.fill(draft);
+    await expect(page.getByRole('button', { name: '关闭窗口', exact: true })).toBeDisabled();
+    // Exercise the actual native closeRequested event (the same guard as Alt+F4),
+    // including the active JS listener, without forcing window destruction.
+    await windowCommand('close');
+    await expect(page.getByText('请先完成当前操作，并保存或放弃节点草稿后关闭窗口。', { exact: true })).toBeVisible();
+    await expect(field).toHaveValue(draft);
+    assert.equal((await snapshot()).current_version.id, before.current_version.id);
+    assert.equal(page.isClosed(), false);
+    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    await page.getByRole('menuitem', { name: '放弃节点草稿', exact: true }).click();
+    await expect(field).toHaveValue(original);
+    await expect(page.getByRole('button', { name: '关闭窗口', exact: true })).toBeEnabled();
+    report.native_window.draft_close_prevented = true;
   });
   await step('save manual edit and import a synthetic result without overwriting it', async () => {
     await page.getByLabel('节点标题').fill(`本地保留编辑 ${config.cycle}`);
@@ -566,6 +615,28 @@ try {
     }
     assert.deepEqual(report.errors, []);
   });
+  await step('native close button exits the owned desktop and its bridge', async () => {
+    const before = await ownedProcesses();
+    const parent = before.find(item => item.pid === config.process_id);
+    assert(parent && path.basename(parent.path).toLowerCase() === 'entwurf-desktop.exe', 'the connected owned desktop must still be alive');
+    const expectedBridge = path.join(path.dirname(parent.path), 'resources', 'gpt-bridge', 'Entwurf.Bridge.exe');
+    const ownsBridge = item => item.parent === parent.pid && item.created >= parent.created
+      && filesystemIdentity(item.path ?? '') === filesystemIdentity(expectedBridge);
+    const children = before.filter(ownsBridge);
+    report.native_window.close_owner = parent;
+    report.native_window.close_children = children;
+    await capture('installed-before-native-close.png');
+    await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
+    await expect.poll(async () => {
+      const current = await ownedProcesses();
+      return current.some(item => (item.pid === parent.pid && item.created === parent.created
+        && filesystemIdentity(item.path ?? '') === filesystemIdentity(parent.path)) || ownsBridge(item));
+    }, { timeout: 10_000, intervals: [100, 250, 500] }).toBe(false);
+    await expect.poll(() => page.isClosed() || !browser.isConnected(), { timeout: 5000 }).toBe(true);
+    report.native_window.close_exited = true;
+    report.native_window.bridge_exited = true;
+    assert.deepEqual(report.errors, []);
+  });
   report.passed = true;
 } catch (error) {
   report.passed = false;
@@ -575,6 +646,6 @@ try {
 } finally {
   report.finished_at = new Date().toISOString();
   await fs.writeFile(path.join(evidence, 'acceptance.json'), JSON.stringify(report, null, 2));
-  if (browser) await browser.close();
+  if (browser?.isConnected()) await browser.close();
   console.log(JSON.stringify({ passed: report.passed, cycle: report.cycle, evidence, failure: report.failure }));
 }

@@ -1,4 +1,3 @@
-import { Icons } from "./Icons";
 import type { PageId } from "../lib/types";
 
 const titles: Record<PageId, { label: string; title: string; description: string }> = {
@@ -10,16 +9,10 @@ const titles: Record<PageId, { label: string; title: string; description: string
 };
 interface HeaderProps {
   page: PageId;
-  projectName: string;
-  onOpenCommand: () => void;
-  navigationDisabled?: boolean;
 }
-export function Header({ page, projectName, onOpenCommand, navigationDisabled }: HeaderProps) {
+export function Header({ page }: HeaderProps) {
   const content = titles[page];
   return <header className="page-header">
-    <div className="header-topline"><div className="breadcrumb"><span>Entwurf</span><Icons.chevron size={12} /><span>{projectName}</span><Icons.chevron size={12} /><strong>{content.label}</strong></div>
-      <button className="command-trigger" aria-label="快速跳转" title="快速跳转 · Ctrl K" disabled={navigationDisabled} onClick={onOpenCommand}><Icons.search size={15} /><span>快速跳转</span><kbd>Ctrl K</kbd></button>
-    </div>
     <div className="header-row"><div><h1>{content.title}</h1><p>{content.description}</p></div></div>
   </header>;
 }

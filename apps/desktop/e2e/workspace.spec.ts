@@ -6,10 +6,12 @@ async function nativeFixture(page: Page, exportFailure = false, delayedStyle = f
   if (extra.importedPlan) snapshot.current_version!.gpt_import = gptImportFixture();
   if (withRepair) snapshot.current_version!.visual_repairs = [repairFixture()];
   await page.addInitScript(({ snapshot, capabilities, exportFailure, delayedStyle, irVersion }) => {
-    Object.assign(window, { isTauri: true });
+    Object.assign(window, { isTauri: true, __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} } });
     let current = snapshot;
     let diagnosticsExports = 0;
-    Object.assign(window, { __TAURI_INTERNALS__: { invoke: async (command: string, args: any) => {
+    Object.assign(window, { __TAURI_INTERNALS__: { metadata: { currentWindow: { label: "main" } }, transformCallback: () => 1, invoke: async (command: string, args: any) => {
+      if (command === 'plugin:event|listen') return 1;
+      if (command === 'plugin:event|unlisten') return null;
       if (command === 'bootstrap') return capabilities;
       if (command === 'export_diagnostics') return diagnosticsExports++ === 0 ? 'fixture/diagnostics.json' : null;
       if (command === 'workspace_snapshot') return structuredClone(current);

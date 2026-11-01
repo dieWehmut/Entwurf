@@ -139,10 +139,10 @@ it('saves formula and order while keeping other canonical node fields intact', a
 });
 it('quick jump works from keyboard and restores focus on Escape', async () => {
   const { user } = setup(); await screen.findByLabelText('当前任务');
-  const trigger = screen.getByRole('button', { name: /快速跳转/ }); trigger.focus();
+  const trigger = screen.getByRole('button', { name: '视图' }); trigger.focus();
   await user.keyboard('{Control>}k{/Control}'); expect(await screen.findByRole('dialog')).toBeVisible();
   await user.keyboard('{Escape}'); expect(trigger).toHaveFocus();
-  await user.click(trigger); await user.type(screen.getByLabelText('搜索页面'), '设置'); await user.keyboard('{Enter}');
+  await user.click(trigger); await user.click(screen.getByRole('menuitem', { name: '快速跳转' })); await user.type(screen.getByLabelText('搜索页面'), '设置'); await user.keyboard('{Enter}');
   expect(screen.getByRole('heading', { name: '设置', level: 1 })).toBeVisible();
 });
 
