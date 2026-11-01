@@ -114,14 +114,18 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     <label className="field">图片生成提示<textarea rows={5} disabled={locked || busy || (running && !recoverable)} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={recoverable ? "继续时需填写与这次运行完全相同的原提示" : "描述这次希望 ChatGPT 生成的图片"} /></label>
     <p className="muted">{version ? `本次生成绑定任务 ${taskId} 的 r${version.revision}。` : "导入资料建立知识版本后可开始生成。"}</p>
     <button className="primary-button" disabled={locked || busy || running || !version || !prompt.trim() || !status?.connected || !status.available} onClick={() => { void start(); }}>启动一次图片生成</button>
-    {runs.map(item => <article className="source-record" key={item.run_id}><strong>{phases[item.phase] ?? item.phase}</strong>{item.reason && <p>{automationReason(item.reason)}</p>}<p className="path-text">运行：{item.run_id} · 基础版本：{item.base_version_id}</p>
+    {runs.map(item => {
+      const saved = Boolean(item.sha256 && item.mime_type && snapshot.project.generated_images?.some(image =>
+        image.run_id === item.run_id && image.task_id === item.task_id && image.base_version_id === item.base_version_id
+        && image.prompt_sha256 === item.prompt_sha256 && image.sha256 === item.sha256 && image.mime_type === item.mime_type));
+      return <article className="source-record" key={item.run_id}><strong>{phases[item.phase] ?? item.phase}</strong>{item.reason && <p>{automationReason(item.reason)}</p>}<p className="path-text">运行：{item.run_id} · 基础版本：{item.base_version_id}</p>
       {version && item.base_version_id !== version.id && <p className="muted">此运行绑定其他知识版本，不能导入当前版本；可查看和下载原始图片，当前知识修改保持不变。</p>}
       {canResume(item) && <p className="muted">仅在本地确认从未发送后可继续；不会重发已发送提示。{resumePending(item) ? "恢复请求尚未确认，正在继续查询原运行。" : "如已刷新页面，请重新填写原提示以核对身份。"}</p>}
       <div className="handoff-actions">{activePhases.has(item.phase) && <button className="secondary-button" disabled={locked || busy} onClick={() => { void cancel(item); }}>停止观察</button>}
       {canResume(item) && <button className="primary-button" disabled={locked || busy || !status?.connected || !status.available || !prompt.trim() || resumePending(item)} onClick={() => { void resume(item); }}>继续未发送的任务</button>}
-      {item.phase === "awaiting_import" && item.base_version_id === version?.id && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run("保存生成图片", () => importAutomationImage(service, item, client)); }}>继续导入图片</button>}</div>
+      {item.phase === "awaiting_import" && (saved || item.base_version_id === version?.id) && <button className="primary-button" disabled={locked || busy} onClick={() => { if (service) void run(saved ? "确认已保存图片" : "保存生成图片", () => importAutomationImage(service, item, client)); }}>{saved ? "确认已保存图片" : "继续导入图片"}</button>}</div>
       {service && item.sha256 && item.mime_type && ["awaiting_import", "cancelled"].includes(item.phase) && <RetainedImagePreview key={`${item.task_id}:${item.base_version_id}:${item.sha256}:${item.mime_type}`} service={service} item={item} />}
-    </article>)}
+    </article>; })}
     <p className="muted">匹配当前任务与版本的图片会自动保存一次；失败后可手动继续导入。停止观察不会撤回已发送到 ChatGPT 的请求，刷新页面不重复提交。</p>
   </section>;
 }
