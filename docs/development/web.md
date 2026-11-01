@@ -47,7 +47,7 @@ pnpm exec playwright test --config playwright.web.config.ts --workers 1
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` 在 `feat/v0.1` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。仓库 Pages 的发布来源需设为 GitHub Actions。部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许发布分支。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
+`.github/workflows/pages.yml` 在 `main` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。仓库默认分支为 `main`，Pages 的发布来源设为 GitHub Actions。部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许 `main` 发布。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
 
 本工作流只发布静态应用与引擎资源，不运行用户任务、不上传本地资料，也不连接 ChatGPT 账号。
 

@@ -2,7 +2,7 @@ name: Build and deploy shared web app
 
 on:
   push:
-    branches: [feat/v0.1]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
