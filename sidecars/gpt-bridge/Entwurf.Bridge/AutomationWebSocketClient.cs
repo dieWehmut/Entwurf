@@ -98,7 +98,9 @@ public sealed class AutomationWebSocketClient(Uri address, string token) : IDisp
 
 public static class AutomationBootstrap
 {
-    public static async Task<int> RunAsync()
+    public static Task<int> RunAsync() => RunAsync(() => new WindowsImageSurface());
+
+    internal static async Task<int> RunAsync(Func<IImageAutomationSurface> createSurface)
     {
         if (!Console.IsInputRedirected) return 2;
         try
@@ -112,7 +114,7 @@ public static class AutomationBootstrap
             var parentStart = parent.StartTime.ToUniversalTime();
             using var lifetime = new CancellationTokenSource();
             using var transport = new AutomationWebSocketClient(address, config.Token);
-            await using var session = new ImageAutomationSession(config.StateDirectory, new WindowsImageSurface(), transport.SendAsync);
+            await using var session = new ImageAutomationSession(config.StateDirectory, createSurface(), transport.SendAsync);
             var inputClosed = MonitorInputAsync(input, lifetime);
             var parentExited = MonitorParentAsync(parent, parentStart, lifetime);
             try { await transport.RunAsync(session, lifetime.Token); }

@@ -378,8 +378,10 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         lifetime.Cancel();
         runningControl?.Cancellation.Cancel();
         try { await running.WaitAsync(TimeSpan.FromSeconds(5)); } catch (TimeoutException) { }
-        // UI operations must be bounded by the surface implementation; never leave a lifetime-less executor.
-        surface.Dispose();
+        // A stalled UIA provider can retain the surface lock even after cancellation. Keep disposal
+        // under that lock, but let this dedicated adapter process exit and reclaim it if cleanup stalls.
+        try { await Task.Run(surface.Dispose).WaitAsync(TimeSpan.FromSeconds(1)); }
+        catch (TimeoutException) { }
         runningControl?.Cancellation.Dispose();
         lifetime.Dispose();
         ownership.Dispose();

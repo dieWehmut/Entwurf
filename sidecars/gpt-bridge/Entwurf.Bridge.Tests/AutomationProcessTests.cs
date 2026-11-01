@@ -13,9 +13,15 @@ namespace Entwurf.Bridge.Tests;
 public sealed class AutomationProcessTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Automation_bootstrap_authenticates_over_websocket_and_exits_on_stdin_eof_or_auth_refusal(bool refuseAuthentication)
+    [InlineData("eof", false)]
+    [InlineData("refusal", false)]
+    [InlineData("malformed_authentication", false)]
+    [InlineData("parent_exit", false)]
+    [InlineData("eof", true)]
+    [InlineData("refusal", true)]
+    [InlineData("malformed_authentication", true)]
+    [InlineData("parent_exit", true)]
+    public async Task Automation_bootstrap_exits_on_eof_refusal_exception_or_parent_exit(string shutdown, bool blockedDisposal)
     {
         var directory = Path.Combine(Path.GetTempPath(), "entwurf-automation-test-" + Guid.NewGuid());
         Directory.CreateDirectory(directory);
@@ -23,18 +29,23 @@ public sealed class AutomationProcessTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "Entwurf.Bridge.exe"))
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, blockedDisposal ? "Entwurf.Bridge.Tests.exe" : "Entwurf.Bridge.exe"))
         { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        info.ArgumentList.Add("--automation-stdin");
+        info.ArgumentList.Add(blockedDisposal ? "--blocked-dispose-stdin" : "--automation-stdin");
         info.Environment["DOTNET_ROOT"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
         using var child = Process.Start(info)!;
+        using var parent = shutdown == "parent_exit" ? Process.Start(new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            ArgumentList = { "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 60" }
+        }) : null;
         try
         {
             const string secret = "offline-owner-capability-never-in-query";
             await FrameCodec.WriteAsync(child.StandardInput.BaseStream, JsonSerializer.SerializeToUtf8Bytes(new
             {
                 websocket_url = $"ws://127.0.0.1:{port}/api/automation/extension", token = secret,
-                state_directory = directory, parent_pid = Environment.ProcessId
+                state_directory = directory, parent_pid = parent?.Id ?? Environment.ProcessId
             }), deadline.Token);
             var accepting = listener.AcceptTcpClientAsync(deadline.Token).AsTask();
             var exited = child.WaitForExitAsync(deadline.Token);
@@ -62,17 +73,27 @@ public sealed class AutomationProcessTests
             Assert.Equal("authenticate", authentication.RootElement.GetProperty("type").GetString());
             Assert.Equal(secret, authentication.RootElement.GetProperty("token").GetString());
             // No authenticated response is sent: these cases never inspect or operate ChatGPT.
-            if (refuseAuthentication)
+            if (shutdown == "refusal")
                 await socket.SendAsync("{\"type\":\"error\",\"code\":\"unauthorized\"}"u8.ToArray(), WebSocketMessageType.Text, true, deadline.Token);
+            else if (shutdown == "malformed_authentication")
+                await socket.SendAsync("{}"u8.ToArray(), WebSocketMessageType.Text, true, deadline.Token);
+            else if (shutdown == "parent_exit")
+            {
+                // The test keeps the child's stdin open: parent death alone must end the capability.
+                parent!.Kill();
+                await parent.WaitForExitAsync(deadline.Token);
+            }
             else child.StandardInput.Close();
-            await child.WaitForExitAsync(deadline.Token);
-            Assert.Equal(refuseAuthentication ? 1 : 0, child.ExitCode);
+            await child.WaitForExitAsync(deadline.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            if (shutdown == "malformed_authentication") Assert.NotEqual(0, child.ExitCode);
+            else Assert.Equal(shutdown == "refusal" ? 1 : 0, child.ExitCode);
             Assert.Empty(await child.StandardOutput.ReadToEndAsync());
             Assert.DoesNotContain(secret, await child.StandardError.ReadToEndAsync());
         }
         finally
         {
             if (!child.HasExited) { child.Kill(true); await child.WaitForExitAsync(); }
+            if (parent is not null && !parent.HasExited) { parent.Kill(); await parent.WaitForExitAsync(); }
             Directory.Delete(directory, true);
         }
     }

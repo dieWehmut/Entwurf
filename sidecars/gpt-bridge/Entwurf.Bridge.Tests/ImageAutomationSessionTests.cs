@@ -15,6 +15,44 @@ public sealed class ImageAutomationSessionTests
     static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6kVwAAAAASUVORK5CYII=");
 
     [Fact]
+    public async Task Blocked_surface_cleanup_is_bounded_and_preserves_staged_artifact_without_resubmission()
+    {
+        using var fixture = new Fixture();
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var surface = new Surface { OnDispose = () => { entered.SetResult(); release.Wait(); finished.SetResult(); } };
+        var session = fixture.Session(surface);
+        await session.HandleAsync(Start("bounded-cleanup"), default);
+        await fixture.WaitPhase("bounded-cleanup", "awaiting_import");
+        var database = await File.ReadAllBytesAsync(Path.Combine(fixture.Directory, "runs.json"));
+        var artifact = await File.ReadAllBytesAsync(Path.Combine(fixture.Directory, "bounded-cleanup.image"));
+        var cleanup = Task.Run(async () => await session.DisposeAsync());
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await cleanup.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(database, await File.ReadAllBytesAsync(Path.Combine(fixture.Directory, "runs.json")));
+            Assert.Equal(artifact, await File.ReadAllBytesAsync(Path.Combine(fixture.Directory, "bounded-cleanup.image")));
+            Assert.Equal(1, surface.Submissions);
+        }
+        finally
+        {
+            release.Set();
+            await cleanup.WaitAsync(TimeSpan.FromSeconds(3));
+            await finished.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        fixture.Messages.Clear();
+        var restoredSurface = new Surface();
+        await using var restored = fixture.Session(restoredSurface);
+        await restored.ConnectedAsync(default);
+        Assert.Equal("awaiting_import", fixture.LastPhase("bounded-cleanup"));
+        Assert.Equal(artifact, Convert.FromBase64String(fixture.Last("artifact").GetProperty("bytes_base64").GetString()!));
+        Assert.Equal(0, restoredSurface.Submissions);
+        Assert.False(restoredSurface.PromptEntered.Task.IsCompleted);
+    }
+
+    [Fact]
     public async Task A_connected_helper_reports_unlocked_availability_without_restart_or_any_run()
     {
         using var fixture = new Fixture();
@@ -361,6 +399,7 @@ public sealed class ImageAutomationSessionTests
         public int Submissions;
         public bool HoldPrompt;
         public Action? OnSubmit;
+        public Action? OnDispose;
         public string? ExternalDownload;
         public bool DownloadFails;
         public bool Recoverable;
@@ -399,6 +438,6 @@ public sealed class ImageAutomationSessionTests
             Restored.TrySetResult();
             return Task.FromResult<PreparedImageConversation?>(new Conversation());
         }
-        public void Dispose() { }
+        public void Dispose() { OnDispose?.Invoke(); }
     }
 }
