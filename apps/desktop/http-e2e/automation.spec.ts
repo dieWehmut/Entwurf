@@ -4,7 +4,8 @@ import { access as fileAccess, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 test("real HTTP coordinator automatically persists a fixture extension image then acknowledges", async ({ page, baseURL }) => {
-  test.skip(new URL(baseURL!).port !== "48123", "Requires the isolated companion on port 48123.");
+  test.skip(!process.env.ENTWURF_HTTP_TEST_DATA_DIR, "Requires an explicitly configured isolated fixture data directory.");
+  expect(new URL(baseURL!).port, "Never attach a fixture provider to the installed companion").not.toBe("48123");
   const clientId = randomUUID();
   const bootstrap = await fetch(`${baseURL}/api/bootstrap`, { headers: { "X-Entwurf-Client": clientId } });
   expect(bootstrap.ok).toBe(true);
@@ -15,8 +16,19 @@ test("real HTTP coordinator automatically persists a fixture extension image the
   const bytes = await readFile(fileURLToPath(new URL("../../../fixtures/public/ingestion/bilingual.png", import.meta.url)));
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const socket = new WebSocket(access.websocket_url);
-  let starts = 0, acknowledged = false, holdArtifact = false;
-  let heldRun: {run_id:string;task_id:string;base_version_id:string} | null = null;
+  let starts = 0, acknowledgements = 0, holdArtifact = false;
+  let browserSession = "", browserClient = "";
+  page.on("response", async response => {
+    if (new URL(response.url()).pathname === "/api/bootstrap" && response.ok()) {
+      browserSession = (await response.json()).session_token;
+      browserClient = response.request().headers()["x-entwurf-client"];
+    }
+  });
+  const command = async (name: string, args: unknown) => fetch(`${baseURL}/api/command`, {
+    method: "POST", headers: {"Content-Type":"application/json", "X-Entwurf-Session":browserSession, "X-Entwurf-Client":browserClient},
+    body: JSON.stringify({command:name, args}),
+  });
+  let heldRun: {run_id:string;task_id:string;base_version_id:string;prompt_sha256:string} | null = null;
   const uploads: string[] = [];
   page.on("response", async response => {if(new URL(response.url()).pathname === "/api/uploads" && response.request().method() === "POST" && response.ok()) uploads.push(...(await response.json()).map((file:{path:string})=>file.path));});
   const errors: string[] = [];
@@ -35,7 +47,7 @@ test("real HTTP coordinator automatically persists a fixture extension image the
           if(holdArtifact) {heldRun=run;return;}
           socket.send(JSON.stringify({ type: "artifact", run_id: run.run_id, task_id: run.task_id, base_version_id: run.base_version_id, mime_type: "image/png", sha256, bytes_base64: bytes.toString("base64") }));
         }
-        if (message.type === "artifact_accepted") acknowledged = true;
+        if (message.type === "artifact_accepted") acknowledgements++;
       };
     });
     await page.goto("/");
@@ -49,7 +61,7 @@ test("real HTTP coordinator automatically persists a fixture extension image the
     await expect(page.getByRole("button", { name: "启动一次图片生成" })).toBeEnabled();
     await page.getByRole("button", { name: "启动一次图片生成" }).click();
     await expect(page.getByRole("img", { name: /ChatGPT 生成图片/ })).toBeVisible({ timeout: 20_000 });
-    await expect.poll(() => acknowledged).toBe(true);
+    await expect.poll(() => acknowledgements).toBe(1);
     await page.reload(); await tasks();
     await expect(page.getByRole("img", { name: /ChatGPT 生成图片/ })).toBeVisible();
     expect(starts).toBe(1); expect(errors).toEqual([]);
@@ -67,17 +79,43 @@ test("real HTTP coordinator automatically persists a fixture extension image the
     const alternate = await readFile(fileURLToPath(new URL("../src-tauri/icons/icon.png", import.meta.url)));
     socket.send(JSON.stringify({type:"artifact",...heldRun!,mime_type:"image/png",sha256:createHash("sha256").update(alternate).digest("hex"),bytes_base64:alternate.toString("base64")}));
     await tasks();
-    await expect(page.getByRole("button",{name:"继续导入图片"})).toBeVisible();
-    for(let attempt=0;attempt<2;attempt++) {
-      await page.getByRole("button",{name:"继续导入图片"}).click();
-      await expect(page.getByRole("alert").filter({hasText:/stale|version/i})).toBeVisible();
+    await expect(page.getByRole("button",{name:"查看原始图片"})).toBeVisible();
+    await expect(page.getByRole("button",{name:"继续导入图片"})).toHaveCount(0);
+    const before = await (await command("workspace_snapshot", {taskId:heldRun!.task_id})).json();
+    const review = async () => {
+      await page.getByRole("button",{name:"查看原始图片"}).click();
+      const preview = page.getByRole("img",{name:/原始生成图片/});
+      await expect(preview).toBeVisible();
+      await expect.poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      const download = page.waitForEvent("download");
+      await page.getByRole("link",{name:"下载原始图片"}).click();
+      expect(await readFile((await (await download).path())!)).toEqual(alternate);
+    };
+    const uploadsBeforeReview = uploads.length;
+    await review(); await page.reload(); await tasks(); await review();
+    await page.getByRole("button",{name:"停止观察"}).click();
+    await expect(page.getByText("观察已停止",{exact:true})).toBeVisible();
+    await page.reload(); await tasks(); await review();
+    expect(uploads.length).toBe(uploadsBeforeReview);
+    expect(starts).toBe(2); expect(acknowledgements).toBe(1); expect(errors).toEqual([]);
+    expect(await (await command("workspace_snapshot", {taskId:heldRun!.task_id})).json()).toEqual(before);
+    // The UI offers no stale import. Exercise the backend rejection and owned
+    // upload cleanup directly, in addition to the typed client's cleanup unit test.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const body = new FormData(); body.append("files", new Blob([alternate], {type:"image/png"}), "stale.png");
+      const uploaded = await fetch(`${baseURL}/api/uploads`, {method:"POST", headers:{"X-Entwurf-Session":browserSession,"X-Entwurf-Client":browserClient},body});
+      expect(uploaded.ok).toBe(true);
+      const [{path}] = await uploaded.json(); uploads.push(path);
+      const rejected = await command("import_generated_image", {taskId:heldRun!.task_id, baseVersionId:heldRun!.base_version_id, runId:heldRun!.run_id, promptSha256:heldRun!.prompt_sha256, path, expectedSha256:createHash("sha256").update(alternate).digest("hex"), mimeType:"image/png"});
+      expect(rejected.ok).toBe(false); expect((await rejected.json()).error).toMatch(/stale|version/i);
+      expect((await command("discard_uploads", {paths:[path]})).ok).toBe(true);
     }
-    if(process.env.ENTWURF_HTTP_TEST_DATA_DIR) for(const path of uploads) {
+    for (const path of uploads) {
       let exists=true;try{await fileAccess(process.env.ENTWURF_HTTP_TEST_DATA_DIR+path);}catch{exists=false;}
       expect(exists).toBe(false);
     }
-    await page.getByRole("button",{name:"停止观察"}).click();
-    await expect(page.getByText("观察已停止",{exact:true})).toBeVisible();
+    expect(await (await command("workspace_snapshot", {taskId:heldRun!.task_id})).json()).toEqual(before);
+    expect(acknowledgements).toBe(1);
     heldRun=null;
 
   } finally {
