@@ -45,6 +45,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
     return () => { alive = false; };
   }, [client]);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("entwurf.theme", theme); }, [theme]);
+  useEffect(() => { document.scrollingElement?.scrollTo({ top: 0, left: 0 }); }, [page]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); if (!working.current) setCommandOpen(o => !o); } };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
@@ -54,7 +55,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, [draft]);
-  const navigate = (next: PageId) => { if (!working.current && !busy) setPage(next); };
+  const navigate = (next: PageId) => { if (!working.current && !busy) { setPage(next); setNotice(null); } };
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
   const run: Run = async (label, action, success, checkOutcome) => {
     if (working.current || !client.available) return false;
@@ -101,21 +102,21 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
     }, () => setActiveNodeId(null));
   }
   return <div className="app-shell">
-    <Sidebar page={page} theme={theme} projectName={snapshot?.project.name ?? "未打开项目"} taskCount={snapshot?.project.tasks.length ?? 0} onNavigate={navigate} onToggleTheme={toggleTheme} onOpenSettings={() => navigate("settings")} navigationDisabled={!!busy} />
-    <main className="main-column" aria-busy={!!busy}>
-      <Header page={page} projectName={snapshot?.project.name ?? "本地工作区"} theme={theme} onToggleTheme={toggleTheme} onOpenCommand={() => setCommandOpen(true)} navigationDisabled={!!busy} />
+    <Sidebar page={page} onNavigate={navigate} onOpenSettings={() => navigate("settings")} navigationDisabled={!!busy} />
+    <main className={`main-column page-${page}${snapshot ? "" : " is-empty"}`} aria-busy={!!busy}>
+      {page !== "settings" && <Header page={page} projectName={snapshot?.project.name ?? "本地工作区"} onOpenCommand={() => setCommandOpen(true)} navigationDisabled={!!busy} />}
       {!client.available && <div className="callout warn" role="status">浏览器预览：本地工作区不可用。请启动 Windows 桌面应用以创建项目、导入和导出文件。</div>}
       {busy && <div className="toast page-toast" role="status">{busy}</div>}
       {error && <div className="callout warn" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="关闭错误">×</button></div>}
       {notice && <div className="toast page-toast" role="status">{notice}</div>}
       {draft && <div className="callout warn">节点有未保存修改。保存或放弃后才能切换任务、修改来源、导出或回滚。{version?.id !== draft.baseVersionId && <strong>当前版本已改变，草稿已过期；保留内容供复制，放弃草稿后重新编辑。</strong>}<button className="text-button" disabled={unavailable} onClick={() => navigate("result")}>查看草稿</button></div>}
-      {snapshot && <div className="workspace-toolbar">
+      {snapshot && page !== "settings" && <div className="workspace-toolbar current-workspace">
         <label>当前任务<select aria-label="当前任务" disabled={locked} value={snapshot.selected_task_id ?? ""} onChange={e => { void run("切换任务", () => client.call("workspace_snapshot", { taskId: e.target.value }), () => setActiveNodeId(null)); }}>
           <option value="" disabled>请选择任务</option>{snapshot.project.tasks.map(t => <option key={t.id} value={t.id}>{t.chapter ? `${t.chapter} / ` : ""}{t.title}</option>)}
         </select></label><span>{task?.state ?? "没有任务"} · {version ? `r${version.revision}` : "尚无知识版本"}</span>
         <button className="secondary-button" disabled={unavailable} onClick={() => { void run("刷新工作区", () => client.call("workspace_snapshot", { taskId: task?.id })); }}>刷新工作区</button>
       </div>}
-      {page === "project" && <div className="workspace-stack">
+      {page === "project" && <div className="workspace-stack project-workspace">
         <section className="panel"><h2>{client.runtime === "browser" ? "浏览器项目" : "本地项目"}</h2><p className="muted path-text">{snapshot?.root ?? (client.runtime === "browser" ? "项目保存在此浏览器中，刷新或重新打开页面后可继续编辑。" : client.runtime === "local-http" ? "项目保存在本机服务的数据库中。" : "选择本机目录，新建项目或打开已有项目。")}</p>
           <div className="workspace-toolbar"><label className="field">项目名称<input disabled={locked} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="输入项目名称" /></label><button className="primary-button" disabled={locked || !projectName.trim()} onClick={() => openProject(true)}>新建项目</button><button className="secondary-button" disabled={locked} onClick={() => openProject(false)}>打开项目</button></div>
           {projects && <section aria-label="选择项目"><h3>已保存项目</h3>{projects.length ? projects.map(project => <button className="secondary-button" disabled={locked} key={project.id} onClick={() => { void run("打开项目", () => client.call("load_existing_project", { root: project.root }), () => { setProjects(null); setActiveNodeId(null); }); }}>{project.name}</button>) : <p className="empty-note">此存储中还没有项目。</p>}<button className="text-button" onClick={() => setProjects(null)}>关闭项目列表</button></section>}
@@ -128,8 +129,8 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
       {page === "sources" && (snapshot ? <SourcesPage key={snapshot.project.id} onCreateTask={() => navigate("project")} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先在项目页打开项目。</p>)}
       {page === "tasks" && (snapshot && task ? <TasksPage key={task.id} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先创建或选择一个任务。</p>)}
       {page === "result" && (snapshot && version ? <ResultPage key={task?.id} snapshot={snapshot} client={client} run={run} locked={locked} busy={unavailable} draft={draft} setDraft={setDraft} activeNodeId={activeNodeId} setActiveNodeId={setActiveNodeId} saveDraft={saveDraft} /> : <p className="empty-note">当前任务没有知识版本。导入资料后可编辑、校验和预览。</p>)}
-      {page === "settings" && <SettingsPage snapshot={snapshot} capabilities={capabilities} client={client} run={run} locked={locked} theme={theme} toggleTheme={toggleTheme} refreshCapabilities={() => { void run("检测能力", async () => { setCapabilities(await client.call("bootstrap", undefined)); return null; }); }} />}
-      <footer className="app-footer"><span>Entwurf v0.1 · 本地优先</span><span>无遥测 · 源资料可追溯</span><span>Apache-2.0</span></footer>
+      {page === "settings" && <SettingsPage snapshot={snapshot} capabilities={capabilities} client={client} run={run} locked={locked} theme={theme} toggleTheme={toggleTheme} onOpenTasks={() => navigate("tasks")} refreshCapabilities={() => { void run("检测能力", async () => { setCapabilities(await client.call("bootstrap", undefined)); return null; }); }} />}
+      {page !== "settings" && <footer className="app-footer"><span>Entwurf v0.1 · 本地优先</span><span>无遥测 · 源资料可追溯</span><span>Apache-2.0</span></footer>}
     </main><CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} onNavigate={navigate} />
   </div>;
 }

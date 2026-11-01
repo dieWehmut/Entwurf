@@ -1,87 +1,37 @@
 import { Icons, type IconComponent } from "./Icons";
-import type { PageId, Theme } from "../lib/types";
+import type { PageId } from "../lib/types";
 
 interface SidebarProps {
   page: PageId;
-  theme: Theme;
-  projectName: string;
-  taskCount: number;
   onNavigate: (page: PageId) => void;
-  onToggleTheme: () => void;
   onOpenSettings: () => void;
   navigationDisabled?: boolean;
 }
-
-const navigation: { id: PageId; label: string; icon: IconComponent; hint: string }[] = [
-  { id: "project", label: "项目", icon: Icons.folder, hint: "概览与最近任务" },
-  { id: "sources", label: "资料与风格", icon: Icons.layers, hint: "导入、锚点与视觉参考" },
-  { id: "tasks", label: "任务", icon: Icons.bot, hint: "任务版本、图片生成与结果导入" },
-  { id: "result", label: "结果", icon: Icons.grid, hint: "审阅、校验与导出" },
+const navigation: { id: PageId; label: string; shortLabel: string; icon: IconComponent; hint: string }[] = [
+  { id: "project", label: "项目", shortLabel: "项目", icon: Icons.folder, hint: "概览与最近任务" },
+  { id: "sources", label: "资料与风格", shortLabel: "资料", icon: Icons.layers, hint: "导入、锚点与视觉参考" },
+  { id: "tasks", label: "任务", shortLabel: "任务", icon: Icons.bot, hint: "任务版本、图片生成与结果导入" },
+  { id: "result", label: "结果", shortLabel: "结果", icon: Icons.grid, hint: "审阅、校验与导出" },
 ];
-
-export function Sidebar({
-  page,
-  theme,
-  projectName,
-  taskCount,
-  onNavigate,
-  onToggleTheme,
-  onOpenSettings,
-  navigationDisabled,
-}: SidebarProps) {
-  return (
-    <aside className="sidebar" aria-label="主导航">
-      <div className="brand">
-        <span className="brand-mark" aria-hidden="true"><img src={`${import.meta.env.BASE_URL}icon.png`} alt="" /></span>
-        <div>
-          <strong>Entwurf</strong>
-          <span>可验证知识图</span>
-        </div>
-      </div>
-
-      <div className="project-chip">
-        <span className="eyebrow">当前项目</span>
-        <span className="project-chip-name">{projectName}</span>
-        <span className="project-chip-meta">{taskCount} 个任务</span>
-      </div>
-
-      <nav className="nav-list">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          const active = page === item.id;
-          return (
-            <button
-              key={item.id}
-              disabled={navigationDisabled}
-              className={`nav-item ${active ? "is-active" : ""}`}
-              onClick={() => onNavigate(item.id)}
-              aria-current={active ? "page" : undefined}
-              title={item.hint}
-            >
-              <Icon size={17} strokeWidth={1.7} />
-              <span>{item.label}</span>
-              {active && <span className="nav-dot" aria-hidden="true" />}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div className="sidebar-spacer" />
-
-      <div className="sidebar-note">
-        <Icons.info size={14} />
-        <span>核心功能离线可用。图片生成状态见任务页。</span>
-      </div>
-
-      <div className="sidebar-footer">
-        <button className="icon-button" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "浅色主题" : "深色主题"}>
-          {theme === "dark" ? <Icons.sun size={16} /> : <Icons.moon size={16} />}
-        </button>
-        <button className="icon-button" onClick={onOpenSettings} disabled={navigationDisabled} aria-label="打开设置" title="设置">
-          <Icons.settings size={16} />
-        </button>
-        <div className="build-tag">v0.1 · local</div>
-      </div>
-    </aside>
-  );
+export function Sidebar({ page, onNavigate, onOpenSettings, navigationDisabled }: SidebarProps) {
+  return <aside className="sidebar" aria-label="主导航">
+    <div className="brand" title="Entwurf · 可验证知识图">
+      <span className="brand-mark"><img src={`${import.meta.env.BASE_URL}icon.png`} alt="Entwurf" /></span>
+    </div>
+    <nav className="nav-list" aria-label="工作区导航">
+      {navigation.map(item => {
+        const Icon = item.icon;
+        return <button key={item.id} disabled={navigationDisabled} className={`nav-item ${page === item.id ? "is-active" : ""}`}
+          onClick={() => onNavigate(item.id)} aria-label={item.label} aria-current={page === item.id ? "page" : undefined} title={`${item.label} · ${item.hint}`}>
+          <Icon size={22} strokeWidth={1.6} /><span className="rail-label" aria-hidden="true">{item.shortLabel}</span>
+        </button>;
+      })}
+    </nav>
+    <div className="sidebar-footer">
+      <button className={`nav-item ${page === "settings" ? "is-active" : ""}`} onClick={onOpenSettings} disabled={navigationDisabled}
+        aria-label="打开设置" aria-current={page === "settings" ? "page" : undefined} title="设置">
+        <Icons.settings size={22} strokeWidth={1.6} /><span className="rail-label" aria-hidden="true">设置</span>
+      </button>
+    </div>
+  </aside>;
 }

@@ -1,5 +1,6 @@
 import { AutomationPanel, GeneratedImageGallery } from "../components/AutomationPanel";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Icons } from "../components/Icons";
 import type { Run } from "../App";
 import type { StyleSpec, TaskVersion, Theme } from "../lib/types";
 import { type BridgeGate, type BridgeReport, type Capabilities, type WorkspaceClient, type WorkspaceSnapshot } from "../lib/workspace";
@@ -52,25 +53,40 @@ export function TasksPage({ snapshot, client, run, locked }: Props) {
   <section className="panel"><h2>不可变版本</h2>{[...task.versions].reverse().map(v => <article className="source-record" key={v.id}><strong>r{v.revision} · {v.reason}</strong><p>{v.created_at} · {v.ir.nodes.length} 个节点</p><button className="secondary-button" disabled={locked || v.id === task.current_version} onClick={() => { void run("回滚版本", () => client.call("rollback_version", { taskId: task.id, versionId: v.id })); }}>从 r{v.revision} 恢复内容</button></article>)}{!task.versions.length && <p className="empty-note">导入资料后建立第一个版本。</p>}</section>
   <section className="panel"><h2>任务审计日志</h2><ol className="audit-list">{snapshot.project.audit.filter(event => event.task_id === task.id).map(event => <li key={event.id}><time>{event.at}</time><strong>{event.kind}</strong><p>{event.detail}</p></li>)}</ol></section></div>;
 }
-export function SettingsPage({ snapshot, capabilities, client, run, locked, theme, toggleTheme, refreshCapabilities }: Omit<Props, "snapshot"> & { snapshot: WorkspaceSnapshot | null; capabilities: Capabilities | null; theme: Theme; toggleTheme: () => void; refreshCapabilities: () => void }) {
+const settingsCategories = [
+  { id: "general", label: "常规", icon: Icons.settings, description: "调整界面外观，查看应用信息。" },
+  { id: "ocr", label: "OCR", icon: Icons.file, description: "设置文字识别语言，查看本机识别能力。" },
+  { id: "chatgpt", label: "ChatGPT 连接", icon: Icons.bot, description: "连接已登录的 ChatGPT 会话，在任务中生成图片。" },
+  { id: "storage", label: "存储与诊断", icon: Icons.folder, description: "查看项目保存位置，导出脱敏诊断。" },
+] as const;
+type SettingsCategory = typeof settingsCategories[number]["id"];
+export function SettingsPage({ snapshot, capabilities, client, run, locked, theme, toggleTheme, refreshCapabilities, onOpenTasks }: Omit<Props, "snapshot"> & { snapshot: WorkspaceSnapshot | null; capabilities: Capabilities | null; theme: Theme; toggleTheme: () => void; refreshCapabilities: () => void; onOpenTasks: () => void }) {
+  const [category, setCategory] = useState<SettingsCategory>("general");
   const [ocrDraft, setOcrDraft] = useState<string | null>(null);
   const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null);
-  return <div className="workspace-stack"><section className="panel"><h2>外观与项目</h2><div className="setting-row"><div><strong>界面主题</strong><p>当前为{theme === "dark" ? "深色" : "浅色"}。</p></div><button className="secondary-button" onClick={toggleTheme}>切换主题</button></div><p className="path-text">项目目录：{snapshot?.root ?? "未打开"}</p></section>
-  <section className="panel"><h2>本机能力报告</h2><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button>{capabilities ? <><dl className="capability-details"><dt>运行平台</dt><dd>{capabilities.platform} · {capabilities.version}</dd>{capabilities.storage && <><dt>项目存储</dt><dd>{capabilities.storage === "indexeddb" ? "此浏览器数据库" : capabilities.storage === "sqlite" ? "本机 SQLite 数据库" : capabilities.storage}</dd></>}<dt>Tesseract</dt><dd>{capabilities.tesseract_available ? "已检测到" : "未检测到；图片文字保留为待确认"}</dd><dt>已安装 OCR 语言</dt><dd>{capabilities.ocr_languages.join(", ") || "未检测到语言包"}</dd><dt>ChatGPT 图片生成</dt><dd>连接与运行状态见任务页</dd></dl><p className="muted">{capabilities.bridge ? "结构化规划接口：" : ""}{capabilities.bridge_detail}</p></> : <p className="empty-note">尚未取得本机检测结果。</p>}
-  {capabilities?.bridge && <BridgeDiscovery report={capabilities.bridge} />}
-  </section>
-  <section className="panel"><h2>脱敏诊断</h2><p className="muted">将本机能力与项目统计保存为脱敏诊断 JSON。</p>
-    <button className="secondary-button" disabled={locked} onClick={() => { void run("导出脱敏诊断", async () => {
-      setDiagnosticsPath(null);
-      const savedPath = await client.call("export_diagnostics", undefined);
-      if (!savedPath?.trim()) return;
-      setDiagnosticsPath(savedPath);
-      return null;
-    }); }}>导出脱敏诊断</button>
-    {diagnosticsPath && <p className="path-text" role="status">已保存：{diagnosticsPath}</p>}
-  </section>
-  {client.runtime === "browser" && <section className="panel"><h2>开源许可</h2><p><a href={`${import.meta.env.BASE_URL}licenses/THIRD-PARTY-NOTICES.txt`} target="_blank" rel="noreferrer">第三方许可证与版权声明</a></p><p><a href={`${import.meta.env.BASE_URL}licenses/dependency-inventory.json`} target="_blank" rel="noreferrer">网页依赖清单</a></p></section>}
-  <section className="panel"><h2>OCR 设置</h2><label className="field">OCR 语言<input value={ocrDraft ?? snapshot?.project.settings.ocr_languages ?? ""} placeholder="chi_sim+eng" onChange={e => setOcrDraft(e.target.value)} disabled={locked || !snapshot} /></label><p className="muted">保存后用于后续资料摄取。已有资料请在来源页重新解析原件。</p><button className="primary-button" disabled={locked || !snapshot || !ocrDraft?.trim()} onClick={() => { void run("保存 OCR 设置", () => client.call("save_settings", { ocrLanguages: ocrDraft!.trim() }), () => setOcrDraft(null)); }}>保存 OCR 设置</button></section></div>;
+  const selected = settingsCategories.find(item => item.id === category)!;
+  useEffect(() => { document.scrollingElement?.scrollTo({ top: 0, left: 0 }); }, [category]);
+  const storageName = capabilities?.storage === "indexeddb" ? "此浏览器数据库" : capabilities?.storage === "sqlite" || client.runtime === "native" || !client.runtime ? "本机 SQLite 数据库" : "本地数据库";
+  return <div className="settings-layout">
+    <aside className="settings-sidebar" aria-label="设置分类侧栏"><h1>设置</h1>
+      <div className="settings-nav" role="group" aria-label="设置分类导航">{settingsCategories.map(item => {
+        const Icon = item.icon;
+        return <button key={item.id} disabled={locked} className={category === item.id ? "is-active" : ""} aria-pressed={category === item.id} onClick={() => setCategory(item.id)}><Icon size={19} strokeWidth={1.6} />{item.label}</button>;
+      })}</div>
+      <label className="settings-mobile-nav">设置分类<select aria-label="设置分类" value={category} disabled={locked} onChange={event => setCategory(event.target.value as SettingsCategory)}>{settingsCategories.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
+    </aside>
+    <div className="settings-content"><header className="settings-heading"><h2>{selected.label}</h2><p>{selected.description}</p></header>
+      {category === "general" && <><section className="panel settings-group"><h3>外观</h3><div className="setting-row"><div><strong>界面主题</strong><p>用于此设备上的 Entwurf 界面。</p></div><select aria-label="界面主题" value={theme} onChange={event => { if (event.target.value !== theme) toggleTheme(); }}><option value="dark">深色</option><option value="light">浅色</option></select></div></section>
+      <section className="panel settings-group"><h3>应用信息</h3><div className="setting-row"><div><strong>Entwurf</strong><p>可验证知识图 · 本地优先</p></div><span>{capabilities?.version ?? "0.1.0"}</span></div><div className="setting-row"><div><strong>运行平台</strong><p>{capabilities?.platform ?? "正在读取"}</p></div></div><div className="setting-row"><div><strong>项目与隐私</strong><p>资料保留在本地；核心整理与编译功能离线可用，无遥测。</p></div></div></section></>}
+      {category === "ocr" && <><section className="panel settings-group"><h3>OCR 设置</h3><label className="field">OCR 语言<input value={ocrDraft ?? snapshot?.project.settings.ocr_languages ?? ""} placeholder="chi_sim+eng" onChange={event => setOcrDraft(event.target.value)} disabled={locked || !snapshot} /></label><p className="muted">保存后用于后续资料摄取。已有资料请在来源页重新解析原件。</p>{!snapshot && <p className="muted">打开项目后可保存识别语言。</p>}<button className="primary-button" disabled={locked || !snapshot || !ocrDraft?.trim()} onClick={() => { void run("保存 OCR 设置", () => client.call("save_settings", { ocrLanguages: ocrDraft!.trim() }), () => setOcrDraft(null)); }}>保存 OCR 设置</button></section>
+      <section className="panel settings-group"><h3>文字识别能力</h3><dl className="capability-details"><dt>Tesseract</dt><dd>{capabilities?.tesseract_available ? "已检测到" : "未检测到；图片文字保留为待确认"}</dd><dt>已安装 OCR 语言</dt><dd>{capabilities?.ocr_languages.join(", ") || "未检测到语言包"}</dd></dl><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button></section></>}
+      {category === "chatgpt" && <><section className="panel settings-group"><h3>ChatGPT 图片生成</h3><p>连接与运行状态见任务页</p><p className="muted">选择 ChatGPT 客户端或浏览器会话。客户端模式无需浏览器扩展；生成的图片独立保存在任务中。</p><div className="handoff-actions"><button className="secondary-button" disabled={locked} onClick={() => { void run("打开连接设置", () => client.call("open_automation_setup", undefined)); }}>ChatGPT 连接设置</button><button className="secondary-button" disabled={locked || !snapshot?.selected_task_id} onClick={onOpenTasks}>前往任务页</button></div></section>
+      <section className="panel settings-group"><h3>本机能力报告</h3><button className="secondary-button" disabled={locked} onClick={refreshCapabilities}>重新检测能力</button>{capabilities ? <p className="muted">{capabilities.bridge ? "结构化规划接口：" : ""}{capabilities.bridge_detail}</p> : <p className="empty-note">尚未取得本机检测结果。</p>}{capabilities?.bridge && <BridgeDiscovery report={capabilities.bridge} />}</section></>}
+      {category === "storage" && <><section className="panel settings-group"><h3>项目存储</h3><div className="setting-row"><div><strong>{storageName}</strong><p>{client.runtime === "browser" ? "项目保存在此浏览器。清除网站数据会删除项目，请定期导出结果。" : "项目与原始资料保存在本机，重新打开应用后可继续。"}</p></div></div><p className="path-text">项目目录：{snapshot?.root ?? "未打开"}</p></section>
+      <section className="panel settings-group"><h3>脱敏诊断</h3><p className="muted">将本机能力与项目统计保存为脱敏诊断 JSON，不包含资料正文或提示词。</p><button className="secondary-button" disabled={locked} onClick={() => { void run("导出脱敏诊断", async () => { setDiagnosticsPath(null); const savedPath = await client.call("export_diagnostics", undefined); if (!savedPath?.trim()) return; setDiagnosticsPath(savedPath); return null; }); }}>导出脱敏诊断</button>{diagnosticsPath && <p className="path-text" role="status">已保存：{diagnosticsPath}</p>}</section>
+      {client.runtime === "browser" && <section className="panel settings-group"><h3>开源许可</h3><p><a href={`${import.meta.env.BASE_URL}licenses/THIRD-PARTY-NOTICES.txt`} target="_blank" rel="noreferrer">第三方许可证与版权声明</a></p><p><a href={`${import.meta.env.BASE_URL}licenses/dependency-inventory.json`} target="_blank" rel="noreferrer">网页依赖清单</a></p></section>}</>}
+    </div>
+  </div>;
 }
 
 const bridgeGateLabels: { id: BridgeGate; label: string }[] = [

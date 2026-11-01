@@ -75,7 +75,7 @@ test('five pages, themes, desktop sizes and zooms render without errors', async 
     await page.setViewportSize(size);
     for (const theme of ['dark', 'light']) {
       const actual = await page.locator('html').getAttribute('data-theme');
-      if (actual !== theme) await page.getByRole('main').getByRole('button', { name: /切换到.*主题/ }).click();
+      if (actual !== theme) { await page.getByRole('button', { name: '打开设置', exact: true }).click(); await page.getByRole('button', { name: '常规', exact: true }).click(); await page.getByLabel('界面主题', { exact: true }).selectOption(theme); }
       for (const zoom of [1, 1.25, 1.5]) {
         await page.evaluate(zoom => { document.documentElement.style.zoom = String(zoom); }, zoom);
         for (const [id, label] of [['project', '项目'], ['sources', '资料与风格'], ['tasks', '任务'], ['result', '结果'], ['settings', '打开设置']]) {
@@ -134,6 +134,7 @@ test('settings renders native discovery evidence and four unverified gates', asy
   await nativeFixture(page); await page.goto('/');
   await expect(page.getByLabel('当前任务')).toHaveValue('task-1');
   await page.getByRole('button', { name: '打开设置', exact: true }).click();
+  await page.getByRole('button', { name: 'ChatGPT 连接', exact: true }).click();
   await expect(page.getByText('未检测到 ChatGPT 窗口', { exact: true })).toBeVisible();
   const gates = page.getByRole('list', { name: '结构化规划接口兼容性门槛' });
   await expect(gates.getByRole('listitem')).toHaveCount(4);
@@ -163,6 +164,7 @@ test('visual repair undo replaces outputs and renders the newly checked version'
 test('diagnostics export shows only a returned saved path and no completion on cancellation', async ({ page }) => {
   await nativeFixture(page); await page.goto('/'); await expect(page.getByLabel('当前任务')).toHaveValue('task-1');
   await page.getByRole('button', { name: '打开设置', exact: true }).click();
+  await page.getByRole('button', { name: '存储与诊断', exact: true }).click();
   await page.getByRole('button', { name: '导出脱敏诊断', exact: true }).click();
   await expect(page.getByText('已保存：fixture/diagnostics.json', { exact: true })).toBeVisible();
   await page.screenshot({ path: '/tmp/entwurf-frontend-diagnostics-saved.png', fullPage: true });
