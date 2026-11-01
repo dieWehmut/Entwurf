@@ -61,10 +61,10 @@ The final full and focused comparisons were opened together and reviewed after t
 - Two real WASM/IndexedDB Playwright cases passed: Markdown import/edit/reload/SVG/PNG/PDF/diagnostic flow; and grouped settings/OCR save/reload/theme/mobile navigation/scroll restoration.
 - Three related existing protocol-fixture UI tests passed: five pages with both themes at two desktop sizes and CSS zooms, native discovery gates, and diagnostic export/cancellation. These fixtures verify presentation only and are not described as installed-app evidence.
 - Native Windows Chromium additionally completed real public Markdown import, OCR draft retention, saved OCR reload, mobile category navigation, task navigation and a real diagnostic download. Page errors: `[]`. No ChatGPT generation, login, account inspection or production automation request was performed.
-- The Windows installed-app acceptance script now selects `存储与诊断` before export and `常规` before theme changes. Its business, ownership and artifact checks are unchanged. The final installer cycles remain a separate root-owned acceptance step.
+- The Windows installed-app acceptance script now selects `存储与诊断` before export and `常规` before theme changes. Its business, ownership and artifact checks are unchanged. The final `6f7bbb7` installer completed two actual uninstall/reinstall cycles (3 and 4), each passing 12 native checks, including all five pages in both themes. Private evidence is in `artifacts/release-20261101-6f7bbb7/reinstall-summary.json` in the controlled Windows checkout.
 
 ## Follow-up / limits
 
-The reference's unrelated account/chat controls are deliberately not reproduced. The new shared UI has not yet been exercised inside the final rebuilt Windows installer; its existing release driver has been adapted for that run. Physical multi-monitor behavior and additional Windows display scales are not claimed.
+The reference's unrelated account/chat controls are deliberately not reproduced. The shared UI has been exercised inside the rebuilt Windows installer and on deployed Pages. Real ChatGPT generation remains a separate integration acceptance step. Physical multi-monitor behavior and additional Windows display scales are not claimed.
 
 Final result: passed

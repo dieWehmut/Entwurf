@@ -4,7 +4,7 @@ The implementation uses independent branches for the portable core, shared
 frontend, browser adapter and integration. The reference repository was inspected
 at `3e651c27967b09e5ef6270474f9e48ee7e10110e`; no implementation was copied.
 
-## Verified locally
+## Verified implementation and releases
 
 - The real Rust/WASM pipeline imports, reviews, compiles and exports actual
   SVG/PNG/PDF, and survives an IndexedDB reset/reopen. Original hashes and
@@ -30,26 +30,78 @@ at `3e651c27967b09e5ef6270474f9e48ee7e10110e`; no implementation was copied.
   import, ACK, reload and original-byte download together.
 - Native Windows `cargo check --locked -p entwurf-desktop --target
   x86_64-pc-windows-msvc` passes with the new desktop companion and image commands.
+  The selected native host and eager desktop startup also pass Windows checking.
   This used a separate checkout; the previous installation and 420 existing
   acceptance-project files remained unchanged.
 - The reinstall driver also hashes the application's local WebUI workspace and
   waits for owned bridge children to exit before uninstalling. PowerShell fixture
   tests verify changed data, redirected paths, child timeout and PID reuse.
 
+- The combined native Windows adapter passes 95 .NET tests, including real child-process
+  bootstrap/EOF, single submission, cancellation, persisted binding, original-byte
+  ACK/replay, lock-screen probe recovery and transcript speaker boundaries. The
+  final fixes were independently reviewed against the exact Windows test inputs.
+  Missing UIA visibility metadata is treated conservatively. A real method-stack
+  capture identified a cleanup lock wait; four blocked-child exit cases failed
+  before the fix and passed after bounded cleanup was added. Retained run and
+  original-image bytes remain unchanged, and restart does not resubmit.
+- Browser dependency distribution now includes 393 records and 254 original
+  notice texts. The native inventory remains 614 records and 409 texts, with no
+  unresolved notices. The supplied desktop icon is also the browser favicon.
+- The first actual Pages run passed core/frontend checks and ten of eleven
+  browser scenarios, then correctly stopped before deployment. A persistence test
+  refreshed before the asynchronous save completed; it now waits for the explicit
+  post-commit UI acknowledgment. Three affected scenarios each passed three runs.
+  The second deployment run is `41253803685` at `cd17d82`.
+- Pages deployment `41255363101` at `b8d2fcc` passed 66 frontend tests,
+  11 actual browser tests and the WASM smoke checks. The deployed page was opened
+  again with the earlier persistent browser profile: its project survived the
+  update, the supplied icon and Chinese text rendered correctly, and no browser
+  errors occurred. This verifies that UI revision, before the later requested
+  homepage/settings layout changes.
+- The requested navigation rail and categorized settings are implemented in the
+  shared UI. Native Windows Chromium screenshots were compared with the supplied
+  references using the observed 192 DPI. See [design QA](../../design-qa.md).
+  Candidate `6f7bbb7` was deployed by [Pages run 41258979120](https://github.com/dieWehmut/Entwurf/actions/runs/41258979120),
+  with 67 frontend and 12 real browser tests passing. Reusing the earlier browser
+  profile on the public site preserved its project, task and edited node. The
+  updated navigation, four settings categories, themes, mobile layout, icon and
+  dependency notices were verified without browser errors.
+- The Windows NSIS candidate was built and installed from `6f7bbb7`.
+  Installer SHA-256: `f147c0d749b9bbe2346870c4d5c33905daa9e35ca26fbbeb03b25d32550acbb6`.
+  Two actual uninstall/reinstall cycles used that same installer; neither reused
+  the previous installation. Each passed all 12 native UI checks, including real
+  SVG/PNG/PDF export, IR restoration, reversible layout repair, diagnostics save
+  and cancellation, and five pages in both themes.
+- Reinstall cycle 3 preserved all 420 native-project and 19 local-WebUI files;
+  cycle 4 preserved all 494 native-project and 20 local-WebUI files. Every file's
+  SHA-256 was compared before and after uninstall. Both installed processes owned
+  the eager localhost service. Independent HTTP clients reopened the existing
+  public-fixture project and retrieved its identical 7,433-byte image after each
+  reinstall. These images are explicitly public fixtures, not ChatGPT output.
+
 ## Remaining release gates
 
 The installed unified ChatGPT client exposes the ChatGPT product mode and its
 Images page with an editable composer. Its Windows package identity is Codex;
 the product-mode controls, rather than the executable name alone, distinguish
-the supported surface. The normal Edge ChatGPT page is anonymous. Windows is
-currently locked, so live input and original-image capture remain unverified.
-The native UI adapter is being integrated against this existing client.
+the supported surface. The normal Edge ChatGPT page is anonymous. A temporary
+disconnection of the Windows interactive session was confirmed using read-only
+Win32 metadata; after the user unlocked Windows, that same session returned to
+Active with the Default input desktop. No session switching or credentials were
+needed. A subsequent read-only probe exposed an unsupported UIA visibility
+property on the client's top-level window; conservative handling was verified by
+a successful live read-only readiness probe. The interactive session subsequently
+disconnected again. After reconnection, WTS extended session flags and an
+uncloaked, full-screen LockApp window confirmed an actual locked desktop.
+Live generation remains pending an unlocked, continuously connected desktop.
+Every local acceptance attempt so far stopped before the Start click.
 
 No real ChatGPT prompt has been sent in this acceptance run. Local fixtures
 establish protocol behavior, not live generation or account acceptance.
 
-Live Pages deployment, one sparse real-account generation from each of the three
-frontends, final Windows packaging and two complete reinstall cycles are still
-required. Previous desktop reinstall results apply to the previous release only.
+One sparse real-account generation from each frontend is still required. The
+final reviewed result will then be integrated into `main`; repository default
+and Pages deployment policy will be switched to `main` as requested.
 Private source images, account information and generated acceptance images remain
 outside Git.

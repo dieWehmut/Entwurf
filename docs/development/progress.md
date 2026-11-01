@@ -1,5 +1,10 @@
 # v0.1 implementation and acceptance status
 
+This report records the original offline desktop baseline. The later shared web
+app, automated image workflow, revised UI and newer installer results are tracked
+in [automation and shared web acceptance](automation-web-acceptance.md); that
+report takes precedence for the current candidate.
+
 The binding requirements are in [the supplied plan](../plans/entwurf-v0.1.md).
 The user's later instruction authorizes staged commits and pushes to `origin`;
 it overrides the plan's original no-push instruction. Work is on `feat/v0.1`.
