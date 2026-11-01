@@ -113,14 +113,37 @@ public sealed class ImageAutomationSessionTests
             Assert.Equal(1, firstSurface.Submissions);
         }
         fixture.Messages.Clear();
+        var artifactEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deliverArtifact = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.BeforeSend = async (message, cancellation) =>
+        {
+            if (message.GetProperty("type").GetString() != "artifact") return;
+            artifactEntered.TrySetResult();
+            await deliverArtifact.Task.WaitAsync(cancellation);
+        };
         var restoredSurface = new Surface { Recoverable = true };
         await using var restored = fixture.Session(restoredSurface);
         await restored.HandleAsync(Message("status", "recover"), default);
         await restoredSurface.Restored.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await fixture.WaitPhase("recover", "awaiting_import");
-        Assert.Equal(0, restoredSurface.Submissions);
-        Assert.False(restoredSurface.PromptEntered.Task.IsCompleted);
-        Assert.Equal(Png, Convert.FromBase64String(fixture.Last("artifact").GetProperty("bytes_base64").GetString()!));
+        try
+        {
+            await artifactEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            // awaiting_import is sent before artifact I/O/delivery. The matching artifact is
+            // the completion condition, including when transport delivery yields here.
+            var pendingArtifact = fixture.WaitArtifact("recover");
+            Assert.False(pendingArtifact.IsCompleted);
+            deliverArtifact.TrySetResult();
+            var artifact = await pendingArtifact;
+            Assert.Equal("recover", artifact.GetProperty("run_id").GetString());
+            Assert.Equal("task", artifact.GetProperty("task_id").GetString());
+            Assert.Equal("version", artifact.GetProperty("base_version_id").GetString());
+            Assert.Equal(Png, Convert.FromBase64String(artifact.GetProperty("bytes_base64").GetString()!));
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Png)), artifact.GetProperty("sha256").GetString());
+            Assert.Equal(0, restoredSurface.Submissions);
+            Assert.False(restoredSurface.PromptEntered.Task.IsCompleted);
+        }
+        finally { deliverArtifact.TrySetResult(); }
     }
 
     [Fact]
@@ -211,8 +234,9 @@ public sealed class ImageAutomationSessionTests
         {
             await first.HandleAsync(Start("one"), default);
             await fixture.WaitPhase("one", "awaiting_import");
+            var artifact = await fixture.WaitArtifact("one");
             Assert.Equal(1, firstSurface.Submissions);
-            Assert.Equal(Png, Convert.FromBase64String(fixture.Last("artifact").GetProperty("bytes_base64").GetString()!));
+            Assert.Equal(Png, Convert.FromBase64String(artifact.GetProperty("bytes_base64").GetString()!));
             Assert.True(File.Exists(Path.Combine(fixture.Directory, "one.image")));
             Assert.DoesNotContain("fixture image prompt", File.ReadAllText(Path.Combine(fixture.Directory, "runs.json")));
         }
@@ -377,14 +401,25 @@ public sealed class ImageAutomationSessionTests
         public string Directory { get; } = Path.Combine(Path.GetTempPath(), "entwurf-native-session-" + Guid.NewGuid());
         public ConcurrentQueue<JsonElement> Messages { get; } = new();
         public Func<JsonElement, bool>? ThrowOnSend;
-        public ImageAutomationSession Session(Surface surface) => new(Directory, surface, (message, _) =>
+        public Func<JsonElement, CancellationToken, Task>? BeforeSend;
+        public ImageAutomationSession Session(Surface surface) => new(Directory, surface, async (message, cancellation) =>
         {
+            if (BeforeSend is not null) await BeforeSend(message, cancellation);
             Messages.Enqueue(message.Clone());
             if (ThrowOnSend?.Invoke(message) == true) throw new IOException("simulated transport failure after durable staging");
-            return Task.CompletedTask;
         });
         public JsonElement Last(string type, string? id = null) => Messages.Last(m => m.GetProperty("type").GetString() == type && (id is null || m.GetProperty("run_id").GetString() == id));
         public string? LastPhase(string id) => Last("status", id).GetProperty("phase").GetString();
+        public async Task<JsonElement> WaitArtifact(string id)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (true)
+            {
+                var artifact = Messages.LastOrDefault(m => m.GetProperty("type").GetString() == "artifact" && m.GetProperty("run_id").GetString() == id);
+                if (artifact.ValueKind != JsonValueKind.Undefined) return artifact;
+                await Task.Delay(10, timeout.Token);
+            }
+        }
         public async Task WaitPhase(string id, string phase)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

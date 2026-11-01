@@ -89,12 +89,14 @@ public sealed class AutomationProcessTests
             else Assert.Equal(shutdown == "refusal" ? 1 : 0, child.ExitCode);
             Assert.Empty(await child.StandardOutput.ReadToEndAsync());
             Assert.DoesNotContain(secret, await child.StandardError.ReadToEndAsync());
+            // Child termination must release the durable-state capability before any cleanup wait.
+            using (new FileStream(Path.Combine(directory, "adapter.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         }
         finally
         {
             if (!child.HasExited) { child.Kill(true); await child.WaitForExitAsync(); }
             if (parent is not null && !parent.HasExited) { parent.Kill(); await parent.WaitForExitAsync(); }
-            Directory.Delete(directory, true);
+            await TemporaryDirectory.DeleteAsync(directory);
         }
     }
 }
