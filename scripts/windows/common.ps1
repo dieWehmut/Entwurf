@@ -7,8 +7,22 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 function Invoke-CheckedNative {
     param([Parameter(Mandatory = $true)][string]$Command, [string[]]$Arguments = @())
     if ($Command -eq 'pnpm') { $Command = 'pnpm.cmd' }
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
+    $oldPreference = $ErrorActionPreference
+    try {
+        # Resolve failures must terminate even when the caller uses Continue.
+        $native = Get-Command $Command -CommandType Application -ErrorAction Stop
+        # Windows PowerShell 5 turns redirected native stderr into ErrorRecords.
+        # Build tools write ordinary progress there; only their exit code fails a build.
+        $ErrorActionPreference = 'Continue'
+        # A local LASTEXITCODE would shadow the global value native processes update.
+        $global:LASTEXITCODE = $null
+        & $native.Source @Arguments
+        $exitCode = $global:LASTEXITCODE
+        if ($null -eq $exitCode) { throw "$Command could not be started; no native exit code was returned" }
+        if ($exitCode -ne 0) { throw "$Command failed with exit code $exitCode" }
+    } finally {
+        $ErrorActionPreference = $oldPreference
+    }
 }
 
 function Get-ToolOutput {
