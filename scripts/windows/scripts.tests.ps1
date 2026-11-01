@@ -52,3 +52,5 @@ try {
 } finally { Pop-Location }
 Assert-True $failed 'nonzero native exit codes propagate as terminating errors'
 Write-Output 'PASS: prerequisite compatibility, optional OCR, and native failure propagation'
+
+& (Join-Path $PSScriptRoot 'native-output.tests.ps1')
