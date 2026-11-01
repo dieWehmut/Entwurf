@@ -54,10 +54,14 @@ Files: `apps/desktop/src/lib/**`, runtime worker, shared project picker, existin
 Files: `sidecars/chatgpt-browser/**`; native adapter files only if required by the identified signed-in entry.
 
 - [ ] Discover the actual local signed-in surface read-only; identify composer, new response, generation completion and original download controls.
-- [ ] Implement the narrow authenticated transport, durable submit intent and no-replay recovery against deterministic DOM/download fixtures.
-- [ ] Implement exact response/run correlation, original image capture, bounded bytes and cancellation/navigation guards.
-- [ ] Keep the artifact pending until the destination app commits it and sends `artifact_accepted`.
-- [ ] Commit tested adapter chunks; defer all real sends to the coordinated acceptance stage.
+- [x] Implement the narrow authenticated transport, durable submit intent and no-replay recovery against deterministic DOM/download fixtures.
+- [x] Implement exact response/run correlation, original image capture, bounded bytes and cancellation/navigation guards.
+- [x] Keep the artifact pending until the destination app commits it and sends `artifact_accepted`.
+- [x] Commit tested adapter chunks; defer all real sends to the coordinated acceptance stage.
+
+The installed ChatGPT product mode, Images page and composer have been identified
+read-only. Current original-output/download controls remain subject to the live
+acceptance in Task 7; fixture evidence does not complete that discovery step.
 
 ## Task 5: Durable run coordinator and generated-image domain
 
@@ -68,15 +72,16 @@ Files: local service automation modules, core/project/contracts image metadata, 
 - [x] Connect start/status/cancel/download/ack from all three Workspace clients, including refresh recovery and exact-once database import.
 - [x] Verify complete flows with deterministic adapter fixtures before touching the real account.
 - [x] Commit and integrate each reviewed branch, resolving shared schema/Cargo changes explicitly.
+- [ ] Complete the final-review fix for preview/download of staged stale originals, including after stopping observation, while preserving import version guards and ACK boundaries.
 
 ## Task 6: Pages build and deployment
 
 Files: `.github/workflows/**`, WASM/frontend build scripts and deployment acceptance.
 
 - [x] Build WASM and the actual browser app at `/Entwurf/`, testing fonts, worker and assets under the subpath.
-- [x] Add Pages artifact upload/deploy jobs on the stable `feat/v0.1` branch with minimal explicit token permissions.
+- [x] Add Pages artifact upload/deploy jobs with minimal explicit token permissions; trigger automatically on final `main`, with manual dispatch for staged branches.
 - [x] Enable Pages Actions publishing when the deployable artifact is concrete; push and inspect the actual run/deployment status.
-- [ ] Open the live site and verify real project persistence and local companion pairing; record deployment URL/commit.
+- [x] Open the live site and verify real project persistence and local companion pairing; record deployment URL/commit.
 
 ## Task 7: Coordinated real acceptance and final delivery
 
@@ -85,3 +90,8 @@ Files: `.github/workflows/**`, WASM/frontend build scripts and deployment accept
 - [ ] Rebuild the Windows installer and perform two actual uninstall/reinstall cycles, preserving project and generated-image data.
 - [ ] Audit every explicit requirement against real evidence; unresolved account/selector/deployment checks remain incomplete.
 - [ ] Publish concise usage/setup/test evidence, push final integration and only then mark the goal complete.
+
+Intermediate candidate `64dd4e8` passed native reinstall cycles 5 and 6 and Pages
+deployment `41271982734`. The final-review source fix requires updated artifacts;
+these intermediate successes do not complete the final installed or live-account
+gates. See `docs/development/automation-web-acceptance.md` for detailed evidence.

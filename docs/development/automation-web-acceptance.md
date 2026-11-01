@@ -80,6 +80,55 @@ at `3e651c27967b09e5ef6270474f9e48ee7e10110e`; no implementation was copied.
   public-fixture project and retrieved its identical 7,433-byte image after each
   reinstall. These images are explicitly public fixtures, not ChatGPT output.
 
+## Resumed candidate checks — 2026-11-01
+
+The requested compact titlebar and real task sidebar are integrated at `e13e8af`;
+the candidate at `64dd4e8` also contains reviewed native-test repairs. Root reran
+82 frontend tests, all 27 coordinator tests, the real WASM smoke suite, 12 Pages-path
+browser cases and the separate real-browser shell flow. All passed. The shell flow
+covers task selection, keyboard menus, node drafts through Back/Forward, theme and
+project persistence, settings layout and the mobile task sidebar. Root compared
+the newly captured desktop/settings/mobile images with the supplied references.
+
+The first fresh native test run passed 118 of 121 and stopped packaging. One
+assertion read an artifact before its asynchronous delivery; two teardown deletes
+encountered Windows sharing violations. The reviewed test-only repair waits for
+the matching artifact and briefly waits for a conflicting directory handle while
+retaining explicit watcher disposal, process exit and exclusive state-lock checks.
+Actual held-handle tests and a missing-disposal mutation verify those checks. The
+clean final native suite passes 124 of 124, with no skipped tests. The original
+intermittent directory-handle owner was not identified; no production lifecycle
+repair is claimed.
+
+Candidate `64dd4e8` built a new Windows NSIS installer with SHA-256
+`743729c98d86d462445f1a9a9ef505a67e2738df922fb401ca10a927a9207094`.
+Actual reinstall cycles 5 and 6 each passed all 15 native UI checks. The titlebar
+maximized/restored and minimized/restored the real window, an unsaved node draft
+blocked close, and the final close action exited both the app and its owned bridge.
+The offline import/edit/export, IR restoration, layout repair, diagnostics and
+five-page/two-theme checks also passed. Cycle 5 preserved all 572 native-project
+files and 25 local-WebUI files; cycle 6 preserved all 655 and 25 respectively, by
+comparing every file hash before and after uninstall. Root inspected the new
+installed task and settings screenshots. These remain intermediate-candidate
+results; affected artifacts must be rebuilt after the final review fix.
+
+[Pages run 41271982734](https://github.com/dieWehmut/Entwurf/actions/runs/41271982734)
+successfully built, tested and deployed `64dd4e8`, including the compact titlebar.
+The public site reopened its original dedicated browser profile with the exact
+same project, task and r1 version. Its existing origin-bound pairing reached the
+installed candidate's local service without network failures. The status correctly
+reported the locked Windows session. Preparation issued zero generation requests,
+left the original submission-intent state unchanged, and produced a new screenshot
+that root inspected.
+
+The final implementation review found one required workflow gap: an original image
+staged against an older task version could not be previewed or downloaded, and
+stopping observation also blocked its retrieval. The core correctly rejects its
+stale import. A scoped fix is in progress to retain authenticated original-image
+review/download without changing knowledge, acknowledging an import or resending
+the request. Final release acceptance remains open until that fix is reviewed and
+the affected deployed and installed artifacts are verified.
+
 ## Remaining release gates
 
 The installed unified ChatGPT client exposes the ChatGPT product mode and its
@@ -95,7 +144,11 @@ a successful live read-only readiness probe. The interactive session subsequentl
 disconnected again. After reconnection, WTS extended session flags and an
 uncloaked, full-screen LockApp window confirmed an actual locked desktop.
 Live generation remains pending an unlocked, continuously connected desktop.
-Every local acceptance attempt so far stopped before the Start click.
+During the resumed acceptance, both authoritative stores retained one local run
+paused before submission with an explicit native `submit_intent: false` and no
+image or conversation binding. Fresh checks briefly confirmed an unlocked session;
+the session then disconnected and locked before the explicit resume click. The
+existing run and its original intent are preserved for continuation.
 
 No real ChatGPT prompt has been sent in this acceptance run. Local fixtures
 establish protocol behavior, not live generation or account acceptance.

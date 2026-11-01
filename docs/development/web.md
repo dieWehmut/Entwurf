@@ -47,7 +47,7 @@ pnpm exec playwright test --config playwright.web.config.ts --workers 1
 
 ## GitHub Pages
 
-`.github/workflows/pages.yml` 在 `main` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。仓库默认分支为 `main`，Pages 的发布来源设为 GitHub Actions。部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许 `main` 发布。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
+`.github/workflows/pages.yml` 在 `main` 更新或手动触发时构建、测试并上传 `apps/desktop/dist`。目标默认分支为 `main`，将在最终验收完成后切换；当前状态见[自动化验收记录](automation-web-acceptance.md)。Pages 的发布来源设为 GitHub Actions，部署任务使用 `github-pages` 环境和 `pages: write`、`id-token: write` 权限；环境规则须允许 `main` 发布。项目路径为 `/Entwurf/`，不需要 `gh-pages` 分支。
 
 本工作流只发布静态应用与引擎资源，不运行用户任务、不上传本地资料，也不连接 ChatGPT 账号。
 
@@ -60,6 +60,8 @@ pnpm exec playwright test --config playwright.web.config.ts --workers 1
 本机 HTTP 页面的自动化连接和扩展设置使用服务实际监听端口，支持 CLI `--port`。访问地址仅允许 HTTP 回环主机，不接受凭据、额外路径、查询或片段；静态网页配对与桌面内置服务继续使用默认 48123。
 
 启动请求携带唯一运行 ID、任务 ID 和当前知识版本 ID。状态轮询和页面刷新只读取已有运行，不重复提交。停止观察不会撤回已经发送的 ChatGPT 请求。图片就绪且仍匹配当前任务与知识版本时自动导入一次：校验下载哈希、提交项目存储、再次读取并校验已持久化的图片字节，再确认自动化服务。失败后保留手动重试，不随轮询无限重试；版本已变化时不自动入库。若确认请求中断，重试仍须通过已保存字节的核心校验，损坏或缺失时不释放服务端副本。失败的图片导入会清理临时上传。暂停和等待导入的运行均可停止，明确的提交拒绝不会留下虚假的排队运行。
+
+Windows 适配器明确记录尚未发送的暂停运行，可以通过「继续未发送的任务」显式恢复。须使用原提示、原任务和原知识版本；服务端与适配器分别校验身份，并先保存恢复请求再操作客户端。断线会清除界面的可恢复状态，直到适配器重新确认。重复恢复请求只返回已有状态；响应丢失或发送状态不确定时保持观察，不自动重新输入或发送。浏览器扩展不提供此原生恢复入口。
 
 生成图片显示在任务页与结果页，标明 ChatGPT 来源、运行、基础知识版本和文件哈希，可下载原始字节。生成图片不修改知识节点、来源锚点或知识版本。仓库自动化 UI 测试使用本地响应夹具配合真实 WASM/IndexedDB，验证单次提交、刷新续接、保存后确认及原图下载，不调用真实 ChatGPT。
 
