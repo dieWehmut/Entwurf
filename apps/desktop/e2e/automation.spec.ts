@@ -4,6 +4,11 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 for (const scenario of ["success", "corrupt", "stale", "reject", "paused", "unknown"] as const) test(`automation recovery ${scenario}: real persistence and bounded retries`, async ({ page }) => {
+  const pageErrors: string[] = [];
+  if (scenario === "stale") {
+    page.on("pageerror", error => pageErrors.push(error.message));
+    page.on("console", message => { if (message.type() === "error") pageErrors.push(message.text()); });
+  }
   const bytes = await readFile(fileURLToPath(new URL("../../../fixtures/public/ingestion/bilingual.png", import.meta.url)));
   const sha = createHash("sha256").update(bytes).digest("hex");
   let starts = 0, acks = 0, ready = false, storedBeforeAck = false, artifactRequests = 0, lists = 0;
@@ -73,23 +78,56 @@ for (const scenario of ["success", "corrupt", "stale", "reject", "paused", "unkn
     await page.getByRole("button", {name: "保存节点修改"}).click();
     await expect(page.getByText("保存节点完成", {exact: true})).toBeVisible();
     await tasks(); ready = true;
-    await expect(page.getByRole("button", {name: "继续导入图片"})).toBeVisible();
-    const uploads = () => page.evaluate(async () => {
+    await expect(page.getByRole("button", {name: "查看原始图片"})).toBeVisible();
+    await expect(page.getByRole("button", {name: "继续导入图片"})).toHaveCount(0);
+    const persistedFiles = () => page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>(resolve => {const req=indexedDB.open("entwurf.workspace.v1");req.onsuccess=()=>resolve(req.result);});
-      return new Promise<number>(resolve=>{const req=db.transaction("files").objectStore("files").getAllKeys();req.onsuccess=()=>{db.close();resolve(req.result.filter(key=>String(key).startsWith("/uploads/")).length);};});
+      return new Promise<Record<string, number[]>>(resolve => {
+        const files: Record<string, number[]> = {};
+        const req = db.transaction("files").objectStore("files").openCursor();
+        req.onsuccess = () => { const entry = req.result; if (!entry) {db.close();resolve(files);return;} files[String(entry.key)] = Array.from(entry.value as Uint8Array); entry.continue(); };
+      });
     });
-    const before = await uploads(); expect(artifactRequests).toBe(0);
-    for (let attempt=0;attempt<2;attempt++) {
-      await page.getByRole("button", {name: "继续导入图片"}).click();
-      await expect(page.getByRole("alert").filter({hasText:/stale|version/i})).toBeVisible();
-      expect(await uploads()).toBe(before);
-    }
-    expect(acks).toBe(0);
-    await expect(page.getByRole("button", {name:"停止观察"})).toBeEnabled();
+    const before = await persistedFiles(); expect(artifactRequests).toBe(0);
+    const review = async () => {
+      await page.getByRole("button", {name: "查看原始图片"}).click();
+      const preview = page.getByRole("img", {name: /原始生成图片/});
+      await expect(preview).toBeVisible();
+      await expect.poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      await expect(page.getByText(`任务：${job!.task_id} · SHA-256：${sha}`, {exact:true})).toBeVisible();
+      await expect(page.getByText(`运行：${job!.run_id} · 基础版本：${job!.base_version_id}`, {exact:true})).toBeVisible();
+      const download = page.waitForEvent("download");
+      await page.getByRole("link", {name: "下载原始图片"}).click();
+      expect(await readFile((await (await download).path())!)).toEqual(bytes);
+    };
+    await review();
+    const initialLists = lists;
+    await expect.poll(() => lists, {timeout: 10_000}).toBeGreaterThanOrEqual(initialLists + 2);
+    expect(artifactRequests).toBe(1);
+    await page.reload(); await tasks(); await review();
+    expect(artifactRequests).toBe(2);
     await page.getByRole("button", {name:"停止观察"}).click();
     await expect(page.getByText("观察已停止",{exact:true})).toBeVisible();
+    await expect(page.getByRole("link", {name:"下载原始图片"})).toBeVisible();
+    expect(artifactRequests).toBe(2);
+    await page.reload(); await tasks(); await review();
+    expect(artifactRequests).toBe(3);
+    expect(await persistedFiles()).toEqual(before);
+    expect(acks).toBe(0); expect(starts).toBe(1);
+    await expect(page.getByRole("button", {name:"继续导入图片"})).toHaveCount(0);
     await page.getByLabel("图片生成提示").fill("another explicit prompt");
     await expect(page.getByRole("button",{name:"启动一次图片生成"})).toBeEnabled();
+    expect(page.url()).toContain("http://127.0.0.1:");
+    await expect(page).toHaveTitle(/Entwurf/);
+    await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+    await page.getByRole("img", {name:/原始生成图片/}).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "/tmp/entwurf-retained-original-desktop.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", {name:"关闭任务侧栏"}).click();
+    await page.getByRole("img", {name:/原始生成图片/}).scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: "/tmp/entwurf-retained-original-mobile.png" });
+    expect(pageErrors).toEqual([]);
     return;
   }
   ready = true;
