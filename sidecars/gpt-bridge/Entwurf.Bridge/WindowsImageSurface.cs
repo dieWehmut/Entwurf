@@ -16,13 +16,13 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 {
     readonly object uiGate = new();
     UIA3Automation? automation;
-    sealed record Target(nint Handle, int ProcessId, DateTime Started);
+    NativeImageTarget? sourceTarget;
     sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId);
     sealed record Binding(int Version, long Window, int ProcessId, long ProcessStartedUtcTicks, string DocumentId,
         string EditId, string[] BeforeIds, string PromptSha256, string? UserId, NativeGeneratedImage? Result, string? PreviewRootId);
-    sealed class Conversation(Target target, string documentId, string editId, HashSet<string> before, string? prompt, string promptSha256) : PreparedImageConversation
+    sealed class Conversation(NativeImageTarget target, string documentId, string editId, HashSet<string> before, string? prompt, string promptSha256) : PreparedImageConversation
     {
-        public Target Target { get; } = target;
+        public NativeImageTarget Target { get; } = target;
         public string DocumentId { get; } = documentId;
         public string EditId { get; } = editId;
         public HashSet<string> Before { get; } = before;
@@ -40,10 +40,12 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         if (!DesktopUnlocked()) return new ImageSurfaceProbe(false, "windows_locked");
         lock (uiGate)
         {
-            var target = Discover();
-            var frame = Capture(target, cancellation);
-            return ChatGptProduct(frame) && GlobalImages(frame) is not null
-                ? new ImageSurfaceProbe(true, "ready") : new ImageSurfaceProbe(false, "chatgpt_mode_required");
+            return ProbeSource(DiscoverTargets(), GetForegroundWindow(), target =>
+            {
+                var frame = Capture(target, cancellation);
+                return ChatGptProduct(frame) && GlobalImages(frame) is not null
+                    ? new ImageSurfaceProbe(true, "ready") : new ImageSurfaceProbe(false, "chatgpt_mode_required");
+            });
         }
     }), cancellation);
 
@@ -57,38 +59,57 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 
     public async Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken cancellation)
     {
-        Target target;
+        var preparation = new NativeImagePreparation();
+        var frames = new Dictionary<NativeImageTarget, Frame>();
+        NativeImageFrame ReadFrame(NativeImageTarget target)
+        {
+            var frame = Capture(target, cancellation);
+            frames[target] = frame;
+            return new(frame.Nodes, frame.DocumentId);
+        }
         lock (uiGate)
         {
+            cancellation.ThrowIfCancellationRequested();
             if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
-            target = Discover();
-            Focus(target);
-            var frame = Capture(target, cancellation);
-            if (!ChatGptProduct(frame)) throw new ImageAutomationException("chatgpt_mode_required");
-            if (ImageHome(frame) && WritableEdit(frame) is { } existing && ReadValue(frame.Elements[existing.Id]).Length != 0)
-                throw new ImageAutomationException("user_changed_composer");
-            var images = GlobalImages(frame) ?? throw new ImageAutomationException("image_surface_unavailable");
-            SafeInteraction(target, cancellation);
-            Invoke(frame.Elements[images.Id]); // The verified product-level Images page creates a new conversation on submit.
+            var source = Discover();
+            preparation.Begin(source, DiscoverTargets(), ReadFrame, target =>
+            {
+                sourceTarget = target;
+                Focus(target);
+                OpenNewWindow(target, cancellation);
+            }, cancellation);
         }
+        NativeImageTarget? focused = null;
         var deadline = Stopwatch.StartNew();
         while (deadline.Elapsed < TimeSpan.FromSeconds(35))
         {
             cancellation.ThrowIfCancellationRequested();
             lock (uiGate)
             {
-                SafeInteraction(target, cancellation);
-                var frame = Capture(target, cancellation);
-                if (HasLogin(frame)) throw new ImageAutomationException("chatgpt_login_required");
-                if (ImageHome(frame) && WritableEdit(frame) is { } edit)
+                var edit = preparation.Advance(DiscoverTargets(), target =>
                 {
-                    if (ReadValue(frame.Elements[edit.Id]).Length != 0) throw new ImageAutomationException("user_changed_composer");
+                    if (focused is null) { Focus(target); focused = target; }
+                    SafeInteraction(target, cancellation);
+                    return ReadFrame(target);
+                }, (target, node) =>
+                {
+                    var element = frames[target].Elements[node.Id];
+                    return element.Patterns.Value.IsSupported && !element.Patterns.Value.Pattern.IsReadOnly.Value ? ReadValue(element) : null;
+                }, (target, id) =>
+                {
+                    SafeInteraction(target, cancellation);
+                    Invoke(frames[target].Elements[id]);
+                }, cancellation);
+                if (edit is not null)
+                {
+                    var target = preparation.Target!;
+                    var frame = frames[target];
                     return new Conversation(target, frame.DocumentId, edit.Id, frame.Nodes.Select(x => x.Id).ToHashSet(StringComparer.Ordinal), run.Prompt, run.PromptSha256);
                 }
             }
             await Task.Delay(500, cancellation);
         }
-        throw new ImageAutomationException("image_surface_unavailable");
+        throw new ImageAutomationException(preparation.Target is null ? "independent_window_unavailable" : "image_surface_unavailable");
     }
 
     public async Task WriteAndVerifyPromptAsync(PreparedImageConversation conversation, string prompt, CancellationToken cancellation)
@@ -279,7 +300,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var binding = saved.Deserialize<Binding>(ImageAutomationJson.Options) ?? throw new ImageAutomationException("submission_uncertain");
         if (record.SubmitIntent is not true || binding.Version != 1 || binding.PromptSha256 != record.PromptSha256 || binding.BeforeIds.Length > 4096
             || binding.Window == 0 || binding.ProcessId <= 0) throw new ImageAutomationException("submission_uncertain");
-        var target = new Target((nint)binding.Window, binding.ProcessId, new DateTime(binding.ProcessStartedUtcTicks, DateTimeKind.Utc));
+        var target = new NativeImageTarget((nint)binding.Window, binding.ProcessId, new DateTime(binding.ProcessStartedUtcTicks, DateTimeKind.Utc));
         var run = new Conversation(target, binding.DocumentId, binding.EditId, binding.BeforeIds.ToHashSet(StringComparer.Ordinal), null, binding.PromptSha256)
             { Submitted = true, UserId = binding.UserId, Result = binding.Result, PreviewRootId = binding.PreviewRootId };
         // A preview opened by this run can hide the source transcript from UIA. Close only that exact bound preview,
@@ -351,7 +372,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         return candidates.Length == 1 ? candidates[0] : null;
     }
 
-    Frame Capture(Target target, CancellationToken cancellation, Conversation? conversation = null)
+    Frame Capture(NativeImageTarget target, CancellationToken cancellation, Conversation? conversation = null)
     {
         VerifyTarget(target);
         automation ??= new UIA3Automation { ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2) };
@@ -368,7 +389,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (nodes.Count >= 4096 || watch.Elapsed > TimeSpan.FromSeconds(7)) throw new ImageAutomationException("image_surface_unavailable");
             var element = item.Element;
             var id = string.Join(".", element.Properties.RuntimeId.Value);
-            if (!elements.TryAdd(id, element)) continue;
+            if (!elements.TryAdd(id, element)) throw new ImageAutomationException("image_surface_unavailable");
             var role = element.ControlType.ToString();
             // Only transient, bounded matching values; account fields, edit values and arbitrary message text are never exported.
             var name = "";
@@ -395,9 +416,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 if (queue.Count > 4096) throw new ImageAutomationException("image_surface_unavailable");
             }
         }
-        var documents = nodes.Where(x => x.Role == "Document").ToArray();
-        if (documents.Length != 1) throw new ImageAutomationException("image_surface_unavailable");
-        return new(nodes, elements, documents[0].Id);
+        var scoped = NativeImageFrame.Capture(nodes);
+        return new(scoped.Nodes.ToList(), scoped.Nodes.ToDictionary(x => x.Id, x => elements[x.Id], StringComparer.Ordinal), scoped.DocumentId);
     }
 
     internal static (bool Visible, bool Enabled) ReadAvailability(IAutomationProperty<bool> offscreen, IAutomationProperty<bool> enabled)
@@ -416,9 +436,22 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             or "发送" or "Send" or "Send prompt" or "Send message" or "关闭图像预览" or "关闭图片预览" or "Close image preview" or "关闭" or "Close"
             or "你说：" or "You said:" or "ChatGPT 说：" or "ChatGPT said:";
 
-    static Target Discover()
+    internal NativeImageTarget DiscoverSource(IReadOnlyList<NativeImageTarget> targets, nint foreground)
+        => NativeImagePreparation.SelectSource(targets, sourceTarget, foreground);
+
+    internal ImageSurfaceProbe ProbeSource(IReadOnlyList<NativeImageTarget> targets, nint foreground, Func<NativeImageTarget, ImageSurfaceProbe> read)
     {
-        var candidates = new List<Target>();
+        var target = DiscoverSource(targets, foreground);
+        var probe = read(target);
+        if (probe.Available) sourceTarget = target;
+        return probe;
+    }
+
+    NativeImageTarget Discover() => DiscoverSource(DiscoverTargets(), GetForegroundWindow());
+
+    static List<NativeImageTarget> DiscoverTargets()
+    {
+        var candidates = new List<NativeImageTarget>();
         foreach (var process in Process.GetProcessesByName("ChatGPT"))
         {
             using (process)
@@ -437,9 +470,89 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException) { }
             }
         }
-        if (candidates.Count != 1) throw new ImageAutomationException(candidates.Count == 0 ? "chatgpt_not_found" : "ambiguous_chatgpt_windows");
-        return candidates[0];
+        return candidates;
     }
+    void OpenNewWindow(NativeImageTarget target, CancellationToken cancellation)
+    {
+        var elements = new Dictionary<string, AutomationElement>(StringComparer.Ordinal);
+        IReadOnlyList<NativeMenuNode> ReadMenu()
+        {
+            SafeInteraction(target, cancellation);
+            var root = automation!.FromHandle(target.Handle);
+            var walker = automation.TreeWalkerFactory.GetControlViewWalker();
+            var nodes = new List<NativeMenuNode>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var queue = new Queue<(AutomationElement Element, string? Parent)>();
+            queue.Enqueue((root, null));
+            var watch = Stopwatch.StartNew();
+            while (queue.TryDequeue(out var item))
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (nodes.Count >= 4096 || watch.Elapsed > TimeSpan.FromSeconds(3)) throw new ImageAutomationException("independent_window_unavailable");
+                var element = item.Element;
+                var id = string.Join(".", element.Properties.RuntimeId.Value);
+                if (!seen.Add(id)) throw new ImageAutomationException("independent_window_unavailable");
+                elements[id] = element;
+                var role = element.ControlType.ToString();
+                var name = "";
+                if (role is "Menu" or "MenuItem")
+                {
+                    var label = element.Name;
+                    if (label is "文件" or "File" or "新建窗口" or "New Window") name = label;
+                }
+                var availability = ReadAvailability(element.Properties.IsOffscreen, element.Properties.IsEnabled);
+                var automationId = element.Properties.AutomationId.ValueOrDefault ?? "";
+                if (automationId is not ("application-menu-content" or "application-menu-trigger-file-menu" or "application-menu-trigger-edit-menu"
+                    or "application-menu-trigger-view-menu" or "application-menu-trigger-help-menu")) automationId = "";
+                var ariaRole = element.Properties.AriaRole.ValueOrDefault == "menubar" ? "menubar" : "";
+                nodes.Add(new(new(id, item.Parent, role, name, availability.Visible, availability.Enabled),
+                    element.Patterns.ExpandCollapse.IsSupported, element.Patterns.Invoke.IsSupported, automationId, ariaRole));
+                var child = walker.GetFirstChild(element);
+                while (child is not null)
+                {
+                    queue.Enqueue((child, id));
+                    if (queue.Count > 4096) throw new ImageAutomationException("independent_window_unavailable");
+                    child = walker.GetNextSibling(child);
+                }
+            }
+            return nodes;
+        }
+        NativeWindowMenu.CreateWindow(ReadMenu, id =>
+        {
+            SafeInteraction(target, cancellation);
+            var file = elements[id];
+            if (file.ControlType != ControlType.MenuItem || file.AutomationId != "application-menu-trigger-file-menu"
+                || file.Name is not ("文件" or "File") || !file.IsEnabled || file.IsOffscreen || !file.Patterns.ExpandCollapse.IsSupported)
+                throw new ImageAutomationException("independent_window_unavailable");
+            file.Patterns.ExpandCollapse.Pattern.Expand();
+        }, id =>
+        {
+            SafeInteraction(target, cancellation);
+            var command = elements[id];
+            if (command.ControlType != ControlType.MenuItem || command.Name is not ("新建窗口" or "New Window"))
+                throw new ImageAutomationException("independent_window_unavailable");
+            var walker = automation!.TreeWalkerFactory.GetControlViewWalker();
+            var parent = walker.GetParent(command);
+            var menuFound = false;
+            for (var depth = 0; parent is not null && depth < 32; depth++, parent = walker.GetParent(parent))
+            {
+                if (parent.ControlType == ControlType.Document) break;
+                if (parent.ControlType == ControlType.Menu && parent.AutomationId == "application-menu-content" && parent.Name is "文件" or "File")
+                { menuFound = true; break; }
+            }
+            if (!menuFound) throw new ImageAutomationException("independent_window_unavailable");
+            Invoke(command);
+        }, id =>
+        {
+            try
+            {
+                SafeInteraction(target, CancellationToken.None);
+                elements[id].Patterns.ExpandCollapse.Pattern.Collapse();
+            }
+            catch (Exception error) when (error is ImageAutomationException or COMException or InvalidOperationException or FlaUIException or TimeoutException) { }
+        }, cancellation);
+    }
+
     static string? PackageVersion(Process process)
     {
         uint length = 0;
@@ -452,21 +565,21 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var match = Regex.Match(package, @"^OpenAI\.(?:ChatGPT(?:-Desktop)?|Codex)_([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)_(?:x64|arm64|x86|neutral)__2p2nqsd0c76g0$", RegexOptions.CultureInvariant);
         return match.Success ? match.Groups[1].Value : null;
     }
-    static void VerifyTarget(Target target)
+    static void VerifyTarget(NativeImageTarget target)
     {
         if (!IsWindow(target.Handle)) throw new ImageAutomationException("conversation_changed");
         GetWindowThreadProcessId(target.Handle, out var id);
         using var process = Process.GetProcessById(target.ProcessId);
         if (id != target.ProcessId || process.StartTime.ToUniversalTime() != target.Started) throw new ImageAutomationException("conversation_changed");
     }
-    static void SafeInteraction(Target target, CancellationToken cancellation)
+    static void SafeInteraction(NativeImageTarget target, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
         VerifyTarget(target);
         if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
         if (IsIconic(target.Handle) || GetForegroundWindow() != target.Handle) throw new ImageAutomationException("foreground_unavailable");
     }
-    static void Focus(Target target)
+    static void Focus(NativeImageTarget target)
     {
         if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
         if (IsIconic(target.Handle)) ShowWindow(target.Handle, 9);
@@ -479,14 +592,26 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         finally { if (attached) AttachThreadInput(current, foregroundThread, false); }
         if (GetForegroundWindow() != target.Handle) throw new ImageAutomationException("foreground_unavailable");
     }
-    AutomationElement? SaveDialog(Target target)
+    internal static bool OwnedSaveDialog(nint window, nint targetWindow, Func<nint, nint> owner)
+    {
+        var visited = new HashSet<nint> { window };
+        for (var depth = 0; depth < 32; depth++)
+        {
+            window = owner(window);
+            if (window == 0 || !visited.Add(window)) return false;
+            if (window == targetWindow) return true;
+        }
+        return false;
+    }
+
+    AutomationElement? SaveDialog(NativeImageTarget target)
     {
         var dialogs = new List<nint>();
         EnumWindows((window, _) =>
         {
             if (!IsWindowVisible(window)) return true;
-            GetWindowThreadProcessId(window, out var id);
-            if (id != target.ProcessId && GetWindow(window, 4) != target.Handle) return true;
+            // A shared process can host unrelated conversations and Save As dialogs.
+            if (!OwnedSaveDialog(window, target.Handle, handle => GetWindow(handle, 4))) return true;
             var element = automation!.FromHandle(window);
             if (element.Name is "另存为" or "Save As") dialogs.Add(window);
             return true;

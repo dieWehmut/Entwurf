@@ -29,6 +29,13 @@ public sealed class NativeImagePageTests
         Assert.False(NativeImagePage.IsHome(unrelatedPicker, "composer"));
     }
 
+    [Fact]
+    public void An_images_page_with_a_reappearing_old_transcript_cannot_authorize_prompt_input()
+    {
+        var changed = Home().Append(new NativeImageNode("old-turn", "main", "Text", "你说：", Speaker: "user")).ToArray();
+        Assert.False(NativeImagePage.IsHome(changed, "composer"));
+    }
+
     [Theory]
     [InlineData("OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0", true)]
     [InlineData("OpenAI.ChatGPT_1.2.3.4_x64__2p2nqsd0c76g0", true)]

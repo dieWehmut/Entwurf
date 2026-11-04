@@ -4,6 +4,7 @@ public static class NativeImagePage
 {
     public static bool IsHome(IReadOnlyList<NativeImageNode> nodes, string editId)
     {
+        if (HasTranscriptOrGeneration(nodes)) return false;
         var map = nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
         if (!map.TryGetValue(editId, out var edit) || edit.Role != "Edit" || !edit.Visible || !edit.Enabled) return false;
         if (nodes.Count(x => x.ParentId == edit.ParentId && x.Role == "Button" && x.Visible && IsModelPicker(x.Name)) != 1) return false;
@@ -23,6 +24,10 @@ public static class NativeImagePage
         }
         return false;
     }
+
+    internal static bool HasTranscriptOrGeneration(IReadOnlyList<NativeImageNode> nodes) => nodes.Any(x =>
+        x.Speaker is not null || x.Name is "你说：" or "You said:" or "ChatGPT 说：" or "ChatGPT said:"
+        || NativeImageEvidence.IsGenerating(x.Name));
 
     public static bool IsModelPicker(string name) => name is "选择 ChatGPT 模型" or "Choose a ChatGPT model" or "Select ChatGPT model";
 }
