@@ -115,6 +115,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
   }
   function openProject(create: boolean) {
     if (!create && client.projects) {
+      if (window.innerWidth <= 760) setSidebarOpen(false);
       setProjectFormOpen(true);
       void run("读取项目列表", async () => { setProjects(await client.projects!()); return null; }, () => requestAnimationFrame(() => document.getElementById("project-picker")?.focus()));
       return;

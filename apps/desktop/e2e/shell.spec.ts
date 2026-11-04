@@ -91,6 +91,15 @@ test('compact shell keeps real browser tasks, keyboard menus, drafts and setting
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.getByRole('button', { name: '切换任务侧栏', exact: true }).click();
   await page.screenshot({ path: '/tmp/entwurf-task8-qa/mobile-tasks.png', fullPage: false, animations: 'disabled' });
+  await page.getByRole('button', { name: '切换项目', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: '任务侧栏' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '选择项目' })).toBeFocused();
+  await page.screenshot({ path: '/tmp/entwurf-task8-qa/mobile-project-picker.png', fullPage: false, animations: 'disabled' });
+  await page.getByRole('button', { name: '概率论 · 真实浏览器工作区', exact: true }).click();
+  await expect(page.getByText('打开项目完成', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('当前任务')).toContainText('随机事件与样本空间');
+  await expect(page.locator('.project-manager')).not.toHaveAttribute('open');
+  await page.getByRole('button', { name: '切换任务侧栏', exact: true }).click();
   await page.getByRole('button', { name: '切换到任务 随机事件与样本空间', exact: true }).click();
   await expect(page.getByRole('complementary', { name: '任务侧栏' })).toHaveCount(0);
   await page.getByRole('button', { name: '打开设置', exact: true }).click();

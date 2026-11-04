@@ -55,3 +55,13 @@ No remaining actionable P0/P1/P2 visual issues were found in the scoped shared-U
 - The Windows acceptance driver's cycle-zero project entry now uses File → Open/New Project; all existing assertions and task/chapter selectors are preserved. `node --check` passed.
 
 The local QA server remains available on port 1448. No deployment or push was performed.
+
+## Review follow-up: mobile project picker
+
+The Important finding in `task8-review.md` is resolved. At widths ≤760 px, opening the saved-project picker now closes the task sidebar before focusing the picker. Desktop sidebar behavior is unchanged.
+
+The regression was added to the existing real-WASM shell flow, and demonstrated failing on the original implementation (the sidebar remained present). After the fix it passes at **390 × 844**: explicitly open sidebar → click **切换项目** → verify sidebar gone and picker focused → click the saved project without forced input → observe the actual open completion and retained task → verify the project form closes. The flow then reopens the sidebar and continues existing task/settings checks.
+
+`/tmp/entwurf-task8-qa/mobile-project-picker.png` is the post-fix screenshot, opened and inspected: the saved-project button is visible and unobstructed. The original desktop/reference comparisons remain applicable; this follow-up changes only narrow-screen sidebar dismissal.
+
+Targeted follow-up verification: `pnpm exec vitest run src/Shell.test.tsx` (**8 passed**), `pnpm exec tsc -b`, `pnpm exec vite build --base=/Entwurf/`, and the existing real-WASM shell browser case (**1 passed**). The 99-test suite and six broader browser cases above are the preceding `be3a20b` verification and were not repeated for this one-line fix. The separate final follow-up commit hash is recorded in `/home/han/project/Entwurf/.superpowers/sdd/2026-11-01-automation-web/task8-report.md`. No installed/account/backend/protocol state changed.
