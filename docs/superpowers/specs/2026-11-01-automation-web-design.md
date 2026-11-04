@@ -132,3 +132,19 @@ automatically imported and visible from all three entry points using the existin
 account; a successful deployed Pages Actions run and live site smoke test; and two
 actual final desktop uninstall/reinstall cycles preserving user projects. Build/mock
 success alone cannot satisfy any real-account or installed-app requirement.
+
+## Home and settings references — 2026-11-04
+
+The supplied homepage and settings screenshots define the next shared-shell
+refinement. Use their compact titlebar, narrow icon navigation, secondary sidebar,
+subdued surfaces, centered content and spacing with Entwurf's own content and
+existing controls. The homepage's primary input must create a real task; creating
+and opening projects, entering an optional chapter and selecting saved tasks must
+remain available. Settings must provide a searchable category sidebar and grouped
+rows for the existing theme, OCR, ChatGPT, storage and diagnostic controls.
+
+Native minimize, maximize/restore and close icons must be visible at the top right
+and invoke the actual Tauri window. Keep the existing unsaved-draft close protection.
+The browser uses its host's window controls. Verify both themes, narrow viewports,
+keyboard operation and real workspace persistence, and compare rendered screenshots
+with the user's references before including the UI in the next Windows installer.

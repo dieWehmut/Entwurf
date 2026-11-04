@@ -91,7 +91,7 @@ Files: `.github/workflows/**`, WASM/frontend build scripts and deployment accept
 
 - [ ] Use one bounded public image-generation prompt from each of Pages, local WebUI and the installed desktop, on the same existing account; verify returned original images appear and persist in the correct database.
 - [ ] Record run IDs/hashes/timing privately, with no account identifiers or private images committed.
-- [x] Rebuild the Windows installer and perform two actual uninstall/reinstall cycles, preserving project and generated-image data.
+- [ ] Rebuild the final Windows installer after the independent-window and reference-UI updates, then perform two actual uninstall/reinstall cycles, preserving project and generated-image data. Earlier candidate `2f27ef9` passed cycles 7 and 8; those do not establish acceptance of the later changes.
 - [ ] Audit every explicit requirement against real evidence; unresolved account/selector/deployment checks remain incomplete.
 - [ ] Publish concise usage/setup/test evidence, push final integration and only then mark the goal complete.
 
@@ -100,3 +100,22 @@ deployment `41274652492`, followed by preserved-project/connection preparation i
 all three entry points. The real-account generation and final main/default-branch
 gates remain open while the Windows session is locked. See
 `docs/development/automation-web-acceptance.md` for detailed evidence.
+
+## Task 8: Home and settings reference refinement — 2026-11-04
+
+The user supplied a settings screenshot and a homepage screenshot and requested
+a visible minimize icon. These refine the existing shared application before the
+next installer acceptance.
+
+- [ ] Match the reference's compact titlebar, narrow icon rail, task sidebar and
+  spacious, centered homepage input while retaining actual project and task flows.
+- [ ] Add functional settings search and a categorized sidebar, with centered
+  headings and grouped setting rows. Preserve theme, OCR, ChatGPT connection,
+  storage, diagnostics and license actions.
+- [ ] Keep native minimize, maximize/restore and close controls clearly visible
+  and connected to the actual window, including the existing draft-close guard.
+- [ ] Verify dark/light and narrow layouts, keyboard interactions, real project
+  persistence and changed creation/settings flows. Compare rendered home and
+  settings screenshots against the supplied references and update `design-qa.md`.
+- [ ] Review and integrate the UI, deploy the shared web app, then include this
+  exact source in Task 7's Windows installation and acceptance.
