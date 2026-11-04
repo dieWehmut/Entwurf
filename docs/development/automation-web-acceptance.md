@@ -205,37 +205,83 @@ and initial-window-loading findings. Updated installer acceptance remains
 pending. No real prompt was sent and no live
 image-generation acceptance is claimed.
 
+## Reference UI and renewed installer acceptance — 2026-11-05
+
+The new homepage and settings references, including the explicit minimize-icon
+request, are implemented and independently reviewed. The shared UI centers real
+task creation, retains its task sidebar and project menu, and provides searchable
+settings categories. A review found that the mobile sidebar covered the saved
+project picker; the fix passed a regression that first failed before the change,
+then directly selected the saved project at 390 × 844. The integrated source is
+`bd83b071be16c2abf352cc167514e2fe8f5d89f1`. See [design QA](../../design-qa.md).
+
+The earlier native tokio compilation failure did not reproduce in a clean
+diagnostic release build at `b95682f`; its original cause remains unknown. The
+final `bd83b07` NSIS build then passed formatting, contract checks, all **173
+Windows .NET tests**, frontend/assets/notices preparation and native packaging.
+Its frozen installer SHA-256 is
+`f312cd3d99e410afed7590153868b7aa584295860f9e46203e78e7065c298abe`.
+
+Actual uninstall/reinstall cycles **9 and 10 each passed all 15 checks**. Both
+applied the new installer. Real minimize/restore, maximize/restore, draft-close
+protection, clean app/bridge exit, offline import/edit/export, IR restoration,
+layout undo and diagnostics passed. All five pages rendered in both themes
+without page errors. Root inspected the installed home and settings screenshots.
+Cycle 9 preserved every hash of **928 project files and 32 local-WebUI files**;
+cycle 10 preserved **1027 and 32**, respectively, before and after uninstall.
+Fixture image checks remain public test images, not account-generated output.
+
+Both installed executables have SHA-256
+`aedcf29fcd52420d91ef8256cd3701800fb151b6b2bb1f450fa3cb06e6caf8d6`.
+The frozen post-build executable differs only in the three-byte Tauri bundle
+marker: the bundler applies the NSIS marker during packaging and restores the
+original afterward ([Tauri CLI 2.12.4 source](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle.rs#L212)). A complete binary comparison, matching upstream source,
+generated NSIS input and separate installed-payload copy are preserved in the
+private `artifacts/release-resumed-bd83b07` evidence. The original build receipt
+and artifacts were retained unchanged.
+
+[Pages run 41862954637](https://github.com/dieWehmut/Entwurf/actions/runs/41862954637)
+successfully built and deployed the same source. Its fresh **99 frontend tests**,
+**12 actual browser cases** and WASM smoke checks passed. The deployed JavaScript
+exactly matches the reviewed production preview by SHA-256. The original Pages
+browser profile retained its project, task and r1 knowledge version, and reached
+the final installed local service without network failures or generation requests.
+
+The local WebUI reopened and refreshed its original SQLite task and paused run,
+retaining the same version, prompt hash and byte-identical intent/observer files.
+Preparation issued zero automation writes. The desktop also reopened its original
+public-source task. Reinstall fixtures had created newer global-style snapshots,
+so its never-submitted preparation metadata was refreshed from r9 to r13 only
+after proving identical semantic knowledge and project-style hashes, and absence
+of any native submission intent or task in either run store. The prior metadata
+was backed up; no existing run was rebound. Native preparation created no intent
+or generation request.
+
 ## Remaining release gates
 
-The installed unified ChatGPT client exposes the ChatGPT product mode and its
-Images page with an editable composer. Its Windows package identity is Codex;
-the product-mode controls, rather than the executable name alone, distinguish
-the supported surface. The normal Edge ChatGPT page is anonymous. A temporary
-disconnection of the Windows interactive session was confirmed using read-only
-Win32 metadata; after the user unlocked Windows, that same session returned to
-Active with the Default input desktop. No session switching or credentials were
-needed. A subsequent read-only probe exposed an unsupported UIA visibility
-property on the client's top-level window; conservative handling was verified by
-a successful live read-only readiness probe. The interactive session subsequently
-disconnected again. After reconnection, WTS extended session flags and an
-uncloaked, full-screen LockApp window confirmed an actual locked desktop.
-Live generation remains pending an unlocked, continuously connected desktop.
-During the resumed acceptance, both authoritative stores retained one local run
-paused before submission with an explicit native `submit_intent: false` and no
-image or conversation binding. Fresh checks briefly confirmed an unlocked session;
-the session then disconnected and locked before the explicit resume click. The
-existing run and its original intent are preserved for continuation.
-After the final reinstall, the local run still has explicit native
-`submit_intent: false`, no binding or image, and zero resume receipts at that
-checkpoint. The latest candidate checks above supersede those locked-session
-readings; the remaining immediate gate is independent-window preparation and
-live capture.
+The immediate live-generation gate is the Windows session. At
+`2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
+disconnected and locked; the input desktop could not be opened. Both the final
+local WebUI and deployed Pages preparation reported `windows_locked`. The user
+was asked to reconnect and unlock that session while independent delivery work
+continued.
 
-No real ChatGPT prompt has been sent in this acceptance run. Local fixtures
-establish protocol behavior, not live generation or account acceptance.
+The original local run remains paused with native `submit_intent: false`, no
+image, and its original submission intent preserved. Reinstall startup updated
+the pause reason to `adapter_restarted`; it did not submit or replay the run.
+Pages and desktop still have no submission intents. This continuation made no
+real generation request or additional same-run resume click. The earlier explicit
+resume receipt described above remains preserved.
+
+The installed unified client previously exposed ChatGPT mode and its Images
+composer, but the supported independent `File > New Window` command was absent
+in the last unlocked live check. Final independent-window preparation remains
+unverified. An unlocked, connected desktop and a supported independent new window
+are required before any real prompt is sent; existing drafts must be preserved.
 
 One sparse real-account generation from each frontend is still required. The
 final reviewed result will then be integrated into `main`; repository default
-and Pages deployment policy will be switched to `main` as requested.
-Private source images, account information and generated acceptance images remain
-outside Git.
+and Pages deployment policy will be switched to `main` as requested. These gates
+remain open despite completed UI, deployment and installer acceptance. Private
+source images, account information and generated acceptance images remain outside
+Git.

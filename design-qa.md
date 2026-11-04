@@ -2,7 +2,7 @@
 
 final result: passed
 
-The shared production UI passes the selected visual-direction gate. The homepage now centers a real task composer; project management is collapsible and the actual task list stays in the sidebar. Settings has a searchable category column and centered groups of setting rows. Native minimize remains a real Tauri action; browser windows do not show simulated OS controls. Installed Windows acceptance belongs to the root agent and is not claimed here.
+The shared production UI passes the selected visual-direction gate. The homepage now centers a real task composer; project management is collapsible and the actual task list stays in the sidebar. Settings has a searchable category column and centered groups of setting rows. Native minimize remains a real Tauri action; browser windows do not show simulated OS controls. Final installed Windows and deployment verification is recorded below.
 
 ## Source and capture normalization
 
@@ -54,7 +54,7 @@ No remaining actionable P0/P1/P2 visual issues were found in the scoped shared-U
 - Separate native-controls browser fixture passed keyboard minimize IPC dispatch and drag-region exclusion and produced desktop/narrow captures. Unit tests retain real close-request prevention coverage. Actual Windows minimize/restore/close and native dialog execution remain the root's installed-acceptance step.
 - The Windows acceptance driver's cycle-zero project entry now uses File → Open/New Project; all existing assertions and task/chapter selectors are preserved. `node --check` passed.
 
-The local QA server remains available on port 1448. No deployment or push was performed.
+The isolated implementation preview used port 1448. That implementation handoff did not deploy or push; the final integration and deployment are recorded below.
 
 ## Review follow-up: mobile project picker
 
@@ -65,3 +65,17 @@ The regression was added to the existing real-WASM shell flow, and demonstrated 
 `/tmp/entwurf-task8-qa/mobile-project-picker.png` is the post-fix screenshot, opened and inspected: the saved-project button is visible and unobstructed. The original desktop/reference comparisons remain applicable; this follow-up changes only narrow-screen sidebar dismissal.
 
 Targeted follow-up verification: `pnpm exec vitest run src/Shell.test.tsx` (**8 passed**), `pnpm exec tsc -b`, `pnpm exec vite build --base=/Entwurf/`, and the existing real-WASM shell browser case (**1 passed**). The 99-test suite and six broader browser cases above are the preceding `be3a20b` verification and were not repeated for this one-line fix. The separate final follow-up commit hash is recorded in `/home/han/project/Entwurf/.superpowers/sdd/2026-11-01-automation-web/task8-report.md`. No installed/account/backend/protocol state changed.
+
+## Final installed and deployed verification — 2026-11-05
+
+The shared-UI follow-up review approved the final implementation. It was integrated and pushed as `bd83b071be16c2abf352cc167514e2fe8f5d89f1`; the integrated application and scripts exactly match the reviewed implementation.
+
+The actual Windows NSIS installer passed two complete uninstall/reinstall cycles, **9 and 10**, with **15 of 15 checks passing in each**. The actual window minimized/restored and maximized/restored, an unsaved draft prevented close, and the final close button exited the app and its owned bridge. Five installed pages rendered in both themes without page errors. All 173 native .NET tests passed before bundling.
+
+Installed screenshots are under `/mnt/c/Users/han/AppData/Local/EntwurfAcceptance/v0.1-20261031/cycle-9/` and `cycle-10/`, including `installed-project-dark.png`, `installed-project-light.png`, `installed-settings-dark.png`, and `installed-settings-light.png`. Root opened the cycle-9 home and dark/light settings captures and confirmed the centered composer, grouped searchable settings, visible minimize icon and readable Windows fonts. Cycle 10 uses the same installed executable hash and independently records both themes. The reference supplies visual direction; identical source display scaling is not asserted.
+
+Each installed capture measures **1282 × 808 CSS px**, DPR **2**, PNG **2564 × 1616 px**. The WebView reports a 1280 × 800 CSS-pixel screen. No OS scaling or user font setting was changed; this does not claim testing other display scales.
+
+[Pages run 41862954637](https://github.com/dieWehmut/Entwurf/actions/runs/41862954637) successfully built and deployed the same source. Its fresh **99 frontend tests**, **12 real browser cases**, and WASM smoke checks passed. The live page's `index-DI5QmPdj.js` has SHA-256 `a54e43eaf60f16003bc56f26e9cec7cb32cfb64f13e6e3a4ac604d742b9c8d33`, exactly matching the reviewed production preview. The original dedicated Pages profile reopened the same project, task and r1 knowledge version, retained its local-service connection and reported no network failures or generation requests.
+
+The local WebUI and installed desktop also reopened their preserved public-source tasks. Real ChatGPT generation remains a separate incomplete acceptance gate: the application's Windows session is disconnected and locked. These visual, persistence and installation checks do not claim a live generated image.
