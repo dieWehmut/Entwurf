@@ -170,6 +170,41 @@ the prior setup was retained and knowledge/style hashes were proven unchanged,
 with no native intent or corresponding run in either store. No existing submitted
 run was rebound. Pages and desktop preparations created no generation intent.
 
+## Resumed live preparation — 2026-11-04
+
+Fresh Win32 checks confirmed session 1 was Active and unlocked, with the Default
+input desktop. The final installed desktop still owned the localhost listener;
+its executable identity, installer SHA-256 and successful Pages deployment still
+matched the recorded `2f27ef9` candidate. The local WebUI reopened the original
+project/task/version and paused run, reported `ready`, and issued zero automation
+writes during preparation; the original intent and observer state were unchanged.
+
+One explicit same-run resume was then recorded. Preparation failed before Send
+with `PropertyNotSupportedException`; the coordinator and native store retained
+the original run, and the native store still explicitly recorded
+`submit_intent: false`. The resume receipt is preserved and is not replayed.
+Subsequent bounded diagnostics found one outer application Document and two
+nested Documents, which the current adapter's whole-window document-count guard
+rejects. These observations do not prove the earlier property exception's cause.
+
+The user clarified that new generations must use an independent client window
+and new conversation, preserving the existing draft. Installed public application
+resources define a feature-gated `File > New Window`. Expanding the live File
+menu did not expose that command, so no new window was opened and the original
+draft was not changed. The public source does not expose a user setting or a
+supported launch argument that bypasses this gate. New-window binding remains
+unverified. The independent-window implementation is committed at `3b9e227` on
+its isolated branch. It scopes the outer application Document, verifies the
+renderer menu's fixed chrome anchors, polls asynchronous menu content after one
+expansion, and pins the newly created window and fresh conversation before any
+input. Original drafts and embedded-document controls are excluded; Save As
+ownership follows the target window's owner chain. The final Windows .NET suite
+passed 173 tests with zero failures or skips. Independent review confirmed that
+the tested source matches the reviewed commit and resolved the menu, source-cache
+and initial-window-loading findings. Updated installer acceptance remains
+pending. No real prompt was sent and no live
+image-generation acceptance is claimed.
+
 ## Remaining release gates
 
 The installed unified ChatGPT client exposes the ChatGPT product mode and its
@@ -191,8 +226,10 @@ image or conversation binding. Fresh checks briefly confirmed an unlocked sessio
 the session then disconnected and locked before the explicit resume click. The
 existing run and its original intent are preserved for continuation.
 After the final reinstall, the local run still has explicit native
-`submit_intent: false`, no binding or image, and zero resume receipts. The latest
-entry checks continue to report `windows_locked`.
+`submit_intent: false`, no binding or image, and zero resume receipts at that
+checkpoint. The latest candidate checks above supersede those locked-session
+readings; the remaining immediate gate is independent-window preparation and
+live capture.
 
 No real ChatGPT prompt has been sent in this acceptance run. Local fixtures
 establish protocol behavior, not live generation or account acceptance.

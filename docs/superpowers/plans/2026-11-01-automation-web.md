@@ -14,6 +14,8 @@
 
 - Use multiple branches/worktrees and `gpt-6-astra` subagents; root owns integration and staged pushes.
 - Reuse the locally signed-in ChatGPT account for all three real acceptance flows.
+- Open an independent Windows client window and fresh conversation for each new
+  image run; preserve existing windows, conversations and unsent drafts.
 - Do not copy reference implementation, credentials or browser profiles.
 - Real generations are sparse and sequential; fixtures cover repeated failure/race tests.
 - Existing source provenance, immutable versions, review gates, manual edits and user icon remain valid.
@@ -54,6 +56,8 @@ Files: `apps/desktop/src/lib/**`, runtime worker, shared project picker, existin
 Files: `sidecars/chatgpt-browser/**`; native adapter files only if required by the identified signed-in entry.
 
 - [ ] Discover the actual local signed-in surface read-only; identify composer, new response, generation completion and original download controls.
+- [ ] Verify the client's New Window menu action, bind the newly created window,
+  validate its fresh composer and scope native downloads to that window.
 - [x] Implement the narrow authenticated transport, durable submit intent and no-replay recovery against deterministic DOM/download fixtures.
 - [x] Implement exact response/run correlation, original image capture, bounded bytes and cancellation/navigation guards.
 - [x] Keep the artifact pending until the destination app commits it and sends `artifact_accepted`.

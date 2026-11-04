@@ -72,6 +72,13 @@ An independently implemented MV3 extension can control an existing signed-in
 open a new conversation/tab in that same profile, preserving the user's drafts.
 The local Windows client exposes the ChatGPT product mode and Images page; a
 native UI Automation adapter is therefore required for the user's existing account.
+Each new Windows image run must open an independent client window and a fresh
+conversation using that same signed-in session. The original window, conversation
+and unsent draft must be preserved. Verify the new window's HWND, process/start
+identity, product mode and empty composer before image preparation; never reuse
+the current conversation or choose an arbitrary existing window. A submitted run
+continues observation only in its originally bound window. Native Save As dialogs
+must belong to that window, not merely share its process.
 It uses the packaged bridge with an inherited stdin bootstrap, separate native
 credential and parent/EOF lifetime. Only the selected provider may authenticate.
 Durable submit intent prevents retyping or resending after reconnect/restart.

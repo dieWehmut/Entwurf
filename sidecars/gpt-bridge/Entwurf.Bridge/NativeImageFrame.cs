@@ -32,4 +32,3 @@ internal sealed record NativeImageFrame(IReadOnlyList<NativeImageNode> Nodes, st
         return new(nodes.Where(x => owners[x.Id] == documentId).ToArray(), documentId);
     }
 }
-
