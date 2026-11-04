@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 
 async function createProject(page: Page, name: string) {
+  await expect(page.getByRole("button", { name: "文件", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "文件", exact: true }).click();
+  await page.getByRole("menuitem", { name: "新建项目", exact: true }).click();
+  await expect(page.getByLabel("项目名称")).toBeFocused();
   await page.getByLabel("项目名称").fill(name);
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByLabel("任务标题")).toBeEnabled();

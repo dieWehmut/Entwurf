@@ -1,61 +1,57 @@
-# Compact titlebar and task sidebar design QA
+# Home and settings reference refinement — Task 8
 
-Final result: passed
+final result: passed
 
-The selected references guide the shared Entwurf shell. The implementation removes the breadcrumb, adds a compact working titlebar, makes the navigation icons smaller, places a theme switch above the settings gear, and adds a collapsible sidebar containing the current project's actual tasks. Existing project, source, review, image and diagnostic workflows remain available.
+The shared production UI passes the selected visual-direction gate. The homepage now centers a real task composer; project management is collapsible and the actual task list stays in the sidebar. Settings has a searchable category column and centered groups of setting rows. Native minimize remains a real Tauri action; browser windows do not show simulated OS controls. Installed Windows acceptance belongs to the root agent and is not claimed here.
 
-## Sources, normalization and evidence
+## Source and capture normalization
 
-- Breadcrumb removal reference: `/mnt/c/Users/han/AppData/Local/Temp/tmp819A.png`, 713 × 107 pixels.
-- Titlebar reference: `/mnt/c/Users/han/AppData/Local/Temp/tmpD4B2.png`, 2529 × 74 pixels.
-- Task sidebar reference: `/mnt/c/Users/han/AppData/Local/Temp/tmp1F7.png`, 401 × 1427 pixels.
-- The references have different crops and sampling scales. The approved interpretation is a compact 36 CSS px titlebar, a 60 CSS px rail, 18 px navigation icons and a 256 px task sidebar. The settings category column remains 240 px. Reference physical pixels are not claimed to equal CSS pixels.
-- Real browser implementation: `http://127.0.0.1:1436/Entwurf/`, production build, real Rust WASM and IndexedDB. Desktop captures use 1440 × 1000 CSS pixels at DPR 1; mobile captures use 390 × 844. Browser tooling was unavailable, so authorized Linux Playwright was used.
-- Combined comparison inputs were created and opened at `/tmp/entwurf-titlebar-qa/titlebar-comparison.png` and `/tmp/entwurf-titlebar-qa/sidebar-comparison.png`. The first shows the titlebar source at approximately half its physical dimensions above the actual 36 px implementation. The second aligns the reference navigation with the actual task sidebar; different task content and document length are intentional.
-- Final screenshots: `/tmp/entwurf-titlebar-qa/desktop-dark.png`, `menu-dark.png`, `settings-dark.png`, `settings-light.png`, `mobile-light.png`, and `mobile-tasks.png`. Captures disable CSS transitions. The root reviewer independently opened desktop, settings and mobile captures and accepted the layout.
+- Selected home: `/mnt/c/Users/han/AppData/Local/Temp/tmpE5C8.png`, measured **2559 × 1494 physical pixels**.
+- Selected settings: `/mnt/c/Users/han/AppData/Local/Temp/tmp1AF6.png`, measured **2559 × 1492 physical pixels**.
+- Image-tool display initially showed these near 2048 px wide. For explicit comparison the sources were resampled using Lanczos to **2048 × 1196** (home) and **2048 × 1194** (settings), approximately 0.8003×. Source OS scaling/DPR is unknown; this normalization does not assert it was captured at 125% scaling.
+- The implementation was captured at exactly those CSS viewports, DPR 1, against `http://127.0.0.1:1448/Entwurf/`, using the production build and an isolated Playwright Chromium context. No signed-in browser was controlled.
+- A temporary `FONTCONFIG_FILE=/tmp/entwurf-task8-fonts.conf` points the QA process at the machine's existing Windows fonts. This lets the existing Segoe UI / Microsoft YaHei CSS stack resolve while comparing with the Windows reference. No font files or system font settings were changed or copied into the repository. Separate default Linux fallback screenshots are included below.
+- The approved compact titlebar remains 36 CSS px; the reference's normalized titlebar is about 49 px. Rail + task/category sidebar is 316 px versus approximately 326 px in the normalized references. These small chrome differences preserve the existing compact shell. The composer is 720 px wide; the settings cards are 816 px wide, aligned at approximately x=774 at the matched viewport, versus about x=769 / 815 px in the reference.
 
-These images show an actual public Markdown project with a retained task and saved edit. They contain no invented history, IPC mocks, or live ChatGPT output. The reference's account and conversation content is not copied into the application.
+## Combined comparisons inspected
 
-## Findings and fixes
+All files are local, outside git, under `/tmp/entwurf-task8-qa/`:
 
-1. **P2 — settings could gain an unnecessary fourth column; resolved.** Entering settings now hides the task sidebar without changing its persisted open preference. Leaving settings restores the workspace sidebar. The settings screenshot shows rail → categories → content directly.
-2. **P2 — keyboard focus could leave the help dialog; resolved.** Help traps Tab/Shift+Tab, closes with Escape, and restores focus to its menu trigger. Modal overlays sit above the titlebar. Unit coverage verifies the focus cycle and restoration.
-3. **P2 — native close protection needs the complete Tauri event contract; resolved and verified installed.** `onCloseRequested` prevents closing during an operation or unsaved node edit. Tauri's implementation calls `destroy()` after an allowed close, so both close and destroy capabilities are configured. Required permission names were checked against the generated desktop schema. Actual installed-window execution passed the final Windows cycles described below.
+- `home-comparison.png`: normalized reference left, real WASM home right, equal viewport dimensions.
+- `settings-comparison.png`: normalized reference left, real WASM general settings right, equal viewport dimensions.
+- `home-detail-comparison.png`, `settings-detail-comparison.png`: readable focused crops with source above implementation, without scaling the individual crops.
+- `window-controls-comparison.png`: source and native-controls browser fixture crop, at equal pixel scale. The smaller compact titlebar is intentional.
+- `desktop-dark.png`, `desktop-light.png`, `settings-dark.png`, `settings-light.png`: actual retained browser project after task creation, Markdown import and node edit.
+- `first-use-dark.png`, `menu-dark.png`: first-use project form and working File menu.
+- `mobile-dark.png`, `mobile-light.png`, `mobile-tasks.png`, `mobile-settings-dark.png`, `mobile-settings-light.png`: 390 × 844 CSS px, including active search and keyboard focus.
+- `native-home-dark.png`, `native-settings-dark.png`: Tauri IPC **browser fixture**, same full comparison viewports; not installed Windows screenshots.
+- `native-home-1280.png`, `native-settings-1280.png`: 1280 × 808 CSS px native-controls fixture.
+- `browser-fallback-mobile.png`, `browser-fallback-settings-mobile.png`: actual default Linux font fallback at 390 × 844, without the temporary font configuration.
 
-The final combined comparisons show no remaining actionable P0/P1/P2 visual mismatch in the approved scope. Browser window controls are omitted; native controls are conditional on the real Tauri runtime.
+## Findings, corrections, and final fidelity pass
 
-## Behavior and regression evidence
+1. **P2, home toolbar — fixed.** The current-task label wrapped onto two lines at desktop width during initial visual inspection. The compact selector now keeps its label on one line; final home captures show the correction.
+2. **P2, home placement — fixed.** The first composer sat approximately 50 px below the intended composition. Increased lower breathing room raises the composer while keeping the heading and controls together; the final equal-viewport comparison shows the intended centered 720 px input. Narrow screens use their own padding.
+3. **P2, project form reopening — fixed.** A first-use `<details>` forced open by a derived prop could become out of sync after a manual collapse. Its actual open state is now controlled consistently. The final real browser flow collapses it, reopens and focuses it from both the sidebar and File menu, creates a project, and later reopens a saved project from the sidebar picker.
+4. **Typography environment difference — normalized, documented.** Initial Linux captures used the bundled WenKai fallback because Windows UI fonts were unavailable to fontconfig. Scoped fontconfig now tests the real existing Windows CSS choices; separate unmodified fallback evidence records the Linux appearance. Native Windows rendering remains an independent installed check.
 
-The following records the initial UI-branch verification. The final integrated
-candidate `2f27ef9`, including automation recovery additions, passes 97 frontend
-tests and the deployed Pages workflow's 12 browser cases. Root also reran the
-separate real-browser shell flow successfully during integration.
+Required fidelity surfaces:
 
-- **73 frontend unit tests passed**, including six new shell cases: task sidebar/history, owned task selection with draft protection, real menu callbacks/theme, native API wiring and close prevention, settings column behavior, and help focus restoration. The first four shell cases were demonstrated failing before implementation; the settings/help cases also failed before their fixes.
-- TypeScript and both ordinary and `/Entwurf/` production builds passed. No new frontend dependency was added.
-- **All 23 distinct Playwright cases passed across the appropriate runtime configurations.** The initial dev run passed 21 cases. Its settings case expected the `/Entwurf/` deployment path and passed against the production Pages-base build. The multi-page fixture required an isolated Vite optimizer cache and the missing test-only Tauri event-unregister stub; all ten workspace cases then passed together. The new shell case additionally passed on the production Pages-base build.
-- Real WASM cases cover Markdown edit/reload/export, separate active projects in two tabs, PDF extraction/image OCR, stale-tab edit protection, rotated JPEG anchors, settings/OCR save/reload and the new shell navigation flow. Automation tests use explicit local protocol fixtures, not a live ChatGPT session.
-- The new browser shell test uses the real file chooser, creates an actual task, saves a node edit through the Edit menu, verifies draft survival across Back/Forward, reloads retained project/task/theme state, and checks mobile sidebar selection and horizontal overflow. Page errors are empty.
-- Existing native-protocol presentation tests continue to cover five pages, both themes, 1280/1920 widths and 100/125/150% CSS zoom, review/export failures, IR restore and diagnostic cancellation. These are browser fixtures and do not claim Windows native execution.
+- **Fonts/typography:** the existing Windows UI font stack produces neutral sans serif UI in the normalized captures. Large home/general headings, 13–14 px rows and secondary descriptions maintain hierarchy. Long project/task names truncate in chrome, while body text wraps. Linux fallback differs in character style but remains legible without overflow.
+- **Spacing/layout:** narrow icon rail, separate real task sidebar, quiet centered composer, and settings category→content arrangement follow the source. Cards use grouped rows and separators with headings outside the cards. First-use, mobile and 1280 px views remain coherent. There is no extra task column on settings.
+- **Colors/tokens:** retained neutral #181818 canvas, #222222 grouped surfaces and subtle gray borders follow the source's dark gray direction. Existing light tokens provide corresponding light surfaces. Focus rings and real action enabled/disabled states remain visible.
+- **Assets/icons:** supplied Entwurf PNG branding is retained. Existing Lucide icons provide consistent line weights, including a clearer 18 px minimize glyph. No decorative imagery was needed or generated. No source account or conversation text was copied.
+- **Copy/content:** references guide composition, while genuine Entwurf task, chapter, OCR, ChatGPT, storage and diagnostic controls supply content. The reference's long account-settings list and full chat history are intentionally absent: Entwurf only displays actual categories and saved tasks. The optional chapter line, project selector, app footer, and real create-task arrow are intentional production differences; no fake voice/chat controls were added.
 
-## Final Windows acceptance coverage
+No remaining actionable P0/P1/P2 visual issues were found in the scoped shared-UI comparison. Pixel-identical reproduction of another product's account content, OS frame, or display scaling is not claimed.
 
-`scripts/windows/accept-desktop.mjs` now includes actual installed-app assertions for:
+## Verification
 
-1. The titlebar maximizes/restores and minimizes/restores the real window. State is read from Tauri; decorations are off and resizing remains enabled.
-2. A real native `closeRequested` event preserves an unsaved node draft and its base version, then the explicit discard action restores the original field.
-3. After all artifact checks and screenshots, the close button exits the owned desktop and its bridge. PID, executable path and creation time are captured before closing; matching surviving processes fail acceptance. The script does not kill a leaked bridge or weaken existing artifact checks.
+- Full frontend suite: 99 tests passed. Focused shell/app coverage also passed after the final project-form correction, including native minimize wiring, no drag-region ancestor, close protection, sidebar preferences and draft retention.
+- Ordinary production build, TypeScript, and `/Entwurf/` production build passed using pnpm 10.34.9.
+- All six existing real-WASM browser cases passed: Markdown/edit/reload/export, two-tab project isolation, PDF/OCR ingestion, stale draft protection, EXIF source dimensions, and settings/OCR persistence. The project-creation helper now opens the actual File menu before filling a potentially collapsed form.
+- Extended shell browser flow passed with real WASM/IndexedDB: sidebar/File form focus, Enter to create a task, Markdown import, edit/save, Back/Forward draft safety, saved-project picker focus/reopen, search by setting content, no results/Escape, theme and OCR reload, mobile task selection, and no horizontal overflow. Page errors are empty.
+- Separate native-controls browser fixture passed keyboard minimize IPC dispatch and drag-region exclusion and produced desktop/narrow captures. Unit tests retain real close-request prevention coverage. Actual Windows minimize/restore/close and native dialog execution remain the root's installed-acceptance step.
+- The Windows acceptance driver's cycle-zero project entry now uses File → Open/New Project; all existing assertions and task/chapter selectors are preserved. `node --check` passed.
 
-Root executed the final candidate `2f27ef9` in actual uninstall/reinstall cycles 7
-and 8 on 2026-11-01. Each passed all 15 installed checks, including the three real
-window cases above, and preserved every project/local-WebUI file hash through
-uninstall. Root opened the final installed task and settings captures in
-`%LOCALAPPDATA%\EntwurfAcceptance\v0.1-20261031\cycle-8`.
-They measure 1282 × 808 CSS pixels at DPR 2 and 2564 × 1616 PNG pixels. OS scaling
-was not changed or independently verified; these results do not claim native
-100/125/150% display-scaling coverage. Actual ChatGPT image generation remains a
-separate, incomplete acceptance gate while Windows is locked.
-
-## Assets and polish
-
-The existing supplied PNG brand and Lucide icon library are reused. Colors retain the approved neutral gray surfaces and semantic status colors. File/Edit/View/Help entries invoke existing application functions; history controls use actual visited pages; the sidebar groups actual tasks by chapter. No decorative or nonfunctional menu entries were added. There are no outstanding visual polish blockers.
+The local QA server remains available on port 1448. No deployment or push was performed.

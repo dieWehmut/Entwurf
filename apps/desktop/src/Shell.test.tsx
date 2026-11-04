@@ -69,6 +69,7 @@ it('connects native window controls to Tauri and refuses close with an unsaved d
   await screen.findByLabelText('当前任务');
   await user.click(screen.getByRole('button', { name: '最小化窗口' }));
   expect(windowApi.minimize).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '最小化窗口' }).closest('[data-tauri-drag-region]')).toBeNull();
   await user.click(screen.getByRole('button', { name: '切换窗口最大化' }));
   expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
   await user.click(within(screen.getByRole('navigation')).getByRole('button', { name: '结果' }));
@@ -101,4 +102,43 @@ it('traps focus in help and restores the help menu trigger after closing', async
   expect(close).toHaveFocus();
   await user.keyboard('{Escape}');
   await waitFor(() => expect(screen.getByRole('button', { name: '帮助' })).toHaveFocus());
+});
+
+it('opens the collapsed project form from the File menu and focuses its input', async () => {
+  const { user } = mount();
+  await screen.findByLabelText('当前任务');
+  expect(document.querySelector('.project-manager')).not.toHaveAttribute('open');
+  await user.click(screen.getByRole('button', { name: '文件' }));
+  await user.click(screen.getByRole('menuitem', { name: '新建项目' }));
+  await waitFor(() => expect(screen.getByLabelText('项目名称')).toHaveFocus());
+  expect(document.querySelector('.project-manager')).toHaveAttribute('open');
+});
+
+it('searches settings content across categories, handles no results and clears with Escape', async () => {
+  const { user, call } = mount();
+  await screen.findByLabelText('当前任务');
+  await user.click(screen.getByRole('button', { name: '打开设置' }));
+  const search = screen.getByRole('searchbox', { name: '搜索设置' });
+  await user.type(search, 'tesseract');
+  expect(screen.getByRole('heading', { name: '文字识别能力' })).toBeVisible();
+  expect(screen.queryByLabelText('界面主题')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '重新检测能力' }));
+  expect(call).toHaveBeenCalledWith('bootstrap', undefined);
+  await user.clear(search); await user.type(search, '没有这样的设置');
+  expect(screen.getByRole('heading', { name: '没有找到相关设置' })).toBeVisible();
+  await user.keyboard('{Escape}');
+  expect(search).toHaveValue('');
+  expect(screen.getByLabelText('界面主题')).toBeVisible();
+  await user.type(search, 'ocr');
+  await user.click(screen.getByRole('button', { name: 'OCR' }));
+  expect(search).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'OCR' })).toHaveAttribute('aria-pressed', 'true');
+  await user.clear(screen.getByLabelText('OCR 语言')); await user.type(screen.getByLabelText('OCR 语言'), 'eng');
+  await user.type(search, '主题');
+  await user.selectOptions(screen.getByLabelText('界面主题'), 'light');
+  expect(localStorage.getItem('entwurf.theme')).toBe('light');
+  await user.clear(search);
+  expect(screen.getByLabelText('OCR 语言')).toHaveValue('eng');
+  await user.click(screen.getByRole('button', { name: '保存 OCR 设置' }));
+  expect(call).toHaveBeenCalledWith('save_settings', { ocrLanguages: 'eng' });
 });

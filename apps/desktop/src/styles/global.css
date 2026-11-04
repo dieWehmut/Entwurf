@@ -734,3 +734,98 @@ summary { cursor: pointer; }
   .settings-layout { min-height: calc(100dvh - var(--titlebar-height) - 62px); }
   .page-project .header-row, .page-project.is-empty .header-row { padding-top: 36px; }
 }
+
+/* Reference-led home: keep project tools near the chrome and the task input at the center. */
+.page-project { max-width: none; }
+.page-project .current-workspace { max-width: none; margin: 0; padding: 18px 0 10px; border: 0; }
+.page-project .current-workspace label { display: flex; align-items: center; gap: 12px; width: auto; max-width: 55%; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.page-project .current-workspace select { max-width: 260px; min-width: 0; padding: 7px 10px; border-radius: 20px; }
+.page-project .current-workspace > span { display: none; }
+.page-project .current-workspace > button { border: 0; background: transparent; color: var(--muted); }
+.project-workspace { display: flex; flex: 1; flex-direction: column; width: 100%; max-width: none; }
+.project-manager { width: min(760px, 100%); margin: 0 auto; }
+.project-manager summary { display: flex; align-items: center; gap: 8px; width: fit-content; margin-left: auto; padding: 10px 0; cursor: pointer; list-style: none; color: var(--muted); font-size: 13px; }
+.project-manager summary::-webkit-details-marker { display: none; }
+.project-manager summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.project-manager[open] summary > svg:last-child { transform: rotate(90deg); }
+.project-manager .panel { margin: 12px 0 24px; }
+.project-manager h2 { margin-bottom: 12px; }
+.project-manager .workspace-toolbar { margin: 18px 0; }
+.project-manager .field { flex: 1 1 220px; }
+.project-manager .field input { min-width: 0; }
+.home-start { width: min(720px, 100%); margin: auto; padding: 48px 0 200px; text-align: center; }
+.home-start h1 { margin-bottom: 28px; font-size: clamp(26px, 2vw, 32px); font-weight: 500; letter-spacing: -.025em; }
+.home-composer { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 7px 8px 7px 18px; border: 1px solid transparent; border-radius: 32px; background: var(--accent-wash); color: var(--text-soft); }
+.home-composer > svg { flex: none; }
+.home-composer:focus-within { border-color: var(--border-strong); }
+.home-composer input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 6px 0; font-size: 15px; }
+.home-composer input:focus-visible { outline-offset: 4px; border-radius: 4px; }
+.home-submit { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--text); color: var(--bg); }
+.home-submit:disabled { opacity: .4; }
+.home-chapter { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 22px auto 0; color: var(--muted); font-size: 12px; }
+.home-chapter input { width: 180px; max-width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 5px 7px; font-size: 12px; }
+.home-hint { color: var(--muted); font-size: 13px; margin-top: 20px; line-height: 1.8; }
+.page-project.is-empty .project-workspace { justify-content: center; }
+.page-project.is-empty .home-start { order: -1; margin: auto auto 0; padding: 60px 0 28px; }
+.page-project.is-empty .home-start h1 { margin-bottom: 14px; }
+.page-project.is-empty .home-hint { margin-top: 0; }
+.page-project.is-empty .project-manager { margin: 0 auto auto; }
+.page-project > .page-toast { position: fixed; z-index: 6; right: 24px; bottom: 24px; max-width: calc(100vw - 48px); }
+
+/* Settings share the reference's category column, search and grouped rows. */
+.settings-layout { grid-template-columns: var(--task-sidebar-width) minmax(0, 1fr); }
+.settings-sidebar { padding: 20px 14px; background: var(--bg-soft); }
+.settings-sidebar h1 { font-size: 20px; padding: 0 6px; margin-bottom: 18px; }
+.settings-search { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 22px; border-radius: 24px; background: var(--surface-raised); color: var(--muted); }
+.settings-search input { min-width: 0; width: 100%; border: 0; background: transparent; padding: 0; font-size: 13px; }
+.settings-search input::-webkit-search-cancel-button { display: none; }
+.settings-search > svg, .settings-search button { flex: none; }
+.settings-search button { border: 0; background: transparent; display: grid; place-items: center; padding: 0; width: 24px; height: 24px; color: var(--muted); }
+.settings-nav { position: static; gap: 24px; }
+.settings-nav-group:has(> p:only-child) { display: none; }
+.settings-nav-group > p { font-size: 12px; color: var(--muted); padding: 0 10px; margin-bottom: 8px; }
+.settings-nav button { width: 100%; min-height: 36px; padding: 8px 10px; gap: 10px; font-size: 13px; border-radius: 8px; }
+.settings-content { max-width: 920px; margin-inline: auto; padding: 34px 52px 60px; }
+.settings-heading { margin-bottom: 42px; }
+.settings-heading h2 { font-size: 28px; }
+.settings-heading p { margin-top: 10px; font-size: 13px; }
+.settings-group { padding: 0; margin-bottom: 36px; border: 0; border-radius: 0; background: transparent; }
+.settings-group h3 { margin: 0 0 16px; font-size: 14px; }
+.settings-card { padding: 4px 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.settings-card > p { margin: 14px 0; line-height: 1.7; }
+.settings-group .setting-row { padding: 16px 0; gap: 20px; }
+.settings-group .setting-row p { margin-top: 4px; }
+.settings-group .setting-row select { height: 34px; font-size: 13px; width: 130px; padding: 4px 10px; }
+.settings-card > button, .settings-card > .handoff-actions { margin: 12px 0 16px; }
+.settings-empty { padding: 44px 20px; text-align: center; color: var(--muted); }
+.settings-empty svg { margin-bottom: 18px; }
+.settings-empty h3 { color: var(--text); margin-bottom: 8px; }
+.settings-empty button { margin-top: 24px; }
+.window-controls { flex: none; }
+@media (max-width: 1040px) and (min-width: 761px) {
+  .settings-content { padding: 32px 28px; }
+  .page-project .current-workspace label { max-width: 65%; }
+}
+@media (max-width: 760px) {
+  .page-project .current-workspace { padding: 16px 0 0; gap: 4px; }
+  .page-project .current-workspace label { flex: 1; max-width: 100%; font-size: 11px; gap: 6px; }
+  .page-project .current-workspace select { width: 135px; max-width: 100%; }
+  .page-project .current-workspace > button { padding: 6px 0 6px 8px; font-size: 11px; }
+  .home-start { padding: 52px 0 68px; }
+  .home-composer { gap: 8px; padding-left: 12px; }
+  .home-composer input { font-size: 13px; }
+  .home-chapter { margin-top: 18px; }
+  .home-hint { font-size: 12px; }
+  .page-project.is-empty .home-start { padding-top: 42px; }
+  .project-manager .workspace-toolbar { flex-wrap: wrap; }
+  .settings-sidebar { padding: 20px 18px 18px; }
+  .settings-search { margin-bottom: 18px; }
+  .settings-content { padding: 28px 18px; }
+  .settings-heading { margin-bottom: 28px; }
+  .settings-card { padding: 4px 16px; }
+  .settings-group .setting-row select { width: 130px; }
+  .titlebar:has(.window-controls) .titlebar-drag { padding: 0; }
+  .titlebar:has(.window-controls) .titlebar-drag span { display: none; }
+  .titlebar:has(.window-controls) .titlebar-menu-trigger { padding-inline: 4px; }
+  .window-controls button { width: 30px; }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
+import { Icons } from "./components/Icons";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { Titlebar } from "./components/Titlebar";
@@ -29,6 +30,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [projectFormOpen, setProjectFormOpen] = useState(true);
   const [projectName, setProjectName] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [chapter, setChapter] = useState("");
@@ -45,7 +47,7 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
       if (!alive) return;
       if (caps.status === "fulfilled") setCapabilities(caps.value);
       else setError(errorMessage(caps.reason));
-      if (workspace.status === "fulfilled") setSnapshot(workspace.value);
+      if (workspace.status === "fulfilled") { setSnapshot(workspace.value); if (workspace.value) setProjectFormOpen(false); }
       else if (!/no.*workspace|no project is open|workspace.*not.*open|尚未|未打开/i.test(errorMessage(workspace.reason))) setError(errorMessage(workspace.reason));
       setBusy(null);
     });
@@ -113,18 +115,20 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
   }
   function openProject(create: boolean) {
     if (!create && client.projects) {
-      void run("读取项目列表", async () => { setProjects(await client.projects!()); return null; });
+      setProjectFormOpen(true);
+      void run("读取项目列表", async () => { setProjects(await client.projects!()); return null; }, () => requestAnimationFrame(() => document.getElementById("project-picker")?.focus()));
       return;
     }
     void run(create ? "创建项目" : "打开项目", async () => {
       const root = await client.call("choose_directory", client.runtime && client.runtime !== "native" ? { purpose: create ? "create" : "open", name: projectName.trim() } : undefined);
       if (!root) return;
       return create ? client.call("create_project", { root, name: projectName.trim() }) : client.call("load_existing_project", { root });
-    }, () => setActiveNodeId(null));
+    }, () => { setActiveNodeId(null); setProjectFormOpen(false); });
   }
   function focusProjectField(id: string) {
     if (locked) return;
     navigate("project");
+    if (id === "project-name") setProjectFormOpen(true);
     if (window.innerWidth <= 760) setSidebarOpen(false);
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   }
@@ -149,9 +153,9 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
       onNewProject={() => focusProjectField("project-name")} onOpenProject={chooseProject} onNewTask={() => focusProjectField("task-title")}
       onSave={() => { void saveDraft(); }} onDiscard={() => setDraft(null)} onNavigate={navigate} onOpenCommand={() => setCommandOpen(true)} onError={setError} />
     <Sidebar page={page} onNavigate={navigate} onOpenSettings={() => navigate("settings")} navigationDisabled={!!busy} theme={theme} onToggleTheme={toggleTheme} />
-    {sidebarVisible && <TaskSidebar snapshot={snapshot} locked={locked} onSelect={id => { void selectSidebarTask(id); }} onCreate={() => focusProjectField("task-title")} onOpenProject={chooseProject} onClose={() => setSidebarOpen(false)} />}
+    {sidebarVisible && <TaskSidebar snapshot={snapshot} locked={locked} onSelect={id => { void selectSidebarTask(id); }} onCreate={() => focusProjectField("task-title")} onOpenProject={chooseProject} onNewProject={() => focusProjectField("project-name")} onClose={() => setSidebarOpen(false)} />}
     <main className={`main-column page-${page}${snapshot ? "" : " is-empty"}`} aria-busy={!!busy}>
-      {page !== "settings" && <Header page={page} />}
+      {page !== "settings" && page !== "project" && <Header page={page} />}
       {!client.available && <div className="callout warn" role="status">浏览器预览：本地工作区不可用。请启动 Windows 桌面应用以创建项目、导入和导出文件。</div>}
       {busy && <div className="toast page-toast" role="status">{busy}</div>}
       {error && <div className="callout warn" role="alert"><span>{error}</span><button onClick={() => setError(null)} aria-label="关闭错误">×</button></div>}
@@ -163,15 +167,23 @@ export default function App({ client = nativeClient }: { client?: WorkspaceClien
         </select></label><span>{task?.state ?? "没有任务"} · {version ? `r${version.revision}` : "尚无知识版本"}</span>
         <button className="secondary-button" disabled={unavailable} onClick={() => { void run("刷新工作区", () => client.call("workspace_snapshot", { taskId: task?.id })); }}>刷新工作区</button>
       </div>}
-      {page === "project" && <div className="workspace-stack project-workspace">
-        <section className="panel"><h2>{client.runtime === "browser" ? "浏览器项目" : "本地项目"}</h2><p className="muted path-text">{snapshot?.root ?? (client.runtime === "browser" ? "项目保存在此浏览器中，刷新或重新打开页面后可继续编辑。" : client.runtime === "local-http" ? "项目保存在本机服务的数据库中。" : "选择本机目录，新建项目或打开已有项目。")}</p>
-          <div className="workspace-toolbar"><label className="field">项目名称<input id="project-name" disabled={locked} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="输入项目名称" /></label><button className="primary-button" disabled={locked || !projectName.trim()} onClick={() => openProject(true)}>新建项目</button><button className="secondary-button" disabled={locked} onClick={() => openProject(false)}>打开项目</button></div>
-          {projects && <section aria-label="选择项目"><h3>已保存项目</h3>{projects.length ? projects.map(project => <button className="secondary-button" disabled={locked} key={project.id} onClick={() => { void run("打开项目", () => client.call("load_existing_project", { root: project.root }), () => { setProjects(null); setActiveNodeId(null); }); }}>{project.name}</button>) : <p className="empty-note">此存储中还没有项目。</p>}<button className="text-button" onClick={() => setProjects(null)}>关闭项目列表</button></section>}
-          {client.runtime === "browser" && <p className="muted">清除网站数据会删除浏览器项目。请定期导出结果；不同浏览器与设备的数据分别保存。</p>}
+      {page === "project" && <div className="project-workspace">
+        <details className="project-manager" open={projectFormOpen} onToggle={event => setProjectFormOpen(event.currentTarget.open)}>
+          <summary><Icons.folder size={16} aria-hidden="true" /><span>{snapshot ? "管理项目" : "新建或打开项目"}</span><Icons.chevron size={15} aria-hidden="true" /></summary>
+          <section className="panel"><h2>{client.runtime === "browser" ? "浏览器项目" : "本地项目"}</h2><p className="muted path-text">{snapshot?.root ?? (client.runtime === "browser" ? "项目保存在此浏览器中，刷新或重新打开页面后可继续编辑。" : client.runtime === "local-http" ? "项目保存在本机服务的数据库中。" : "选择本机目录，新建项目或打开已有项目。")}</p>
+            <form className="workspace-toolbar" onSubmit={event => { event.preventDefault(); if (!locked && projectName.trim()) openProject(true); }}><label className="field">项目名称<input id="project-name" disabled={locked} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="输入项目名称" /></label><button className="primary-button" disabled={locked || !projectName.trim()} type="submit">新建项目</button><button type="button" className="secondary-button" disabled={locked} onClick={() => openProject(false)}>打开项目</button></form>
+            {projects && <section id="project-picker" tabIndex={-1} aria-label="选择项目"><h3>已保存项目</h3>{projects.length ? projects.map(project => <button className="secondary-button" disabled={locked} key={project.id} onClick={() => { void run("打开项目", () => client.call("load_existing_project", { root: project.root }), () => { setProjects(null); setProjectFormOpen(false); setActiveNodeId(null); }); }}>{project.name}</button>) : <p className="empty-note">此存储中还没有项目。</p>}<button className="text-button" onClick={() => setProjects(null)}>关闭项目列表</button></section>}
+            {client.runtime === "browser" && <p className="muted">清除网站数据会删除浏览器项目。请定期导出结果；不同浏览器与设备的数据分别保存。</p>}
+          </section>
+        </details>
+        <section className="home-start" aria-labelledby="home-heading">
+          <h1 id="home-heading">你的知识工作台</h1>
+          {snapshot ? <form className="home-task-form" onSubmit={event => { event.preventDefault(); if (!locked && taskTitle.trim()) void run("创建任务", () => client.call("create_task", { title: taskTitle.trim(), chapter: chapter.trim() || undefined }), () => setTaskTitle("")).then(saved => { if (saved) navigate("sources"); }); }}>
+            <div className="home-composer"><Icons.plus size={20} aria-hidden="true" /><input id="task-title" aria-label="任务标题" disabled={locked} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="想整理什么知识？输入任务标题" /><button type="submit" className="home-submit" aria-label="创建任务" title="创建任务" disabled={locked || !taskTitle.trim()}><Icons.forward size={20} aria-hidden="true" /></button></div>
+            <label className="home-chapter"><Icons.book size={16} aria-hidden="true" /><span>章节（可选）</span><input aria-label="章节（可选）" disabled={locked} value={chapter} onChange={e => setChapter(e.target.value)} placeholder="为任务归入章节" /></label>
+            <p className="home-hint">从一份资料开始，整理章节、审阅知识，再生成图片。</p>
+          </form> : <p className="home-hint">先新建或打开项目，再开始整理你的第一份资料。</p>}
         </section>
-        {snapshot && <><section className="panel"><h2>章节与任务</h2><div className="workspace-toolbar"><label className="field">任务标题<input id="task-title" disabled={locked} value={taskTitle} onChange={e => setTaskTitle(e.target.value)} /></label><label className="field">章节（可选）<input disabled={locked} value={chapter} onChange={e => setChapter(e.target.value)} /></label><button className="primary-button" disabled={locked || !taskTitle.trim()} onClick={() => { void run("创建任务", () => client.call("create_task", { title: taskTitle.trim(), chapter: chapter.trim() || undefined }), () => setTaskTitle("")).then(saved => { if (saved) navigate("sources"); }); }}>创建任务</button></div>
-          <div className="task-board">{snapshot.project.tasks.map(t => <button key={t.id} className={`task-card ${task?.id === t.id ? "is-active" : ""}`} disabled={locked} onClick={() => { void selectSidebarTask(t.id); }}><strong>{t.title}</strong><span>{t.chapter} · {t.state} · {t.versions.length} 个版本</span></button>)}</div>{!snapshot.project.tasks.length && <p className="empty-note">创建第一个任务，然后导入知识资料。</p>}
-        </section><section className="panel"><h2>当前任务概况</h2><div className="stat-strip"><div className="stat-item"><strong>{version?.ir.sources.length ?? 0}</strong><span>来源</span></div><div className="stat-item"><strong>{version?.ir.nodes.length ?? 0}</strong><span>知识节点</span></div><div className="stat-item"><strong>{version?.ir.unverified.length ?? 0}</strong><span>待确认</span></div><div className="stat-item"><strong>{version?.layout?.pages.length ?? 0}</strong><span>已编译页面</span></div></div><button className="secondary-button" disabled={unavailable} onClick={() => navigate("result")}>审阅结果</button></section></>}
       </div>}
       {page === "sources" && (snapshot ? <SourcesPage key={snapshot.project.id} onCreateTask={() => navigate("project")} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先在项目页打开项目。</p>)}
       {page === "tasks" && (snapshot && task ? <TasksPage key={task.id} snapshot={snapshot} client={client} run={run} locked={locked} /> : <p className="empty-note">先创建或选择一个任务。</p>)}

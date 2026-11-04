@@ -295,8 +295,11 @@ try {
     if (config.cycle === 0) {
       await fs.mkdir(config.project, { recursive: true });
       const existing = await fs.access(path.join(config.project, 'project.json')).then(() => true, () => false);
-      if (existing) await page.getByRole('button', { name: '打开项目', exact: true }).click();
+      await page.getByRole('button', { name: '文件', exact: true }).click();
+      if (existing) await page.getByRole('menuitem', { name: '打开项目', exact: true }).click();
       else {
+        await page.getByRole('menuitem', { name: '新建项目', exact: true }).click();
+        await expect(page.getByLabel('项目名称')).toBeFocused();
         await page.getByLabel('项目名称').fill('概率论 桌面重装验收');
         await page.getByRole('button', { name: '新建项目', exact: true }).click();
       }
