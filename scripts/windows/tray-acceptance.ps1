@@ -60,12 +60,32 @@ function Click-Control($Element, [bool]$Right = $false) {
  # UIA coordinates are physical pixels; use the matching Win32 API.
  # Re-resolve at the point and require the intended element or its child.
  Assert-Owner
- $point = $Element.GetClickablePoint()
+ try { $point = $Element.GetClickablePoint() } catch [System.Management.Automation.MethodInvocationException] {
+  # The Windows 11 overflow provider may expose bounds but no clickable point.
+  $rect = $Element.Current.BoundingRectangle
+  if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { throw 'No usable Shell control bounds.' }
+  foreach ($value in @($rect.X,$rect.Y,$rect.Width,$rect.Height)) {
+   if ([double]::IsNaN($value) -or [double]::IsInfinity($value)) { throw 'Invalid Shell control bounds.' }
+  }
+  $point = [Windows.Point]::new($rect.X + $rect.Width / 2, $rect.Y + $rect.Height / 2)
+ }
  $hit = [Windows.Automation.AutomationElement]::FromPoint($point)
  $matched = $false
  for ($depth = 0; $hit -and $depth -lt 8; $depth++) {
   if ([Windows.Automation.Automation]::Compare($hit,$Element)) { $matched = $true; break }
   $hit = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($hit)
+ }
+ if (-not $matched -and $Element.Current.AutomationId -eq 'NotifyItemIcon' -and $Element.Current.ClassName -eq 'SystemTray.NormalButton') {
+  # Windows 11 hit testing can stop at the overflow XAML host. Accept only
+  # that exact host when it is an ancestor of this notification item.
+  $hostAt = [Windows.Automation.AutomationElement]::FromPoint($point)
+  if ($hostAt.Current.ClassName -eq 'TopLevelWindowForOverflowXamlIsland') {
+   $parent = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($Element)
+   for ($depth = 0; $parent -and $depth -lt 12; $depth++) {
+    if ([Windows.Automation.Automation]::Compare($parent,$hostAt)) { $matched = $true; break }
+    $parent = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($parent)
+   }
+  }
  }
  if (-not $matched) { throw 'Shell control moved or is covered; refusing pointer input.' }
  [EntwurfTrayInput]::Click([int]$point.X,[int]$point.Y,$Right)
@@ -110,7 +130,8 @@ if (-not $icon) {
 }
 if (-not $icon) { throw 'Entwurf notification icon not found in Shell or overflow.' }
 Assert-Owner
-if ($Action -eq 'restore') { Invoke-Control $icon }
+# UIA Invoke on a notification icon need not deliver a left-button event.
+if ($Action -eq 'restore') { Click-Control $icon }
 if ($Action -eq 'exit') {
  $icon = Find-Icon
  if (-not $icon) { throw 'Entwurf notification icon disappeared before context click.' }
