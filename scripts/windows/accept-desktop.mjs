@@ -261,6 +261,18 @@ try {
     await expect.poll(() => windowCommand('is_focused')).toBe(true);
     await expect.poll(() => windowCommand('is_minimized')).toBe(false);
     assert.equal(await windowCommand('is_maximized'), initialMaximized);
+    // Repeat while maximized: hide/restore must preserve the pre-hide state.
+    if (!initialMaximized) await page.getByRole('button', { name: '切换窗口最大化', exact: true }).click();
+    await expect.poll(() => windowCommand('is_maximized')).toBe(true);
+    await page.getByRole('button', { name: '最小化窗口', exact: true }).click();
+    await expect.poll(() => windowCommand('is_visible')).toBe(false);
+    await nativeTray('restore');
+    await expect.poll(() => windowCommand('is_visible')).toBe(true);
+    await expect.poll(() => windowCommand('is_minimized')).toBe(false);
+    await expect.poll(() => windowCommand('is_maximized')).toBe(true);
+    await expect.poll(() => windowCommand('is_focused')).toBe(true);
+    if (!initialMaximized) await page.getByRole('button', { name: '切换窗口最大化', exact: true }).click();
+    await expect.poll(() => windowCommand('is_maximized')).toBe(initialMaximized);
     report.native_window = { decorations: false, resizable: true, initial_maximized: initialMaximized,
       maximized_and_restored: true, minimized_and_restored: true };
   });

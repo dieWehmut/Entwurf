@@ -16,10 +16,10 @@ using System; using System.Runtime.InteropServices;
 public static class EntwurfTrayInput {
  [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint f,bool i,uint a);
  [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr d);
- [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32.dll")] public static extern bool SetPhysicalCursorPos(int x,int y);
  [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint data,UIntPtr extra);
  public static void Click(int x,int y,bool right) {
-  if (!SetCursorPos(x,y)) throw new Exception("Could not position pointer on Entwurf control.");
+  if (!SetPhysicalCursorPos(x,y)) throw new Exception("Could not position pointer on Entwurf control.");
   mouse_event(right?8u:2u,0,0,0,UIntPtr.Zero); mouse_event(right?16u:4u,0,0,0,UIntPtr.Zero);
  }
 }
@@ -42,19 +42,46 @@ function Find-ShellRoots {
   if ($p.ProcessName -eq 'explorer' -and $p.SessionId -eq [Diagnostics.Process]::GetCurrentProcess().SessionId) { $w }
  }
 }
+function Test-NotificationIcon($Element, $ShellRoot) {
+ # Windows 11 exposes icons beneath the shared XAML input site, alongside
+ # taskbar controls. Require the notification-item identity there.
+ if ($Element.Current.AutomationId -eq 'NotifyItemIcon' -and
+     $Element.Current.ClassName -eq 'SystemTray.NormalButton') { return $true }
+ # Legacy Shell icons must live inside the notification area or overflow.
+ if ($ShellRoot.Current.ClassName -in @('NotifyIconOverflowWindow','TopLevelWindowForOverflowXamlIsland')) { return $true }
+ $ancestor = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($Element)
+ while ($ancestor -and -not [Windows.Automation.Automation]::Compare($ancestor,$ShellRoot)) {
+  if ($ancestor.Current.ClassName -eq 'TrayNotifyWnd') { return $true }
+  $ancestor = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+ }
+ return $false
+}
+function Click-Control($Element, [bool]$Right = $false) {
+ # UIA coordinates are physical pixels; use the matching Win32 API.
+ # Re-resolve at the point and require the intended element or its child.
+ Assert-Owner
+ $point = $Element.GetClickablePoint()
+ $hit = [Windows.Automation.AutomationElement]::FromPoint($point)
+ $matched = $false
+ for ($depth = 0; $hit -and $depth -lt 8; $depth++) {
+  if ([Windows.Automation.Automation]::Compare($hit,$Element)) { $matched = $true; break }
+  $hit = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($hit)
+ }
+ if (-not $matched) { throw 'Shell control moved or is covered; refusing pointer input.' }
+ [EntwurfTrayInput]::Click([int]$point.X,[int]$point.Y,$Right)
+}
 function Find-Icon {
  $condition = [Windows.Automation.AndCondition]::new(
   [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'Entwurf'),
   [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button))
- $matches = @(foreach ($w in Find-ShellRoots) { foreach($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants,$condition)) { if (-not $e.Current.IsOffscreen) { $e } } })
+ $matches = @(foreach ($w in Find-ShellRoots) { foreach($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants,$condition)) { if (-not $e.Current.IsOffscreen -and (Test-NotificationIcon $e $w)) { $e } } })
  if ($matches.Count -gt 1) { throw 'Multiple Entwurf notification icons; refusing ambiguous Shell action.' }
  if ($matches.Count -eq 1) { return $matches[0] }
 }
 function Invoke-Control($Element) {
  $pattern = $null
  if ($Element.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { $pattern.Invoke(); return }
- $point = $Element.GetClickablePoint()
- [EntwurfTrayInput]::Click([int]$point.X,[int]$point.Y,$false)
+ Click-Control $Element
 }
 $icon = Find-Icon
 $overflowOpened = $false
@@ -62,7 +89,16 @@ if (-not $icon) {
  $expand = @(foreach ($w in Find-ShellRoots) {
   foreach($id in @('SystemTrayIcon','OverflowButton')) {
    $c = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
-   foreach($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants,$c)) { if (-not $e.Current.IsOffscreen -and $e.Current.IsEnabled) { $e } }
+   foreach($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants,$c)) {
+    # SystemTrayIcon is shared with volume, clock and desktop controls.
+    # Restrict it to the observed chevron semantic name, never emit names.
+    $hiddenChinese = [string][char]0x663E + [char]0x793A + [char]0x9690 + [char]0x85CF + [char]0x7684 + [char]0x56FE + [char]0x6807
+    $overflowName = $e.Current.Name -in @('Show hidden icons',$hiddenChinese)
+    if (-not $e.Current.IsOffscreen -and $e.Current.IsEnabled -and
+        $e.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and
+        (($id -eq 'SystemTrayIcon' -and $e.Current.ClassName -eq 'SystemTray.NormalButton' -and $overflowName) -or
+         ($id -eq 'OverflowButton' -and $overflowName))) { $e }
+   }
   }
  })
  if ($expand.Count -ne 1) { throw 'Shell overflow button unavailable or ambiguous; real tray coverage pending.' }
@@ -76,8 +112,9 @@ if (-not $icon) { throw 'Entwurf notification icon not found in Shell or overflo
 Assert-Owner
 if ($Action -eq 'restore') { Invoke-Control $icon }
 if ($Action -eq 'exit') {
- $point = $icon.GetClickablePoint()
- [EntwurfTrayInput]::Click([int]$point.X,[int]$point.Y,$true)
+ $icon = Find-Icon
+ if (-not $icon) { throw 'Entwurf notification icon disappeared before context click.' }
+ Click-Control $icon $true
  $deadline = [DateTime]::UtcNow.AddSeconds(5)
  $items = @()
  do {
