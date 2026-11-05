@@ -98,8 +98,8 @@ Files: `.github/workflows/**`, WASM/frontend build scripts and deployment accept
 Final reviewed candidate `bd83b07` passed native reinstall cycles 9 and 10 and Pages
 deployment `41862954637`, followed by preserved-project/connection preparation in
 all three entry points. The real-account generation and final main/default-branch
-gates remain open: the application's Windows session is disconnected and locked,
-and final independent-window preparation remains unverified. See
+gates remain open: the Windows session reconnected for tray testing, then locked
+again; final independent-window preparation remains unverified. See
 `docs/development/automation-web-acceptance.md` for detailed evidence.
 
 ## Task 8: Home and settings reference refinement — 2026-11-04
@@ -120,3 +120,22 @@ next installer acceptance.
   settings screenshots against the supplied references and update `design-qa.md`.
 - [x] Review and integrate the UI, deploy the shared web app, then include this
   exact source in Task 7's Windows installation and acceptance.
+
+## Task 9: Windows notification-area tray — 2026-11-05
+
+- [x] Add a Windows tray icon at startup, minimize-to-tray, click-to-restore and
+  Show Window / Exit menu actions. Preserve the existing draft/busy close guard.
+- [x] Review tray lifetime and failure fallback; verify the action sequence on
+  Windows and keep real Shell acceptance separate from pure action tests.
+- [ ] Build and install the reviewed candidate, then verify real notification-area
+  restore in normal/maximized states, guarded Exit and clean process shutdown.
+- [ ] Record fresh uninstall/reinstall preservation evidence and leave the normal
+  installed application available in the tray for the user.
+
+Source `f3f695e` is built and installed; its 176 native/action tests passed.
+Harness `83a8f7a` changes only the tray test helper. Final cycle 11 verified real
+normal/maximized tray restore and six other checks before Windows locked during
+draft/tray Exit. Cycle 11 completion, cycle 12 and normal handoff remain pending.
+The automation subagent reran all 8 storage/duplicate-submission guards without
+live requests; actual three-entry-point generation still requires the unlocked
+desktop and independent-window preparation.

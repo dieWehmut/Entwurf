@@ -257,14 +257,54 @@ of any native submission intent or task in either run store. The prior metadata
 was backed up; no existing run was rebound. Native preparation created no intent
 or generation request.
 
+## Windows tray follow-up — 2026-11-05
+
+Windows now registers an Entwurf notification icon at startup. Minimize hides
+the main window; clicking the icon restores it. The menu provides Show Window
+and Exit, with Exit routed through the existing draft/busy close guard.
+
+Installer source `f3f695e643526f6be6e25fd929d1d9f9e424b77b` passed **3 Rust
+tray-action tests and 173 .NET tests**, then the full Windows/NSIS build.
+Installer SHA-256 is
+`d0931ec38ba6dc050a940b5c338517ee15be0f0a2f368937d8daff116a1ab0d8`.
+The installed payload SHA-256 is
+`63584a44aaaa0afdc4417bf47b53002eaea000cee0519e3c819ae82ff47b48d2`.
+Its only difference from the frozen post-build executable is the same three-byte
+Tauri NSIS marker described above; the complete comparison is retained privately.
+
+Acceptance harness `83a8f7a51dfa7e56a26b3a465e627682487042b4` differs from the
+installer source only in `scripts/windows/tray-acceptance.ps1`. Runtime source is
+unchanged. The harness locates actual Shell controls, uses batched native pointer
+input, and reads the owned Win32 popup menu when UIA exposes no menu items.
+An installed diagnostic run verified actual tray restore and menu Exit, including
+app/bridge shutdown. UIA Invoke alone was not accepted as proof of clicking the
+notification icon.
+
+The final install's cycle 11 passed **7 complete checks**, including normal and
+maximized minimize/hide/real-tray restore, local service availability, offline
+operation, restored edits and native import. Uninstall preserved all hashes of
+**1130 project files and 34 local-WebUI files**. Windows disconnected and locked
+during the subsequent draft/tray Exit check. That check and the rest of cycle 11,
+cycle 12, and the normal tray handoff remain incomplete. Failed/interrupted
+evidence is preserved; no complete reinstall acceptance is claimed for this build.
+
+The automation subagent also reran **8 IndexedDB and duplicate-submission guard
+tests**, all passing with zero live or generation requests. The original run still
+has `submit_intent: false`; these tests do not establish real image generation.
+
 ## Remaining release gates
 
-The immediate live-generation gate is the Windows session. At
-`2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
+At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
 disconnected and locked; the input desktop could not be opened. Both the final
 local WebUI and deployed Pages preparation reported `windows_locked`. The user
 was asked to reconnect and unlock that session while independent delivery work
 continued.
+
+The session was connected and unlocked again at `2026-11-05T06:15:52Z`, allowing
+real tray testing. It disconnected and locked during the final installer check;
+the `2026-11-05T07:21:15Z` probe confirmed an inaccessible input desktop. The user
+was asked to reconnect and unlock it. Independent-window preparation and
+real-account generation acceptance remain open.
 
 The original local run remains paused with native `submit_intent: false`, no
 image, and its original submission intent preserved. Reinstall startup updated
