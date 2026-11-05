@@ -1,5 +1,9 @@
 mod bridge;
 mod companion;
+#[cfg(windows)]
+mod tray;
+#[cfg(windows)]
+mod tray_actions;
 use entwurf_core::{
     ingest::IngestOptions,
     workspace::{NodeEdit, Workspace, WorkspaceSnapshot},
@@ -649,6 +653,10 @@ pub fn run() {
         .manage(CapabilityState::default())
         .manage(companion::CompanionState::default())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Err(error) = tray::install(app) {
+                eprintln!("Entwurf tray unavailable: {error}");
+            }
             let app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 // Make the local WebUI and saved Pages pairing available as soon
