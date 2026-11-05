@@ -16,11 +16,76 @@ using System; using System.Runtime.InteropServices;
 public static class EntwurfTrayInput {
  [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint f,bool i,uint a);
  [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr d);
- [DllImport("user32.dll")] public static extern bool SetPhysicalCursorPos(int x,int y);
- [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint data,UIntPtr extra);
+ [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+ [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; public POINT(int x,int y){X=x;Y=y;} }
+ [StructLayout(LayoutKind.Sequential)] public struct MENUBARINFO { public uint cbSize; public RECT rcBar; public IntPtr hMenu,hwndMenu; public uint flags; }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct MENUITEMINFO { public uint cbSize,fMask,fType,fState,wID; public IntPtr hSubMenu,hbmpChecked,hbmpUnchecked,dwItemData; public IntPtr dwTypeData; public uint cch; public IntPtr hbmpItem; }
+ public delegate bool EnumWindowsProc(IntPtr h,IntPtr p);
+ [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb,IntPtr p);
+ [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h,System.Text.StringBuilder b,int n);
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+ [DllImport("user32.dll")] static extern bool GetMenuBarInfo(IntPtr h,int o,int i,ref MENUBARINFO b);
+ [DllImport("user32.dll")] static extern int GetMenuItemCount(IntPtr m);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMenuItemInfoW(IntPtr m,uint i,bool pos,ref MENUITEMINFO info);
+ [DllImport("user32.dll")] static extern bool GetMenuItemRect(IntPtr h,IntPtr m,uint i,out RECT r);
+ [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+ [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h,uint f);
+ [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
+ // Documented popup handle and visible menu bounds:
+ // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmenubarinfo
+ // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmenuitemrect
+ public static int[] ExitPoint(uint pid,string label) {
+  IntPtr prior=SetThreadDpiAwarenessContext(new IntPtr(-4));
+  if(prior==IntPtr.Zero) throw new Exception("Cannot establish physical menu coordinates.");
+  try {
+   var popups=new System.Collections.Generic.List<IntPtr>();
+   EnumWindows((h,p)=>{uint owner; GetWindowThreadProcessId(h,out owner); var c=new System.Text.StringBuilder(128); GetClassName(h,c,c.Capacity); if(owner==pid && IsWindowVisible(h) && c.ToString()=="#32768") popups.Add(h); return true;},IntPtr.Zero);
+   if(popups.Count==0) return null;
+   if(popups.Count!=1) throw new Exception("Owned native popup ambiguous: count="+popups.Count);
+   IntPtr popup=popups[0]; var bar=new MENUBARINFO(); bar.cbSize=(uint)Marshal.SizeOf(bar);
+   if(!GetMenuBarInfo(popup,-4,0,ref bar) || bar.hMenu==IntPtr.Zero) throw new Exception("Owned popup menu handle unavailable.");
+   int count=GetMenuItemCount(bar.hMenu), found=-1;
+   if(count<1 || count>100) throw new Exception("Invalid popup menu item count.");
+   for(int i=0;i<count;i++) {
+    var item=new MENUITEMINFO(); item.cbSize=(uint)Marshal.SizeOf(item); item.fMask=0x40|1;
+    if(!GetMenuItemInfoW(bar.hMenu,(uint)i,true,ref item) || item.cch>4096) throw new Exception("Cannot inspect owned menu item.");
+    item.cch++; item.dwTypeData=Marshal.AllocHGlobal(checked((int)item.cch*2));
+    try {
+     if(!GetMenuItemInfoW(bar.hMenu,(uint)i,true,ref item)) throw new Exception("Cannot read owned menu label.");
+     if(Marshal.PtrToStringUni(item.dwTypeData)==label && (item.fState & 3)==0) { if(found!=-1) throw new Exception("Ambiguous native Exit item."); found=i; }
+    } finally { Marshal.FreeHGlobal(item.dwTypeData); }
+   }
+   if(found<0) throw new Exception("Enabled native Exit item missing.");
+   RECT rect; if(!GetMenuItemRect(IntPtr.Zero,bar.hMenu,(uint)found,out rect) || rect.Right<=rect.Left || rect.Bottom<=rect.Top) throw new Exception("Invalid native menu bounds.");
+   int x=(int)(((long)rect.Left+rect.Right)/2),y=(int)(((long)rect.Top+rect.Bottom)/2);
+   IntPtr hit=WindowFromPoint(new POINT(x,y)); uint actual; GetWindowThreadProcessId(popup,out actual);
+   if(actual!=pid || !IsWindowVisible(popup) || (hit!=popup && GetAncestor(hit,2)!=popup)) throw new Exception("Owned native menu moved or is covered.");
+   return new[]{x,y};
+  } finally { SetThreadDpiAwarenessContext(prior); }
+ }
+ [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT {public int dx,dy;public uint mouseData,dwFlags,time;public UIntPtr extra;}
+ [StructLayout(LayoutKind.Sequential)] public struct INPUT {public uint type;public MOUSEINPUT mi;}
+ [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint n,INPUT[] inputs,int size);
+ [DllImport("user32.dll")] static extern int GetSystemMetrics(int n);
  public static void Click(int x,int y,bool right) {
-  if (!SetPhysicalCursorPos(x,y)) throw new Exception("Could not position pointer on Entwurf control.");
-  mouse_event(right?8u:2u,0,0,0,UIntPtr.Zero); mouse_event(right?16u:4u,0,0,0,UIntPtr.Zero);
+  IntPtr prior=SetThreadDpiAwarenessContext(new IntPtr(-4));
+  if(prior==IntPtr.Zero)throw new Exception("No physical input context.");
+  try {
+   int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+   if(width<2||height<2||x<left||y<top||x>=left+width||y>=top+height)throw new Exception("Pointer outside virtual desktop.");
+   var inputs=new INPUT[3];
+   inputs[0].mi.dx=(int)Math.Round((x-left)*65535.0/(width-1));inputs[0].mi.dy=(int)Math.Round((y-top)*65535.0/(height-1));inputs[0].mi.dwFlags=0x8000|0x4000|1;
+   inputs[1].mi.dwFlags=right?8u:2u; inputs[2].mi.dwFlags=right?16u:4u;
+   // SendInput inserts this movement/button sequence serially.
+   // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput
+   uint sent=SendInput(3,inputs,Marshal.SizeOf(typeof(INPUT)));
+   if(sent!=3) {
+    int error=Marshal.GetLastWin32Error();
+    if(sent>1) SendInput(1,new[]{inputs[2]},Marshal.SizeOf(typeof(INPUT)));
+    throw new Exception("SendInput incomplete: "+sent+" error="+error);
+   }
+  } finally {SetThreadDpiAwarenessContext(prior);}
  }
 }
 '@
@@ -136,20 +201,19 @@ if ($Action -eq 'exit') {
  $icon = Find-Icon
  if (-not $icon) { throw 'Entwurf notification icon disappeared before context click.' }
  Click-Control $icon $true
+ # Read the actual displayed Win32 menu; its UIA provider may expose no items.
  $deadline = [DateTime]::UtcNow.AddSeconds(5)
- $items = @()
  do {
   Start-Sleep -Milliseconds 100
-  $owned = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$AppProcessId)
-  $condition = [Windows.Automation.AndCondition]::new(
-   [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,$ExitLabel),
-   [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::MenuItem))
-  $items = @(foreach($w in $root.FindAll([Windows.Automation.TreeScope]::Children,$owned)) {
-   foreach($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants,$condition)) { if(-not $e.Current.IsOffscreen -and $e.Current.IsEnabled) { $e } }
-  })
- } while ($items.Count -eq 0 -and [DateTime]::UtcNow -lt $deadline)
- if ($items.Count -ne 1) { throw 'Owned Entwurf Exit menu item unavailable or ambiguous.' }
+  Assert-Owner
+  $point = [EntwurfTrayInput]::ExitPoint([uint32]$AppProcessId,$ExitLabel)
+ } while ($null -eq $point -and [DateTime]::UtcNow -lt $deadline)
+ if ($null -eq $point) { throw 'Owned native popup did not appear.' }
  Assert-Owner
- Invoke-Control $items[0]
+ # Re-read the label, position and owning window immediately before input.
+ $point = [EntwurfTrayInput]::ExitPoint([uint32]$AppProcessId,$ExitLabel)
+ if ($null -eq $point) { throw 'Owned native popup disappeared before input.' }
+ [EntwurfTrayInput]::Click($point[0],$point[1],$false)
+
 }
 [pscustomobject]@{ action=$Action; icon='Entwurf'; overflow_opened=$overflowOpened; real_shell=$true } | ConvertTo-Json -Compress
