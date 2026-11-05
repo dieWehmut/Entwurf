@@ -50,6 +50,18 @@ async function ownedProcesses() {
   return Array.isArray(records) ? records : [records];
 }
 
+async function nativeTray(action) {
+  const parent = (await ownedProcesses()).find(item => item.pid === config.process_id);
+  assert(parent?.path && parent.created, 'owned Entwurf process required for Shell action');
+  const script = fileURLToPath(new URL('./tray-acceptance.ps1', import.meta.url));
+  const result = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', script, '-AppProcessId', String(parent.pid), '-ExecutablePath', parent.path,
+    '-Created', parent.created, '-Action', action], { timeout: 30_000, windowsHide: true });
+  const evidence = JSON.parse(result.stdout.trim());
+  assert.equal(evidence.real_shell, true);
+  (report.tray_actions ??= []).push(evidence);
+}
+
 const idle = () => expect(page.getByRole('main')).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 });
 const navigate = label => page.getByRole('navigation').getByRole('button', { name: new RegExp(`^${label}`) }).click();
 async function nativeDialog(arguments_) {
@@ -243,8 +255,10 @@ try {
     await page.getByRole('button', { name: '切换窗口最大化', exact: true }).click();
     await expect.poll(() => windowCommand('is_maximized')).toBe(initialMaximized);
     await page.getByRole('button', { name: '最小化窗口', exact: true }).click();
-    await expect.poll(() => windowCommand('is_minimized')).toBe(true);
-    await windowCommand('unminimize');
+    await expect.poll(() => windowCommand('is_visible')).toBe(false);
+    await nativeTray('restore');
+    await expect.poll(() => windowCommand('is_visible')).toBe(true);
+    await expect.poll(() => windowCommand('is_focused')).toBe(true);
     await expect.poll(() => windowCommand('is_minimized')).toBe(false);
     assert.equal(await windowCommand('is_maximized'), initialMaximized);
     report.native_window = { decorations: false, resizable: true, initial_maximized: initialMaximized,
@@ -373,6 +387,13 @@ try {
     await expect(field).toHaveValue(draft);
     assert.equal((await snapshot()).current_version.id, before.current_version.id);
     assert.equal(page.isClosed(), false);
+    await page.getByRole('button', { name: '最小化窗口', exact: true }).click();
+    await expect.poll(() => windowCommand('is_visible')).toBe(false);
+    await nativeTray('exit');
+    await expect.poll(() => windowCommand('is_visible')).toBe(true);
+    await expect(field).toHaveValue(draft);
+    assert.equal((await snapshot()).current_version.id, before.current_version.id);
+    report.native_window.tray_draft_exit_prevented = true;
     await page.getByRole('button', { name: '编辑', exact: true }).click();
     await page.getByRole('menuitem', { name: '放弃节点草稿', exact: true }).click();
     await expect(field).toHaveValue(original);
@@ -618,7 +639,7 @@ try {
     }
     assert.deepEqual(report.errors, []);
   });
-  await step('native close button exits the owned desktop and its bridge', async () => {
+  await step('native titlebar or tray Exit closes the owned desktop and its bridge', async () => {
     const before = await ownedProcesses();
     const parent = before.find(item => item.pid === config.process_id);
     assert(parent && path.basename(parent.path).toLowerCase() === 'entwurf-desktop.exe', 'the connected owned desktop must still be alive');
@@ -629,7 +650,13 @@ try {
     report.native_window.close_owner = parent;
     report.native_window.close_children = children;
     await capture('installed-before-native-close.png');
-    await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
+    if (config.cycle % 2 === 0) {
+      await nativeTray('exit');
+      report.native_window.exit_method = 'shell-tray';
+    } else {
+      await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
+      report.native_window.exit_method = 'titlebar';
+    }
     await expect.poll(async () => {
       const current = await ownedProcesses();
       return current.some(item => (item.pid === parent.pid && item.created === parent.created
