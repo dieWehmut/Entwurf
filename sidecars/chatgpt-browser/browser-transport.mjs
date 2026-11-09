@@ -23,25 +23,48 @@ export class BrowserTransport {
   async prepare(run) {
     const report = await this.probe();
     if (!report.available) throw new Error(report.reason === 'login_required' ? 'login_required' : 'existing_session_unavailable');
-    const tabs = await this.browser.tabs.query({ url: 'https://chatgpt.com/*' });
-    const existing = tabs.find(tab => tab.active) ?? tabs[0];
-    // A new tab shares the user's current browser profile and login. Never launch another profile.
-    const tab = await this.browser.tabs.create({ windowId: existing.windowId, url: 'https://chatgpt.com/', active: true });
-    await this.browser.windows.update(existing.windowId, { focused: true });
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const current = await this.browser.tabs.get(tab.id);
-      if (current.url && new URL(current.url).origin !== 'https://chatgpt.com') throw new Error('login_required');
-      let ready;
-      try { ready = await this.call(tab.id, 'probe'); } catch { /* Only readiness checks retry. */ }
-      if (ready?.reason === 'login_required') throw new Error('login_required');
-      if (ready?.available) { await this.call(tab.id, 'prepare', { run }); return { target: tab.id }; }
-      await delay(200);
+    // The task tab is active inside its own window, so Chrome does not freeze it
+    // as an inactive tab. The window itself is never focused and shares the
+    // already-authenticated browser profile without disturbing the user's tabs.
+    const taskWindow = await this.browser.windows.create({ url: 'https://chatgpt.com/', focused: false });
+    const windowId = taskWindow?.id;
+    if (!Number.isInteger(windowId)) throw new Error('background_window_unavailable');
+    let retained = false;
+    try {
+      const tabs = await this.browser.tabs.query({ windowId });
+      const active = tabs.filter(tab => tab.active && Number.isInteger(tab.id));
+      if (active.length !== 1) throw new Error('background_window_unavailable');
+      const tab = active[0];
+      await this.browser.tabs.update(tab.id, { autoDiscardable: false });
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const current = await this.browser.tabs.get(tab.id);
+        if (current.url && new URL(current.url).origin !== 'https://chatgpt.com') throw new Error('login_required');
+        let ready;
+        try { ready = await this.call(tab.id, 'probe'); } catch { /* Only readiness checks retry. */ }
+        if (ready?.reason === 'login_required') throw new Error('login_required');
+        if (ready?.available) {
+          await this.call(tab.id, 'prepare', { run });
+          retained = true;
+          return { target: tab.id };
+        }
+        await delay(200);
+      }
+      throw new Error('composer_timeout');
+    } finally {
+      if (!retained) try { await this.browser.windows.remove(windowId); } catch { /* The failed task window may already be gone. */ }
     }
-    throw new Error('composer_timeout');
   }
   submit(tabId, run) { return this.call(tabId, 'submit', { run_id: run.run_id }); }
   observe(tabId, run_id) { return this.call(tabId, 'observe', { run_id }); }
-  cancel(tabId, run_id) { return this.call(tabId, 'cancel', { run_id }); }
+  async closeOwned(tabId, run_id) {
+    // The content adapter validates the bound run before we remove anything.
+    // Therefore a stale/reused tab id can never close an unrelated user tab.
+    const result = await this.call(tabId, 'cancel', { run_id });
+    await this.browser.tabs.remove(tabId);
+    return result;
+  }
+  cancel(tabId, run_id) { return this.closeOwned(tabId, run_id); }
+  release(tabId, run_id) { return this.closeOwned(tabId, run_id); }
   capture(tabId, run_id, observation) {
     return captureDownload(this.browser.downloads, observation.conversation_url,
       () => this.call(tabId, 'download', { run_id }),

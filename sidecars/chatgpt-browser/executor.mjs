@@ -71,9 +71,13 @@ export class RunExecutor {
   accept(run_id) { return this.exclusive(async () => {
     const record = await this.store.get(run_id);
     if (!record || !['awaiting_import', 'completed'].includes(record.phase)) throw new Error('invalid_acknowledgement');
+    const releaseTarget = record.phase === 'awaiting_import' ? record.target : null;
     record.phase = 'completed';
     if (this.active === run_id) this.active = null;
     await this.report(record);
+    if (releaseTarget !== null) {
+      try { await this.transport.release?.(releaseTarget, run_id); } catch { /* The owned task tab may already be gone. */ }
+    }
     await this.artifactStore?.remove(run_id);
     return record;
   }); }

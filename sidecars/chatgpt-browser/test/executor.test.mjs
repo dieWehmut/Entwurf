@@ -16,7 +16,8 @@ function harness(records = new Map(), failure = null) {
       if (failure) throw new Error(failure);
     },
     async observe() { return { phase: 'generating' }; },
-    async cancel() { actions.push(['cancel']); }
+    async cancel() { actions.push(['cancel']); },
+    async release(target, run_id) { actions.push(['release', target, run_id]); }
   };
   const store = { async get(id) { return structuredClone(records.get(id)); },
     async put(record) { records.set(record.run_id, structuredClone(record)); } };
@@ -65,6 +66,7 @@ test('artifact is emitted once and completion requires database acknowledgement'
   assert.equal(h.events.filter(e => e.type === 'artifact').length, 1);
   await h.executor.accept('run-1');
   assert.equal(h.records.get('run-1').phase, 'completed');
+  assert.deepEqual(h.actions.at(-1), ['release', 7, 'run-1']);
 });
 
 test('cancellation releases the run without claiming ChatGPT stopped generating', async () => {
