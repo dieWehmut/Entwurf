@@ -351,12 +351,43 @@ ten-minute default and cancelled the deployment. No build or test failure was
 reported. The already queued [97442ba run 42742926085](https://github.com/dieWehmut/Entwurf/actions/runs/42742926085)
 is being observed through its original live job, without restarting it.
 
+That second run also passed all build gates, then reached the same ten-minute
+publication timeout while `syncing_files`. Its failed deployment receipt is
+preserved. The existing [df9edbf run 42745114897](https://github.com/dieWehmut/Entwurf/actions/runs/42745114897)
+contains the extended bounded wait and completed deployment successfully.
+
 The workflow now allows thirty minutes for the deployment action within a
 thirty-five-minute job. This changes only the bounded wait for the server result;
 all build/test gates, error handling, permissions and environment rules remain.
 The setting was checked against the official action's millisecond input and
-independently parsed as YAML. Successful publication remains a separate pending
-gate; a longer timeout is not evidence of deployment success.
+independently parsed as YAML. Actual deployment success was subsequently verified
+for run 42745114897 at `df9edbf`; the longer timeout alone was not counted as proof.
+An isolated browser visited the public Pages site and passed Chinese rendering,
+background/locked-session setting lookup, unpaired Start rejection, and project
+and task persistence after reload. It reported no console/page errors or external
+requests. The downloaded companion ZIP contained 16 shipped files, every one
+matching the current canonical source bytes, including Web Lock and durable
+generation-deadline code. Its SHA256 is
+`30fcf9688a76e5912e024633a4405cae1895ee94e59ab71180ef9f7f4d8b052c`.
+Root inspected the successful-run, browser and complete ZIP receipts. This is
+public-site verification, not real-account generation acceptance.
+
+A clean native Windows checkout at `97442ba` also built the NSIS candidate with
+cargo exit 0 after 173 native adapter tests and 99 frontend tests passed. The
+79,661,637-byte installer, post-build desktop executable, companion ZIP, canonical
+Git source archive and packaged resources were frozen. Root independently
+verified all 313 frozen file hashes, including 299 resources. Packaged companion
+bytes match the clean native checkout; comparison with the Linux checkout
+normalizes native CRLF line endings. The installer and desktop executable were
+not launched against installed application data.
+
+The same native source built the Windows web CLI with cargo exit 0. An explicit
+fresh `artifacts` data directory and non-48123 port verified Windows/local-HTTP,
+SQLite file bytes, served frontend and companion ZIP, browser as the default
+provider despite a bundled native adapter, and another HTTP 200 after 35 seconds
+in the locked session. No UIA adapter child or automation run was started. The
+owned service subsequently stopped through its own console Ctrl+C handler with
+exit 0 and its port released; existing application data was unchanged.
 
 The final native locked-browser fixture passed on headed Chromium 156. It starts
 after the original fixture tab is frozen, then submits once in its owned window.
@@ -370,7 +401,7 @@ desktop remains inaccessible with Win32 error 5 in those samples.
 After **68,733 ms**, the extension delivered identical public-fixture original
 bytes. The protocol fixture saved and independently reread them before ACK.
 Three transport keepalives arrived, duplicate Start produced no second submit,
-ACK removed the owned task window and released its Web Lock, the original draft
+ACK removed the owned task tab and released its Web Lock, the original draft
 remained exact, and the owned browser's exit was verified. Root inspected the
 final `locked-browser-20261110-7/receipt.json` and its task-row diagnostic, and
 compared every loaded runtime module with the current committed source hashes.
@@ -383,6 +414,45 @@ data and machine hosts/trust settings are unchanged. No actual ChatGPT request i
 made. This proves the recorded locked-browser/localhost-protocol run, not live
 ChatGPT selectors or all Edge sleep policies. Real Rust/frontend import evidence
 and live-account acceptance remain separate gates.
+
+The added optional real-backend fixture starts from the actual local WebUI and
+detaches its debugger after coordinator acceptance. Its initial native run
+reached download while locked but failed at extension IndexedDB initialization,
+before an artifact reached Rust. A controlled same-browser/extension comparison
+passed IndexedDB open/put/get/remove in a short profile and failed with
+`UnknownError` in a long profile: the latter's SQLite database path would be 267
+characters, beyond the traditional Windows path limit. The matching
+[Chromium 156.0.8078.4 implementation](https://github.com/chromium/chromium/blob/156.0.8078.4/content/browser/indexed_db/file_path_util.cc#L119)
+uses an origin directory and a 52-character database filename. The fixture now
+checks journal-path room before launching Chromium; the failed run and both
+diagnostic receipts are retained. This was a test-directory failure, not evidence
+of a Rust import failure or a frontend freeze.
+
+The new short-directory integration run passed **69,044 ms** of locked generation
+using the real Windows backend and WebUI. The WebUI automatically imported and
+ACKed the image. Before forwarding ACK to the extension, the fixture reopened
+the SQLite project, verified original image bytes on disk and through the real
+API, and checked that the knowledge version was unchanged. All 18 WTS samples
+reported locked. Three keepalives arrived; duplicate Start produced one submit,
+ACK released the task Web Lock and closed its tab, the original draft remained
+exact, and the owned Chromium exit was verified. Root inspected the final
+`artifacts/li65-2/receipt.json` and verified loaded companion module hashes against
+the clean native source and canonical Git content. There were no fixture errors
+or external requests.
+
+The final six-minute integration fixture also passed, with **363,668 ms** of
+locked generation and 18 keepalives. All 77 WTS samples reported locked with an
+inaccessible input desktop. It used new short data/profile directories and the
+updated path guard. The real WebUI imported and ACKed automatically; reopened
+SQLite data and exact original disk bytes matched, while the knowledge version
+remained unchanged. The owned task target disappeared and the page Web Lock was
+released. Chromium exited with code 0, no signal and no forced termination; the
+owned native web CLI then handled Ctrl+C, exited 0 and released its port. Root
+inspected `artifacts/li360-3/receipt.json`, its loaded runtime and harness hashes,
+original disk bytes and final service-stop receipt. WTS evidence consists of
+repeated samples, not continuous observation. These public fixtures still do not
+verify real ChatGPT login, live selectors or every Edge sleeping-tab policy;
+live-account acceptance remains open.
 
 ## Remaining release gates
 
@@ -417,6 +487,6 @@ automation. Native independent-client preparation remains a separate optional
 provider gate. Reviewed implementation changes are integrated into `main`, with
 repository default and Pages policy updated as requested; this does not declare
 live-account acceptance complete. These gates remain open despite
-completed UI, deployment and installer acceptance. Private
+completed implementation tests, fixture checks and prior release checks. Private
 source images, account information and generated acceptance images remain outside
 Git.

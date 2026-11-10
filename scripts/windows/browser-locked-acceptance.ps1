@@ -10,6 +10,8 @@ param(
     [string]$ArtifactDirectory,
     [string]$ExtensionDirectory,
     [string]$FixtureImage,
+    [string]$BackendUrl,
+    [string]$BackendDataDirectory,
     [ValidateRange(65000,540000)][int]$GenerationWaitMilliseconds = 65000
 )
 $ErrorActionPreference = 'Stop'
@@ -57,5 +59,7 @@ $arguments = @(
     '--image', $FixtureImage, '--windows-probe', $PSCommandPath,
     '--generation-wait-ms', [string]$GenerationWaitMilliseconds
 )
+if ($BackendUrl) { $arguments += @('--backend-url', $BackendUrl, '--backend-data-dir', $BackendDataDirectory) }
+elseif ($BackendDataDirectory) { throw '-BackendDataDirectory requires -BackendUrl' }
 & $NodeExecutable @arguments
 if ($LASTEXITCODE -ne 0) { throw "Locked browser acceptance failed (Node exit $LASTEXITCODE)." }

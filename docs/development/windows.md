@@ -118,8 +118,12 @@ public-key fingerprint in the test browser; it is never installed into Windows
 trust stores.
 
 Use Windows Node 22.12+, a headed Chromium executable (for example the local
-Playwright Chromium), and the `ws` package's `wrapper.mjs` module. Create a new
-artifact directory for each run. With an explicitly installed OpenSSL, generate
+Playwright Chromium), and the `ws` package's `wrapper.mjs` module. Create a new,
+short artifact directory for each run. Chromium 156's IndexedDB SQLite file names
+append the extension origin and a 52-character database hash. Long evidence paths
+can exceed Windows' path limit and fail before the extension retains an image;
+the driver checks room for the database journal before starting Chromium. With an
+explicitly installed OpenSSL, generate
 a short-lived test certificate into that directory:
 
 ```powershell
@@ -142,9 +146,36 @@ unlock is observed. It freezes the disposable original composer before starting
 the task, verifies the task's held Web Lock and its exact `Can Freeze` diagnostic
 cell, checks repeated-start suppression and three or more MV3 heartbeats, then
 persists and rereads original PNG bytes before ACK. It verifies the owned task
-window closes, the Web Lock is released, the original fixture draft survives,
+tab closes, the Web Lock is released, the original fixture draft survives,
 and Chromium exits. DevTools attaches only to helper pages; it never attaches to
 the task or extension worker, and no background-throttling bypass flags are used.
+
+To include the real native Windows HTTP/SQLite service and its WebUI, build the
+web CLI and start it in a separate native terminal with a new fixture data
+directory. Keep that terminal's process running during the browser test:
+
+```powershell
+cargo build --locked -p entwurf-web --target x86_64-pc-windows-msvc
+.\target\x86_64-pc-windows-msvc\debug\entwurf-web.exe `
+  --data-dir "$PWD\artifacts\locked-backend\data" `
+  --frontend "$PWD\apps\desktop\dist" --port 49378
+```
+
+Add `-BackendUrl 'http://127.0.0.1:49378'` and
+`-BackendDataDirectory "$PWD\artifacts\locked-backend\data"` to the browser
+fixture command, using another new browser artifact directory. The `ws` module
+must export both `WebSocketServer` and `WebSocket`. The driver refuses port
+48123, existing projects/runs, non-Windows backends, and data directories outside
+`artifacts`; it binds the server's pairing token to the explicit fixture store.
+
+This mode creates a public Markdown project through real HTTP, starts generation
+from the real WebUI, and detaches its page debugger after coordinator acceptance.
+A test-only WebSocket proxy records extension messages. The WebUI must import
+and ACK automatically while locked. Before delivering that ACK to the extension,
+the driver reopens the real SQLite project and verifies image identity, on-disk
+bytes, and the unchanged knowledge version. Failed fixture runs are cancelled
+only if still unfinished. Stop the owned web CLI with Ctrl+C after the test;
+the installed application's data is never a fixture directory.
 
 `receipt.json` records source/loaded-module hashes, the manifest's fixture-only ID
 change, Windows samples and checks. `cannot-freeze-diagnostic.json` records the

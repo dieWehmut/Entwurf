@@ -10,6 +10,7 @@ import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { prepareBackend } from './browser-locked-backend.mjs';
 
 const args = Object.fromEntries(Array.from({ length: (process.argv.length - 2) / 2 }, (_, i) => [process.argv[2 + i * 2].replace(/^--/, ''), process.argv[3 + i * 2]]));
 for (const key of ['chromium', 'websocket-module', 'tls-cert', 'tls-key', 'artifacts', 'extension', 'image', 'windows-probe']) assert.ok(args[key], `Missing --${key}`);
@@ -19,7 +20,7 @@ assert.ok(Number.isInteger(generationWaitMs) && generationWaitMs >= 65_000 && ge
 const artifacts = path.resolve(args.artifacts);
 const profile = path.join(artifacts, 'chromium-profile');
 await mkdir(artifacts, { recursive: true });
-const { WebSocketServer } = await import(pathToFileURL(path.resolve(args['websocket-module'])).href);
+const { WebSocketServer, WebSocket: BackendSocket } = await import(pathToFileURL(path.resolve(args['websocket-module'])).href);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const started = Date.now();
 const receipt = { fixture_only: true, scope: 'real browser adapter and localhost WS protocol; not Rust/frontend or real ChatGPT acceptance', worker_debugger_attached: false, windows: [], messages: [], blocked_requests: [], chromium_flags: [], checks: {} };
@@ -46,13 +47,25 @@ const listen = server => new Promise((resolve, reject) => { server.once('error',
 const fixtureImage = await readFile(args.image);
 const originalHash = sha256(fixtureImage);
 const prompt = 'Public locked-session fixture; generate no real account request.';
-const run = { run_id: 'locked-fixture-run', task_id: 'locked-fixture-task', base_version_id: 'locked-fixture-version', prompt, prompt_sha256: sha256(prompt) };
+let run = { run_id: 'locked-fixture-run', task_id: 'locked-fixture-task', base_version_id: 'locked-fixture-version', prompt, prompt_sha256: sha256(prompt) };
 let submissions = 0, downloads = 0, socket, browser, client, httpsServer, httpServer, wsServer, lockMonitor;
-let artifact, submittedAt, acknowledgedAt;
-let browserStderr = '';
+let artifact, submittedAt, acknowledgedAt, backend, backendSocket, backendAcknowledged = false, backendRunStarted = false;
+let browserStderr = '', browserFallbackKilled = false;
 try {
   windowsProbe();
+  // Chromium 156's IndexedDB SQLite layout appends the extension origin and a
+  // 52-character hashed database name. SQLite journals need additional room.
+  // Deep evidence directories can fail IDB.open before any original is retained.
+  const sqliteJournal = path.join(profile, 'Default', 'IndexedDB', `chrome-extension_${'a'.repeat(32)}_0`, `${'A'.repeat(52)}-journal`);
+  receipt.fixture_profile_path_guard = { profile_path_length: profile.length, estimated_sqlite_journal_path_length: sqliteJournal.length, windows_path_limit: 260 };
+  assert.ok(sqliteJournal.length < 260, 'Browser fixture path is too long for Chromium IndexedDB SQLite files. Use a shorter -ArtifactDirectory.');
   await mkdir(profile); // Refuse reuse before touching an earlier run's evidence.
+  backend = await prepareBackend(args, receipt, fixtureImage, sha256);
+  if (backend) {
+    assert.equal(receipt.backend.platform, 'windows', 'The integrated backend must run natively on Windows.');
+    assert.equal(typeof BackendSocket, 'function', '--websocket-module must also export WebSocket for real backend mode.');
+  }
+  receipt.harness_sources = Object.fromEntries(await Promise.all(['browser-locked-acceptance.mjs', 'browser-locked-backend.mjs'].map(async name => [name, sha256(await readFile(new URL(name, import.meta.url)))])));
   // Copy the current production bytes. A fixture-only public key gives a stable
   // extension id without ever opening or attaching to its service worker.
   const extension = path.join(artifacts, 'companion');
@@ -108,17 +121,46 @@ try {
   const wsPort = await listen(httpServer);
   assert.notEqual(wsPort, 48123);
   wsServer = new WebSocketServer({ server: httpServer, path: '/api/automation/extension' });
-  const token = randomBytes(32).toString('hex');
+  const token = backend?.pairing.extension_token ?? randomBytes(32).toString('hex');
   let authenticated = false;
   wsServer.on('connection', peer => {
     if (socket !== undefined) { fixtureErrors.push('Worker reconnected/restarted unexpectedly'); peer.close(); return; }
     socket = peer;
+    const upstreamQueue = [];
+    if (backend) {
+      backendSocket = new BackendSocket(backend.pairing.websocket_url);
+      backendSocket.on('open', () => { for (const data of upstreamQueue) backendSocket.send(data); upstreamQueue.length = 0; });
+      backendSocket.on('error', error => fixtureErrors.push(`Real backend transport: ${error.message}`));
+      backendSocket.on('message', async data => {
+        try {
+          const message = JSON.parse(String(data));
+          if (message.type === 'error') throw new Error(`Real backend: ${message.code}`);
+          if (message.type === 'authenticated') authenticated = true;
+          if (message.type === 'start') {
+            assert.equal(backendRunStarted, false, 'The real frontend starts exactly once.');
+            assert.equal(message.run.task_id, backend.expected.task_id);
+            assert.equal(message.run.base_version_id, backend.expected.base_version_id);
+            assert.equal(message.run.prompt, prompt);
+            run = message.run; backendRunStarted = true;
+          }
+          if (message.type === 'artifact_accepted') {
+            assert.equal(message.run_id, run.run_id);
+            assert.ok(artifact, 'An ACK must follow the real extension artifact.');
+            await backend.verifyImport(run, artifact);
+            acknowledgedAt = Date.now(); backendAcknowledged = true;
+          }
+          peer.send(String(data));
+        } catch (error) { fixtureErrors.push(`Real backend forwarding: ${error.message}`); }
+      });
+    }
     peer.on('message', data => {
       let message;
       try { message = JSON.parse(String(data)); } catch { fixtureErrors.push('Invalid extension message'); return; }
       receipt.messages.push({ type: message.type, phase: message.phase, detail: message.detail, at_ms: Date.now() - started });
-      if (message.type === 'authenticate') { if (message.token !== token) { fixtureErrors.push('Wrong fixture token'); peer.close(); return; } authenticated = true; peer.send(JSON.stringify({ type: 'authenticated' })); }
+      if (message.type === 'authenticate' && message.token !== token) { fixtureErrors.push('Wrong fixture token'); peer.close(); return; }
       if (message.type === 'artifact') artifact = message;
+      if (backend) { if (backendSocket.readyState === BackendSocket.OPEN) backendSocket.send(String(data)); else upstreamQueue.push(String(data)); }
+      else if (message.type === 'authenticate') { authenticated = true; peer.send(JSON.stringify({ type: 'authenticated' })); }
     });
   });
   const cert = new X509Certificate(await readFile(args['tls-cert']));
@@ -170,7 +212,7 @@ try {
       if (message.sessionId !== sessionId || message.method !== 'Fetch.requestPaused') return;
       const { requestId, request } = message.params;
       const url = new URL(request.url);
-      const operation = (url.origin === 'https://chatgpt.com' && ['/','/existing','/inspector','/c/locked-fixture','/fixture/submit','/fixture/generate','/fixture/original.png','/favicon.ico'].includes(url.pathname)) || ['chrome-extension:', 'chrome:', 'data:', 'blob:'].includes(url.protocol)
+      const operation = (url.origin === 'https://chatgpt.com' && ['/','/existing','/inspector','/c/locked-fixture','/fixture/submit','/fixture/generate','/fixture/original.png','/favicon.ico'].includes(url.pathname)) || (backend && url.origin === receipt.backend.origin) || ['chrome-extension:', 'chrome:', 'data:', 'blob:'].includes(url.protocol)
         ? send('Fetch.continueRequest', { requestId }, sessionId)
         : (receipt.blocked_requests.push({ origin: url.origin, path: url.pathname }), send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }, sessionId));
       operation.catch(error => { if (!/Session.*not found|Target closed|CDP disconnected|Invalid InterceptionId/i.test(error.message)) fixtureErrors.push(`Fixture request interception: ${error.message}`); });
@@ -197,7 +239,8 @@ try {
   await send('Page.setWebLifecycleState', { state: 'frozen' }, original.sessionId);
   await send('Target.detachFromTarget', { sessionId: original.sessionId });
   receipt.checks.existing_tab_frozen_before_start = true;
-  socket.send(JSON.stringify({ type: 'start', run }));
+  if (backend) await backend.openFrontend(attachPage, send, until, prompt, () => backendRunStarted);
+  else socket.send(JSON.stringify({ type: 'start', run }));
   await until(() => submissions === 1, 'single fixture submission');
   const taskTarget = await until(async () => (await send('Target.getTargets')).targetInfos.find(info => info.type === 'page' && info.url === 'https://chatgpt.com/c/locked-fixture'), 'isolated task page');
   // Never attach DevTools to the task: a task debugger would itself prevent
@@ -265,13 +308,18 @@ try {
   assert.deepEqual(Buffer.from(artifact.bytes_base64, 'base64'), fixtureImage);
   // This protocol fixture persists and independently rereads the exact original
   // before sending ACK. It is intentionally not a Rust/project import claim.
-  const retainedPath = path.join(artifacts, 'persisted-original.png');
-  await writeFile(retainedPath, Buffer.from(artifact.bytes_base64, 'base64'));
-  assert.equal(sha256(await readFile(retainedPath)), originalHash);
-  receipt.checks.exact_original_persisted_before_ack = true;
-  assert.equal(await inspector.evaluate(`navigator.locks.query().then(info=>info.held.some(lock=>lock.name===${JSON.stringify(lockName)}))`), true, 'Lock remains held until ACK.');
-  acknowledgedAt = Date.now();
-  socket.send(JSON.stringify({ type: 'artifact_accepted', run_id: run.run_id }));
+  if (backend) {
+    try { await until(() => backendAcknowledged, 'real frontend automatic SQLite import and ACK', 90_000); }
+    catch (error) { receipt.backend.final_run = await backend.getRun(run.run_id); throw error; }
+  } else {
+    const retainedPath = path.join(artifacts, 'persisted-original.png');
+    await writeFile(retainedPath, Buffer.from(artifact.bytes_base64, 'base64'));
+    assert.equal(sha256(await readFile(retainedPath)), originalHash);
+    receipt.checks.exact_original_persisted_before_ack = true;
+    assert.equal(await inspector.evaluate(`navigator.locks.query().then(info=>info.held.some(lock=>lock.name===${JSON.stringify(lockName)}))`), true, 'Lock remains held until ACK.');
+    acknowledgedAt = Date.now();
+    socket.send(JSON.stringify({ type: 'artifact_accepted', run_id: run.run_id }));
+  }
   await until(async () => !(await send('Target.getTargets')).targetInfos.some(info => info.targetId === taskTarget.targetId), 'owned task window removed after ACK');
   assert.equal(await inspector.evaluate(`navigator.locks.query().then(info=>info.held.some(lock=>lock.name===${JSON.stringify(lockName)}))`), false);
   const restoredOriginal = await attachPage(original.targetId);
@@ -294,19 +342,33 @@ try {
   console.error(receipt.error); process.exitCode = 1;
 } finally {
   clearInterval(lockMonitor);
-  if (client) { try { await client.send('Browser.close'); } catch {} client.ws.close(); }
-  if (browser && browser.exitCode === null) {
-    await Promise.race([new Promise(resolve => browser.once('exit', resolve)), pause(5000)]);
-    if (browser.exitCode === null) browser.kill();
-    await Promise.race([new Promise(resolve => browser.once('exit', resolve)), pause(5000)]);
+  if (backend && backendRunStarted && !backendAcknowledged) {
+    try {
+      const finalRun = await backend.getRun(run.run_id);
+      receipt.backend.final_run = finalRun;
+      if (finalRun.phase !== 'completed') receipt.backend.cancelled_fixture_run = await backend.cancel(run.run_id);
+    }
+    catch (error) { fixtureErrors.push(`Fixture cancellation: ${error.message}`); }
   }
+  if (client) { try { await client.send('Browser.close'); } catch {} client.ws.close(); }
+  if (browser && browser.exitCode === null && browser.signalCode === null) {
+    await Promise.race([new Promise(resolve => browser.once('exit', resolve)), pause(5000)]);
+    if (browser.exitCode === null && browser.signalCode === null) {
+      browserFallbackKilled = true; browser.kill();
+      await Promise.race([new Promise(resolve => browser.once('exit', resolve)), pause(5000)]);
+    }
+  }
+  receipt.checks.browser_exit_code = browser?.exitCode ?? null;
+  receipt.checks.browser_exit_signal = browser?.signalCode ?? null;
+  receipt.checks.browser_forced_termination = browserFallbackKilled;
   receipt.checks.browser_exit_verified = !browser?.pid || browser.exitCode !== null || browser.signalCode !== null;
   if (!receipt.checks.browser_exit_verified) { receipt.passed = false; receipt.error = (receipt.error || '') + '\nOwned Chromium did not confirm exit.'; process.exitCode = 1; }
-  socket?.close(); wsServer?.close();
+  socket?.close(); backendSocket?.close(); wsServer?.close();
   httpsServer?.closeAllConnections(); httpServer?.closeAllConnections();
   await Promise.all([httpsServer, httpServer].filter(Boolean).map(server => new Promise(resolve => server.close(resolve))));
   receipt.elapsed_ms = Date.now() - started;
   receipt.fixture_errors = fixtureErrors;
+  if (fixtureErrors.length) { receipt.passed = false; receipt.error = (receipt.error || '') + '\n' + fixtureErrors.join('; '); process.exitCode = 1; }
   await writeFile(path.join(artifacts, 'receipt.json'), JSON.stringify(receipt, null, 2));
   await writeFile(path.join(artifacts, 'chromium.stderr.log'), browserStderr);
 }
