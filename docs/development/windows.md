@@ -82,9 +82,9 @@ dotnet test sidecars/gpt-bridge/Entwurf.Bridge.Tests/Entwurf.Bridge.Tests.csproj
 ## Release gate
 
 Actual results and remaining environment limits are in [acceptance status](progress.md).
-Keep automation disabled unless window discovery, reliable input, completion
-detection and reliable retrieval all pass in a real foreground session on the
-target ChatGPT version. Unit tests and CSS zoom screenshots do not establish
+The Windows UIA adapter requires window discovery, reliable input, completion
+detection and reliable retrieval to pass in a real unlocked foreground session
+on the target ChatGPT version. Unit tests and CSS zoom screenshots do not establish
 native OS scaling or physical multi-monitor behavior.
 
 The installed-app harness uses an owned test installation under
@@ -105,3 +105,54 @@ test-launched process and native file-dialog controls scoped to that process.
 It disables WebView networking; it does not disconnect host network adapters.
 Evidence remains outside Git. A unique WebView profile is not by itself a fresh
 native application configuration; test those separately.
+
+## Locked-session browser fixture
+
+`scripts/windows/browser-locked-acceptance.ps1` verifies the browser adapter in an
+already locked native Windows session. It launches headed Chromium with a new,
+dedicated profile, maps the fixture ChatGPT hostname to an ephemeral localhost
+HTTPS server, and rejects external host resolution. No Windows input or unlock
+operation is issued. Existing browser profiles and the installed companion are
+kept separate from the fixture. The supplied certificate is accepted only by its
+public-key fingerprint in the test browser; it is never installed into Windows
+trust stores.
+
+Use Windows Node 22.12+, a headed Chromium executable (for example the local
+Playwright Chromium), and the `ws` package's `wrapper.mjs` module. Create a new
+artifact directory for each run. With an explicitly installed OpenSSL, generate
+a short-lived test certificate into that directory:
+
+```powershell
+New-Item -ItemType Directory artifacts\locked-browser-run
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=chatgpt.com -addext subjectAltName=DNS:chatgpt.com -keyout artifacts\locked-browser-run\fixture-key.pem -out artifacts\locked-browser-run\fixture-cert.pem
+.\scripts\windows\browser-locked-acceptance.ps1 `
+  -NodeExecutable C:\tools\node.exe `
+  -ChromiumExecutable C:\tools\chromium\chrome.exe `
+  -WebSocketModule C:\tools\node_modules\ws\wrapper.mjs `
+  -TlsCertificate "$PWD\artifacts\locked-browser-run\fixture-cert.pem" `
+  -TlsKey "$PWD\artifacts\locked-browser-run\fixture-key.pem" `
+  -ArtifactDirectory "$PWD\artifacts\locked-browser-run"
+```
+
+The default fixture generation takes 65 seconds. Set
+`-GenerationWaitMilliseconds 360000` for a six-minute observation; the supported
+range is 65–540 seconds. The driver samples WTS lock state every five seconds,
+binding each sample to the actual Chromium PID and session, and fails if an
+unlock is observed. It freezes the disposable original composer before starting
+the task, verifies the task's held Web Lock and its exact `Can Freeze` diagnostic
+cell, checks repeated-start suppression and three or more MV3 heartbeats, then
+persists and rereads original PNG bytes before ACK. It verifies the owned task
+window closes, the Web Lock is released, the original fixture draft survives,
+and Chromium exits. DevTools attaches only to helper pages; it never attaches to
+the task or extension worker, and no background-throttling bypass flags are used.
+
+`receipt.json` records source/loaded-module hashes, the manifest's fixture-only ID
+change, Windows samples and checks. `cannot-freeze-diagnostic.json` records the
+task URL's actual freezing reason. New Chromium versions may require enabling
+internal diagnostics; the driver does so only in its disposable profile. Failed
+runs keep their receipts and use a fresh profile on the next invocation.
+
+This fixture proves the real browser extension's locked-session execution and
+localhost WebSocket delivery of a public image. Rust/project import, actual
+ChatGPT authentication and generation, longer-duration browser policy behavior,
+Edge sleeping tabs, system sleep and session logout require their own evidence.

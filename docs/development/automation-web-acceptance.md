@@ -292,6 +292,86 @@ The automation subagent also reran **8 IndexedDB and duplicate-submission guard
 tests**, all passing with zero live or generation requests. The original run still
 has `submit_intent: false`; these tests do not establish real image generation.
 
+## Locked-session background automation — 2026-11-10
+
+The resumed objective is automation in a logged-on Windows session that remains
+locked. The browser extension now prepares each explicit generation in a fresh,
+unfocused window in the existing browser profile. It preserves the user's
+conversation and draft. Foreground Windows UIA remains an optional provider
+whose input requirements still include an unlocked desktop.
+
+Source `adaec41` makes browser automation the fresh-install default and migrates
+idle v1 installations once. An unfinished native run keeps its provider, tokens,
+identity and retained image so its original adapter can still recover and ACK it.
+Explicit v2 provider choices remain durable. Restart and migration submit nothing.
+All 31 real localhost coordinator tests and 17 HTTP/access tests pass on Linux.
+The bundled-native fresh-install case also passed on native
+`x86_64-pc-windows-msvc` with Rust 1.99.1, one exact test and cargo exit 0. It used
+a clean independent Windows checkout at `b3a22d4`, whose relevant Rust source is
+unchanged in the current integration. Root inspected its final receipt and test
+log; no installation or real generation was performed.
+
+Source `adb9dbe` holds a run-scoped Web Lock before preparing the task composer,
+disables automatic task-tab discarding, sends independent WebSocket keepalives
+every 20 seconds, and uses a one-minute reconnect alarm compatible with Chrome
+116. A frozen original tab permits preparation in the new window; its live login
+controls, empty composer and run binding must pass before the only Send click.
+Read-only observation retries bounded page-response timeouts against the same
+run. A durable ten-minute deadline stops an unresponsive run without replaying
+Send or Download. ACK, cancellation and failed preparation release the matching
+page lock; an orphaned lock expires after fifteen minutes.
+
+The focused-window change alone would not meet this objective: Chromium marks
+all Windows browser windows occluded when the session is locked, including their
+active tabs. The Web Lock addresses Chromium's automatic freezing policy; page
+timers may still be throttled. Sleep, logout, browser exit, expired login and
+manually freezing the task page remain interruption conditions. These distinctions follow
+the [Chromium Windows occlusion design](https://chromium.googlesource.com/chromium/src/+/main/docs/windows_native_window_occlusion_tracking.md),
+[Web Lock freezing policy](https://chromium.googlesource.com/chromium/src/+/main/components/performance_manager/freezing/freezing_policy.cc)
+and [Chrome 116 WebSocket worker guidance](https://developer.chrome.com/docs/extensions/how-to/web-platform/websockets).
+
+All 49 extension regressions pass, including previously failing hung-probe,
+transport-heartbeat, delayed-observation and worker-deadline cases. Source
+`b3a22d4` adds Chinese connection instructions and status messages. All 99 frontend
+tests, TypeScript checking and the production frontend build pass after restoring
+the frozen dependency set. The distributed companion ZIP includes the new module
+and alarm permission; its bundled source bytes were compared with the worktree.
+The real HTTP/SQLite frontend scenario also passed automatic image import, durable
+ACK, reload, identical original download, stale-version rejection and cancellation.
+The three HTTP runtime scenarios pass after `62687ee` updates the test to open the
+actual folded project-management form before creating a cloned-window project.
+
+The reviewed runtime and UI source is now on `main` at `b3a22d4`. The repository
+default and the GitHub Pages environment's allowed deployment branch are both
+`main`. [Pages run 42741441690](https://github.com/dieWehmut/Entwurf/actions/runs/42741441690)
+is building that source; successful deployment is not yet claimed.
+
+The final native locked-browser fixture passed on headed Chromium 156. It starts
+after the original fixture tab is frozen, then submits once in its owned window.
+The task's `chrome://discards` row reports `occluded`, `hidden` and `holding Web
+Lock` as a CannotFreeze reason. Neither the task nor its worker has a debugger
+attached, and no background-throttling bypass flag is used. The browser's actual
+PID is bound to disconnected session 1; all 18 WTS snapshots report locked,
+including 17 browser-bound samples taken about every five seconds. The input
+desktop remains inaccessible with Win32 error 5 in those samples.
+
+After **68,733 ms**, the extension delivered identical public-fixture original
+bytes. The protocol fixture saved and independently reread them before ACK.
+Three transport keepalives arrived, duplicate Start produced no second submit,
+ACK removed the owned task window and released its Web Lock, the original draft
+remained exact, and the owned browser's exit was verified. Root inspected the
+final `locked-browser-20261110-7/receipt.json` and its task-row diagnostic, and
+compared every loaded runtime module with the current committed source hashes.
+Earlier failed harness attempts remain preserved; they are not counted as passes.
+
+The scripts use a dedicated new browser profile, an ephemeral localhost HTTPS/WS
+fixture and a certificate exception scoped to the test certificate's public key.
+Other hostnames are blocked; existing browser profiles, installed application
+data and machine hosts/trust settings are unchanged. No actual ChatGPT request is
+made. This proves the recorded locked-browser/localhost-protocol run, not live
+ChatGPT selectors or all Edge sleep policies. Real Rust/frontend import evidence
+and live-account acceptance remain separate gates.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
@@ -319,9 +399,12 @@ in the last unlocked live check. Final independent-window preparation remains
 unverified. An unlocked, connected desktop and a supported independent new window
 are required before any real prompt is sent; existing drafts must be preserved.
 
-One sparse real-account generation from each frontend is still required. The
-final reviewed result will then be integrated into `main`; repository default
-and Pages deployment policy will be switched to `main` as requested. These gates
-remain open despite completed UI, deployment and installer acceptance. Private
+One sparse real-account generation from each frontend is still required, now
+using an explicitly connected, signed-in browser extension for locked-session
+automation. Native independent-client preparation remains a separate optional
+provider gate. Reviewed implementation changes are integrated into `main`, with
+repository default and Pages policy updated as requested; this does not declare
+live-account acceptance complete. These gates remain open despite
+completed UI, deployment and installer acceptance. Private
 source images, account information and generated acceptance images remain outside
 Git.
