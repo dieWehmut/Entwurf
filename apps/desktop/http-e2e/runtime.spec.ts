@@ -1,7 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function createProject(page: Page, name: string) {
-  await page.getByLabel("项目名称").fill(name);
+  const projectName = page.getByLabel("项目名称");
+  await expect(projectName).toBeAttached();
+  if (!await projectName.isVisible()) await page.getByText("管理项目", { exact: true }).click();
+  await projectName.fill(name);
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByLabel("任务标题")).toBeEnabled();
 }
