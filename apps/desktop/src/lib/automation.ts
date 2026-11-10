@@ -10,7 +10,17 @@ export interface AutomationRun {
 export const automationOrigin = "http://127.0.0.1:48123";
 const reasonLabels: Record<string, string> = {
   ready: "ChatGPT 已就绪，可以开始生成。",
-  windows_locked: "Windows 当前已锁屏，请解锁后继续。",
+  composer_detected: "已找到 ChatGPT 输入框；发送前仍会在独立窗口检查会话。",
+  existing_session_requires_verification: "已找到 ChatGPT 网页，但原页面尚未响应。可准备新任务，发送前会在独立窗口检查会话。",
+  open_existing_chatgpt_session: "请在已登录的浏览器中打开 ChatGPT 网页。",
+  reload_chatgpt_tab: "请刷新已打开的 ChatGPT 网页，让扩展建立连接。",
+  existing_session_unavailable: "未找到可用的 ChatGPT 网页，请打开已登录的页面并刷新。",
+  login_required: "ChatGPT 需要登录，请在浏览器中登录后重新检查连接。",
+  background_window_unavailable: "无法打开独立后台窗口，尚未发送提示。请检查浏览器和扩展。",
+  background_work_unavailable: "无法启用浏览器后台运行，尚未发送提示。请检查浏览器和扩展后重新连接。",
+  background_work_active: "此网页已有后台任务，请先处理原运行。",
+  content_timeout: "ChatGPT 网页响应超时，请查看当前运行状态。不会自动重发提示。",
+  windows_locked: "ChatGPT 客户端需要 Windows 解锁。如需锁屏后台生成，请在连接设置中使用浏览器扩展。",
   chatgpt_not_found: "未找到 ChatGPT 客户端，请先打开并登录。",
   ambiguous_chatgpt_windows: "无法确定用于新建窗口的 ChatGPT 客户端，请将目标客户端置于前台后刷新连接。",
   chatgpt_mode_required: "请在客户端切换到 ChatGPT 模式。",

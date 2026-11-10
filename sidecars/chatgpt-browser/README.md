@@ -8,7 +8,7 @@ existing signed-in ChatGPT browser session.
 
 ## Installation and connection
 
-Load this directory as an unpacked Chrome/Edge extension in the browser profile
+Load this directory as an unpacked Chrome/Edge 116+ extension in the browser profile
 where ChatGPT is already signed in. Keep an existing `https://chatgpt.com/` tab
 open; reload that tab once after installation so the content adapter can attach.
 This does not create a new browser profile, copy cookies, or automate login.
@@ -21,10 +21,53 @@ query credentials, embedded usernames/passwords and other paths are rejected.
 The token goes only in the first WebSocket frame and local extension settings.
 
 The three Entwurf frontends use the same local companion. On an explicit start,
-the extension verifies an existing ChatGPT tab exposes a composer, then opens a
-new ChatGPT tab in **that same browser profile and window**. This preserves the
-user's existing conversation and draft. No prompt is submitted during discovery,
+the extension discovers an existing ChatGPT tab, then opens a
+fresh conversation in **a separate, unfocused window in that same browser profile**.
+The task tab stays active within that window and has automatic discarding disabled.
+If an existing tab is frozen or slow to respond, discovery reports
+`existing_session_requires_verification`: this permits preparation of a new task,
+not a claim that login or the composer is ready. The new owned page must expose
+the supported composer and pass login-control checks before preparation and Send.
+This preserves the user's existing conversation, draft and focused window.
+No prompt is submitted during discovery,
 pairing, reconnection or installation.
+
+## Background operation and locked sessions
+
+The browser adapter is the default connection for background image generation.
+It uses DOM controls and browser downloads rather than foreground Windows input.
+A Windows session must remain logged on; keep the browser, local companion and
+network running. Locking the session is distinct from sleeping, logging off or
+closing the browser, which interrupts this workflow. The native Windows UIA
+adapter still requires an unlocked desktop.
+
+The extension requires Chrome/Edge 116+ and sends an independent
+`{"type":"keepalive"}` WebSocket message every 20 seconds while authenticated to
+keep the Manifest V3 worker active. Heartbeats do not wait for a page probe and
+do not change readiness or durable run state. A one-minute `chrome.alarms` wakeup
+reconnects a stopped or disconnected worker; reconnection observes the original
+run and never resubmits an uncertain prompt.
+
+The content adapter acquires a run-scoped Web Lock before filling the new
+composer. Chromium's automatic freezing policy exempts pages holding Web Locks;
+locking Windows still makes the window occluded and its page timers may be
+throttled. Neither an active tab nor `autoDiscardable:false` alone prevents that
+freezing. Independent task windows do not request focus. The lock is released on
+matching cancellation or image-import acknowledgement, or after a 15-minute
+lease so abandoned work cannot hold it indefinitely. The lease does not renew a
+task or resubmit a prompt. Normal generation observation has a ten-minute
+deadline.
+
+Page RPCs have bounded waits: probes allow two seconds, image-byte capture allows
+60 seconds, and other operations allow 15 seconds. An observation timeout keeps
+querying the original submitted run. A timeout during submission or capture
+keeps the uncertainty visible and never repeats Send or Download. The task window
+is retained through image capture until Entwurf acknowledges durable import;
+cleanup targets only the adapter's bound task tab. Browser suspension, session
+expiry or process termination can still interrupt a run.
+
+These are implementation conditions, not live locked-session acceptance evidence.
+The actual Windows session and signed-in ChatGPT workflow must still be verified.
 
 ## Companion protocol
 
@@ -46,6 +89,7 @@ Server messages:
 Extension messages:
 
 ```json
+{"type":"keepalive"}
 {"type":"probe","available":true,"adapter":"chatgpt-browser","origin":"https://chatgpt.com","reason":"composer_detected"}
 {"type":"status","run_id":"run-1","phase":"generating"}
 {"type":"artifact","run_id":"run-1","task_id":"task-1","base_version_id":"version-1","mime_type":"image/png","bytes_base64":"...","sha256":"..."}
