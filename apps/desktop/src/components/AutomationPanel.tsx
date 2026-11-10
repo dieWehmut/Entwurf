@@ -109,7 +109,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     <p className="muted">使用已登录的 ChatGPT 会话。图片独立保存为任务结果，知识节点与来源保持原有审阅流程。</p>
     <div className="handoff-actions"><button className="secondary-button" disabled={locked || busy} onClick={() => { void connect(); }}>{service ? "重新连接自动化" : "连接 ChatGPT 自动化"}</button><span role="status">{status ? `${status.connected ? "已连接" : "未连接"} · ${automationReason(status.reason)}` : "尚未连接自动化服务"}</span></div>
     <button className="text-button" disabled={locked || busy} onClick={() => { void run("打开连接设置", () => client.call("open_automation_setup", undefined)); }}>ChatGPT 连接设置</button>
-    <p className="muted">默认使用浏览器扩展。需要锁屏后继续生成时，请保持已登录的浏览器和本机服务运行；任务会使用独立窗口，保留原有会话与草稿。ChatGPT 客户端模式需要 Windows 解锁。</p>
+    <p className="muted">默认使用浏览器扩展，也可在连接设置中选择 ChatGPT 客户端。请保持所选应用与本机服务运行；任务使用独立窗口，保留原有会话与草稿。客户端锁屏运行仍待实机验证。</p>
     {error && <p className="callout warn" role="alert">{error}</p>}
     <label className="field">图片生成提示<textarea rows={5} disabled={locked || busy || (running && !recoverable)} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={recoverable ? "继续时需填写与这次运行完全相同的原提示" : "描述这次希望 ChatGPT 生成的图片"} /></label>
     <p className="muted">{version ? `本次生成绑定任务 ${taskId} 的 r${version.revision}。` : "导入资料建立知识版本后可开始生成。"}</p>

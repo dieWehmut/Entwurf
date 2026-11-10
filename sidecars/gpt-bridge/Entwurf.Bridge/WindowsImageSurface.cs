@@ -15,6 +15,7 @@ namespace Entwurf.Bridge;
 public sealed class WindowsImageSurface : IImageAutomationSurface
 {
     readonly object uiGate = new();
+    readonly NativeImageWindowAccess windowAccess = new(ReadWindowIdentity);
     UIA3Automation? automation;
     NativeImageTarget? sourceTarget;
     sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId);
@@ -37,7 +38,6 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken cancellation) => Task.Run(() => ReadProbe(() =>
     {
         cancellation.ThrowIfCancellationRequested();
-        if (!DesktopUnlocked()) return new ImageSurfaceProbe(false, "windows_locked");
         lock (uiGate)
         {
             return ProbeSource(DiscoverTargets(), GetForegroundWindow(), target =>
@@ -70,16 +70,13 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         lock (uiGate)
         {
             cancellation.ThrowIfCancellationRequested();
-            if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
             var source = Discover();
             preparation.Begin(source, DiscoverTargets(), ReadFrame, target =>
             {
                 sourceTarget = target;
-                Focus(target);
                 OpenNewWindow(target, cancellation);
             }, cancellation);
         }
-        NativeImageTarget? focused = null;
         var deadline = Stopwatch.StartNew();
         while (deadline.Elapsed < TimeSpan.FromSeconds(35))
         {
@@ -88,8 +85,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             {
                 var edit = preparation.Advance(DiscoverTargets(), target =>
                 {
-                    if (focused is null) { Focus(target); focused = target; }
-                    SafeInteraction(target, cancellation);
+                    RequireWindow(target, cancellation);
                     return ReadFrame(target);
                 }, (target, node) =>
                 {
@@ -97,8 +93,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                     return element.Patterns.Value.IsSupported && !element.Patterns.Value.Pattern.IsReadOnly.Value ? ReadValue(element) : null;
                 }, (target, id) =>
                 {
-                    SafeInteraction(target, cancellation);
-                    Invoke(frames[target].Elements[id]);
+                    RequireWindow(target, cancellation);
+                    Invoke(target, frames[target].Elements[id], cancellation);
                 }, cancellation);
                 if (edit is not null)
                 {
@@ -120,8 +116,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             var frame = BeforeSubmit(run, cancellation);
             var edit = frame.Elements[run.EditId];
             if (ReadValue(edit).Length != 0 || prompt != run.Prompt) throw new ImageAutomationException("user_changed_composer");
-            SafeInteraction(run.Target, cancellation);
-            edit.Patterns.Value.Pattern.SetValue(prompt);
+            RequireWindow(run.Target, cancellation);
+            SetValue(run.Target, edit, prompt, cancellation);
             if (ReadValue(edit) != prompt) throw new ImageAutomationException("user_changed_composer");
         }
         var settled = Stopwatch.StartNew();
@@ -151,9 +147,12 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             var parent = frame.Nodes.Single(x => x.Id == run.EditId).ParentId;
             var send = frame.Nodes.Where(x => x.ParentId == parent && x.Role == "Button" && x.Visible && x.Enabled && x.Name is "发送" or "Send" or "Send prompt" or "Send message").ToArray();
             if (send.Length != 1) throw new ImageAutomationException("image_surface_unavailable");
-            SafeInteraction(run.Target, cancellation);
-            run.Submitted = true; // Even an ambiguous COM exception after this point can never trigger a second Invoke.
-            Invoke(frame.Elements[send[0].Id]);
+            RequireWindow(run.Target, cancellation);
+            windowAccess.Perform(run.Target, cancellation, () =>
+            {
+                run.Submitted = true; // An ambiguous native call can never trigger a second Invoke.
+                InvokePattern(frame.Elements[send[0].Id], cancellation);
+            });
         }
         return Task.CompletedTask;
     }
@@ -169,7 +168,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             cancellation.ThrowIfCancellationRequested();
             lock (uiGate)
             {
-                SafeInteraction(run.Target, cancellation);
+                RequireWindow(run.Target, cancellation);
                 var frame = Capture(run.Target, cancellation, run);
                 if (frame.DocumentId != run.DocumentId || HasLogin(frame)) throw new ImageAutomationException("conversation_changed");
                 var ownUsers = frame.Nodes.Where(x => x.Role == "Text" && !run.Before.Contains(x.Id) && NativeImageEvidence.MatchesHash(x.Name, run.PromptSha256)).ToArray();
@@ -198,13 +197,13 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         HashSet<string> beforePreview;
         lock (uiGate)
         {
-            SafeInteraction(run.Target, cancellation);
+            RequireWindow(run.Target, cancellation);
             var frame = Capture(run.Target, cancellation, run);
             var current = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId);
             if (current != expected || frame.Nodes.Any(x => x.Visible && NativeImageEvidence.IsGenerating(x.Name)))
                 throw new ImageAutomationException("conversation_changed");
             beforePreview = frame.Nodes.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
-            Invoke(frame.Elements[current.ActionId]);
+            Invoke(run.Target, frame.Elements[current.ActionId], cancellation);
         }
         if (expected.OpensPreview)
         {
@@ -215,7 +214,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 await Task.Delay(300, cancellation);
                 lock (uiGate)
                 {
-                    SafeInteraction(run.Target, cancellation);
+                    RequireWindow(run.Target, cancellation);
                     var frame = Capture(run.Target, cancellation, run);
                     var previews = frame.Nodes.Where(x => x.Visible && x.Role is "Window" or "Group"
                         && !beforePreview.Contains(x.Id) && IsPreviewDialog(x.Name)).ToArray();
@@ -226,7 +225,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                     var downloads = frame.Nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && !beforePreview.Contains(x.Id)
                         && NativeImageEvidence.IsDownload(x.Name) && NativeImageEvidence.IsWithin(x.Id, run.PreviewRootId, map)).ToArray();
                     if (downloads.Length > 1) throw new ImageAutomationException("download_unavailable");
-                    if (downloads.Length == 1) { Invoke(frame.Elements[downloads[0].Id]); opened = true; }
+                    if (downloads.Length == 1) { Invoke(run.Target, frame.Elements[downloads[0].Id], cancellation); opened = true; }
                 }
             }
             if (!opened) throw new ImageAutomationException("download_unavailable");
@@ -240,8 +239,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             cancellation.ThrowIfCancellationRequested();
             lock (uiGate)
             {
-                if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
-                VerifyTarget(run.Target);
+                RequireWindow(run.Target, cancellation);
                 var dialog = SaveDialog(run.Target);
                 if (dialog is not null)
                 {
@@ -252,10 +250,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                     var save = dialog.FindAllDescendants(x => x.ByControlType(ControlType.Button))
                         .Where(x => !x.IsOffscreen && x.IsEnabled && x.AutomationId == "1" && x.Name is "保存(S)" or "保存" or "Save" or "&Save").ToArray();
                     if (edits.Length != 1 || save.Length != 1) throw new ImageAutomationException("download_dialog_unavailable");
-                    edits[0].Patterns.Value.Pattern.SetValue(destination);
+                    SetValue(run.Target, edits[0], destination, cancellation);
                     if (ReadValue(edits[0]) != destination) throw new ImageAutomationException("download_dialog_unavailable");
                     cancellation.ThrowIfCancellationRequested();
-                    Invoke(save[0]);
+                    Invoke(run.Target, save[0], cancellation);
                     saved = true;
                 }
             }
@@ -283,7 +281,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (run.Submitted) return Task.CompletedTask;
             var frame = BeforeSubmit(run, cancellation);
             var edit = frame.Elements[run.EditId];
-            if (ReadValue(edit) == prompt) edit.Patterns.Value.Pattern.SetValue("");
+            if (ReadValue(edit) == prompt) SetValue(run.Target, edit, "", cancellation);
         }
         return Task.CompletedTask;
     }
@@ -307,20 +305,19 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         // then revalidate the original user turn before considering a new download action.
         lock (uiGate)
         {
-            if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
-            VerifyTarget(target);
+            RequireWindow(target, cancellation);
             using var process = Process.GetProcessById(target.ProcessId);
             if (PackageVersion(process) is null) throw new ImageAutomationException("conversation_changed");
             var frame = Capture(target, cancellation, run);
             if (frame.DocumentId != run.DocumentId) throw new ImageAutomationException("conversation_changed");
             if (run.PreviewRootId is { } preview && frame.Nodes.Any(x => x.Id == preview && x.Visible && IsPreviewDialog(x.Name)))
             {
-                SafeInteraction(target, cancellation);
+                RequireWindow(target, cancellation);
                 var map = frame.Nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
                 var close = frame.Nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && NativeImageEvidence.IsWithin(x.Id, preview, map)
                     && x.Name is "关闭图像预览" or "关闭图片预览" or "Close image preview" or "关闭" or "Close").ToArray();
                 if (close.Length != 1) throw new ImageAutomationException("download_unavailable");
-                Invoke(frame.Elements[close[0].Id]);
+                Invoke(target, frame.Elements[close[0].Id], cancellation);
                 run.PreviewRootId = null;
             }
         }
@@ -338,7 +335,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 
     Frame BeforeSubmit(Conversation run, CancellationToken cancellation)
     {
-        SafeInteraction(run.Target, cancellation);
+        RequireWindow(run.Target, cancellation);
         var frame = Capture(run.Target, cancellation);
         if (frame.DocumentId != run.DocumentId || !ImageHome(frame) || !frame.Elements.ContainsKey(run.EditId))
             throw new ImageAutomationException("conversation_changed");
@@ -350,10 +347,26 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         if (!edit.Patterns.Value.IsSupported || edit.Patterns.Value.Pattern.IsReadOnly.Value) throw new ImageAutomationException("image_surface_unavailable");
         return edit.Patterns.Value.Pattern.Value.Value;
     }
-    static void Invoke(AutomationElement element)
+    void Invoke(NativeImageTarget target, AutomationElement element, CancellationToken cancellation)
+        => windowAccess.Perform(target, cancellation, () => InvokePattern(element, cancellation));
+
+    void SetValue(NativeImageTarget target, AutomationElement element, string value, CancellationToken cancellation)
+        => windowAccess.Perform(target, cancellation, () =>
+        {
+            if (!element.IsEnabled || element.IsOffscreen || !element.Patterns.Value.IsSupported)
+                throw new ImageAutomationException("image_surface_unavailable");
+            var pattern = element.Patterns.Value.Pattern;
+            if (pattern.IsReadOnly.Value) throw new ImageAutomationException("image_surface_unavailable");
+            cancellation.ThrowIfCancellationRequested();
+            pattern.SetValue(value);
+        });
+
+    static void InvokePattern(AutomationElement element, CancellationToken cancellation)
     {
         if (!element.IsEnabled || element.IsOffscreen || !element.Patterns.Invoke.IsSupported) throw new ImageAutomationException("image_surface_unavailable");
-        element.Patterns.Invoke.Pattern.Invoke();
+        var pattern = element.Patterns.Invoke.Pattern;
+        cancellation.ThrowIfCancellationRequested();
+        pattern.Invoke();
     }
     static NativeImageNode? GlobalImages(Frame frame)
     {
@@ -374,7 +387,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 
     Frame Capture(NativeImageTarget target, CancellationToken cancellation, Conversation? conversation = null)
     {
-        VerifyTarget(target);
+        RequireWindow(target, cancellation);
         automation ??= new UIA3Automation { ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2) };
         var root = automation.FromHandle(target.Handle);
         var walker = automation.TreeWalkerFactory.GetControlViewWalker();
@@ -477,7 +490,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var elements = new Dictionary<string, AutomationElement>(StringComparer.Ordinal);
         IReadOnlyList<NativeMenuNode> ReadMenu()
         {
-            SafeInteraction(target, cancellation);
+            RequireWindow(target, cancellation);
             var root = automation!.FromHandle(target.Handle);
             var walker = automation.TreeWalkerFactory.GetControlViewWalker();
             var nodes = new List<NativeMenuNode>();
@@ -519,15 +532,20 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         }
         NativeWindowMenu.CreateWindow(ReadMenu, id =>
         {
-            SafeInteraction(target, cancellation);
+            RequireWindow(target, cancellation);
             var file = elements[id];
             if (file.ControlType != ControlType.MenuItem || file.AutomationId != "application-menu-trigger-file-menu"
                 || file.Name is not ("文件" or "File") || !file.IsEnabled || file.IsOffscreen || !file.Patterns.ExpandCollapse.IsSupported)
                 throw new ImageAutomationException("independent_window_unavailable");
-            file.Patterns.ExpandCollapse.Pattern.Expand();
+            var pattern = file.Patterns.ExpandCollapse.Pattern;
+            windowAccess.Perform(target, cancellation, () =>
+            {
+                cancellation.ThrowIfCancellationRequested();
+                pattern.Expand();
+            });
         }, id =>
         {
-            SafeInteraction(target, cancellation);
+            RequireWindow(target, cancellation);
             var command = elements[id];
             if (command.ControlType != ControlType.MenuItem || command.Name is not ("新建窗口" or "New Window"))
                 throw new ImageAutomationException("independent_window_unavailable");
@@ -541,13 +559,13 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 { menuFound = true; break; }
             }
             if (!menuFound) throw new ImageAutomationException("independent_window_unavailable");
-            Invoke(command);
+            Invoke(target, command, cancellation);
         }, id =>
         {
             try
             {
-                SafeInteraction(target, CancellationToken.None);
-                elements[id].Patterns.ExpandCollapse.Pattern.Collapse();
+                RequireWindow(target, CancellationToken.None);
+                windowAccess.Perform(target, CancellationToken.None, () => elements[id].Patterns.ExpandCollapse.Pattern.Collapse());
             }
             catch (Exception error) when (error is ImageAutomationException or COMException or InvalidOperationException or FlaUIException or TimeoutException) { }
         }, cancellation);
@@ -565,33 +583,21 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var match = Regex.Match(package, @"^OpenAI\.(?:ChatGPT(?:-Desktop)?|Codex)_([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)_(?:x64|arm64|x86|neutral)__2p2nqsd0c76g0$", RegexOptions.CultureInvariant);
         return match.Success ? match.Groups[1].Value : null;
     }
-    static void VerifyTarget(NativeImageTarget target)
+    static NativeWindowIdentity? ReadWindowIdentity(nint window)
     {
-        if (!IsWindow(target.Handle)) throw new ImageAutomationException("conversation_changed");
-        GetWindowThreadProcessId(target.Handle, out var id);
-        using var process = Process.GetProcessById(target.ProcessId);
-        if (id != target.ProcessId || process.StartTime.ToUniversalTime() != target.Started) throw new ImageAutomationException("conversation_changed");
+        if (!IsWindow(window)) return null;
+        GetWindowThreadProcessId(window, out var id);
+        try
+        {
+            using var process = Process.GetProcessById(id);
+            return new(window, id, process.StartTime.ToUniversalTime(), PackageVersion(process) is not null);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        { return null; }
     }
-    static void SafeInteraction(NativeImageTarget target, CancellationToken cancellation)
-    {
-        cancellation.ThrowIfCancellationRequested();
-        VerifyTarget(target);
-        if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
-        if (IsIconic(target.Handle) || GetForegroundWindow() != target.Handle) throw new ImageAutomationException("foreground_unavailable");
-    }
-    static void Focus(NativeImageTarget target)
-    {
-        if (!DesktopUnlocked()) throw new ImageAutomationException("windows_locked");
-        if (IsIconic(target.Handle)) ShowWindow(target.Handle, 9);
-        SetForegroundWindow(target.Handle);
-        if (GetForegroundWindow() == target.Handle) return;
-        var current = GetCurrentThreadId();
-        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
-        var attached = foregroundThread != 0 && foregroundThread != current && AttachThreadInput(current, foregroundThread, true);
-        try { BringWindowToTop(target.Handle); SetForegroundWindow(target.Handle); }
-        finally { if (attached) AttachThreadInput(current, foregroundThread, false); }
-        if (GetForegroundWindow() != target.Handle) throw new ImageAutomationException("foreground_unavailable");
-    }
+
+    void RequireWindow(NativeImageTarget target, CancellationToken cancellation) => windowAccess.Require(target, cancellation);
+
     internal static bool OwnedSaveDialog(nint window, nint targetWindow, Func<nint, nint> owner)
     {
         var visited = new HashSet<nint> { window };
@@ -618,21 +624,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         }, 0);
         if (dialogs.Count > 1) throw new ImageAutomationException("download_dialog_unavailable");
         if (dialogs.Count == 0) return null;
-        if (GetForegroundWindow() != dialogs[0]) throw new ImageAutomationException("foreground_unavailable");
         return automation!.FromHandle(dialogs[0]);
-    }
-    static bool DesktopUnlocked()
-    {
-        GetWindowThreadProcessId(GetForegroundWindow(), out var id);
-        if (id != 0)
-        {
-            try { using var foreground = Process.GetProcessById(id); if (foreground.ProcessName is "LockApp" or "LogonUI") return false; }
-            catch (ArgumentException) { return false; }
-        }
-        var desktop = OpenInputDesktop(0, false, 1);
-        if (desktop == 0) return false;
-        try { var name = new StringBuilder(256); return GetUserObjectInformation(desktop, 2, name, name.Capacity * 2, out _) && name.ToString() == "Default"; }
-        finally { CloseDesktop(desktop); }
     }
     public void Dispose() { lock (uiGate) { automation?.Dispose(); automation = null; } }
 
@@ -640,17 +632,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowProc callback, nint parameter);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] static extern bool IsWindow(nint window);
-    [DllImport("user32.dll")] static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] static extern nint GetWindow(nint window, uint command);
     [DllImport("user32.dll")] static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint window, out int process);
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(nint window);
-    [DllImport("user32.dll")] static extern bool BringWindowToTop(nint window);
-    [DllImport("user32.dll")] static extern bool ShowWindow(nint window, int command);
-    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint source, uint target, bool attach);
-    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern int GetPackageFullName(nint process, ref uint length, StringBuilder? fullName);
-    [DllImport("user32.dll")] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetUserObjectInformation(nint handle, int index, StringBuilder information, int length, out int needed);
-    [DllImport("user32.dll")] static extern bool CloseDesktop(nint desktop);
 }
