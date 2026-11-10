@@ -1,6 +1,7 @@
 const identity = ['run_id', 'task_id', 'base_version_id', 'prompt_sha256'];
 const terminal = new Set(['completed', 'cancelled', 'failed']);
 export const MAX_BYTES = 32 * 1024 * 1024;
+const GENERATION_WINDOW_MS = 10 * 60 * 1000;
 export async function sha256(bytes) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -9,8 +10,8 @@ export function safeCode(error) {
   return typeof code === 'string' && /^[a-z][a-z0-9_]{1,60}$/.test(code) ? code : 'adapter_failed';
 }
 export class RunExecutor {
-  constructor({ store, transport, emit, artifactStore }) {
-    Object.assign(this, { store, transport, emit, artifactStore });
+  constructor({ store, transport, emit, artifactStore, now = () => Date.now() }) {
+    Object.assign(this, { store, transport, emit, artifactStore, now });
     this.queue = Promise.resolve();
     this.active = null;
     this.cancelled = new Set();
@@ -30,13 +31,28 @@ export class RunExecutor {
     this.emit({ type: 'status', run_id: record.run_id, phase: aliases[record.phase] ?? record.phase,
       ...(record.phase === 'submission_uncertain' ? { detail: 'submission_uncertain' } : record.detail ? { detail: record.detail } : {}) });
   }
+  async ensureGenerationDeadline(record) {
+    if (Number.isFinite(record.generation_deadline_at)) return;
+    // Legacy submitted records lack timing. Persist their first observation's
+    // bound before contacting the page, so worker restarts never extend it.
+    if (!Number.isFinite(record.submitted_at)) record.submitted_at = this.now();
+    record.generation_deadline_at = record.submitted_at + GENERATION_WINDOW_MS;
+    await this.store.put(record);
+  }
   tick(run_id) { return this.exclusive(async () => {
     const record = await this.store.get(run_id);
     if (!record) throw new Error('unknown_run');
     if (!['submitted', 'generating'].includes(record.phase)) return this.report(record);
+    await this.ensureGenerationDeadline(record);
+    if (this.now() >= record.generation_deadline_at) {
+      record.phase = 'paused'; record.detail = 'generation_timeout';
+      return this.report(record);
+    }
     try {
       const observation = await this.transport.observe(record.target, run_id);
       if (this.cancelled.has(run_id)) return record;
+      if (this.now() >= record.generation_deadline_at) throw new Error('generation_timeout');
+      delete record.detail;
       if (observation.phase === 'image_ready') {
         record.phase = 'downloading'; await this.report(record);
         const artifact = await this.transport.capture(record.target, run_id, observation);
@@ -50,7 +66,12 @@ export class RunExecutor {
         this.emit(message);
       } else { record.phase = 'generating'; await this.report(record); }
     } catch (error) {
-      record.phase = 'paused'; record.detail = safeCode(error); await this.report(record);
+      // A background renderer can respond late when Windows locks/occludes it.
+      // Observation is read-only, so keep the original submitted run and retry.
+      // Capture/submit ambiguity must never repeat a download or Send click.
+      const detail = ['submitted', 'generating'].includes(record.phase) && this.now() >= record.generation_deadline_at ? 'generation_timeout' : safeCode(error);
+      record.phase = detail === 'content_timeout' && ['submitted', 'generating'].includes(record.phase) ? 'generating' : 'paused';
+      record.detail = detail; await this.report(record);
     }
     return record;
   }); }
@@ -120,6 +141,10 @@ export class RunExecutor {
       record.target = prepared.target;
       if (this.cancelled.has(run.run_id)) throw new Error('cancelled');
       record.phase = 'submit_intent';
+      // Store the attempt's timestamp with intent before the only Send click.
+      // It survives a lost reply, reconnection and service-worker replacement.
+      record.submitted_at = this.now();
+      record.generation_deadline_at = record.submitted_at + GENERATION_WINDOW_MS;
       await this.report(record);
       if (this.cancelled.has(run.run_id)) throw new Error('cancelled');
       await this.transport.submit(record.target, run);

@@ -2,17 +2,26 @@
 (async () => {
   const { ChatGptPage } = await import(chrome.runtime.getURL('dom-adapter.mjs'));
   const { captureOriginal } = await import(chrome.runtime.getURL('artifacts.mjs'));
+  const { BackgroundWork } = await import(chrome.runtime.getURL('background-work.mjs'));
   const page = new ChatGptPage(window);
+  const backgroundWork = new BackgroundWork(window.navigator.locks);
   chrome.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== chrome.runtime.id || message?.scope !== 'entwurf-chatgpt') return false;
     const operation = async () => {
       switch (message.type) {
         case 'probe': return page.probe();
-        case 'prepare': return page.prepare(message.run);
+        case 'prepare':
+          await backgroundWork.acquire(message.run?.run_id);
+          try { return page.prepare(message.run); }
+          catch (error) { backgroundWork.release(message.run?.run_id); throw error; }
         case 'submit': return page.submit(message.run_id);
         case 'observe': return page.observe(message.run_id);
         case 'download': return page.download(message.run_id);
-        case 'cancel': return page.cancel(message.run_id);
+        case 'cancel': {
+          const result = page.cancel(message.run_id);
+          backgroundWork.release(message.run_id);
+          return result;
+        }
         case 'capture':
           page.requireRun(message.run_id);
           if (!page.run.downloadClicked) throw new Error('download_not_started');

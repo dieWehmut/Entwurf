@@ -34,5 +34,9 @@ export class CompanionConnection {
     if (!this.authenticated || this.socket.readyState !== 1) return false;
     this.socket.send(JSON.stringify(message)); return true;
   }
+  keepAlive() {
+    try { return this.send({ type: 'keepalive' }); }
+    catch { this.socket.close(); return false; }
+  }
   close() { this.socket.close(); }
 }

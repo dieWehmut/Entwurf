@@ -5,11 +5,16 @@ import { artifactStore, runStore } from './persistence.mjs';
 
 const store = runStore(chrome.storage.local);
 const transport = new BrowserTransport(chrome);
-let connection, reconnect, connecting = false, ticking = false;
+let connection, reconnect, connecting = false, ticking = false, probing = false;
 const emit = message => connection?.send(message);
 const executor = new RunExecutor({ store, transport, artifactStore, emit });
 const state = (phase, reason = null) => chrome.storage.local.set({ connection_status: { phase, reason } });
-async function probe() { emit({ type: 'probe', ...await transport.probe() }); }
+async function probe() {
+  if (probing) return;
+  probing = true;
+  try { emit({ type: 'probe', ...await transport.probe() }); }
+  finally { probing = false; }
+}
 async function restore() {
   for (const record of await store.list()) {
     if (record.phase === 'submit_intent') { record.phase = 'submission_uncertain'; record.detail = 'executor_restarted'; await store.put(record); }
@@ -72,8 +77,19 @@ setInterval(async () => {
   try { await executor.tick(executor.active); } catch { /* Each run exposes bounded status through its executor. */ }
   finally { ticking = false; }
 }, 1000);
-// Chrome 116+ keeps a service worker with an active WebSocket alive when messages flow.
-setInterval(() => { if (connection?.authenticated) void probe(); }, 20000);
+// Heartbeats must not wait for a throttled/frozen content page to answer probe.
+// Chrome 116+ resets the worker's 30-second idle timer on WebSocket traffic.
+setInterval(() => {
+  connection?.keepAlive();
+  if (connection?.authenticated) void probe();
+}, 20000);
+const reconnectAlarm = 'entwurf-companion-reconnect';
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === reconnectAlarm) void connect(); });
+// Alarms wake a stopped/disconnected worker even when its JS timers died. One
+// minute is supported by the minimum Chrome 116; 30 seconds requires Chrome 120.
+void (async () => {
+  if (!await chrome.alarms.get(reconnectAlarm)) await chrome.alarms.create(reconnectAlarm, { periodInMinutes: 1 });
+})();
 chrome.runtime.onStartup.addListener(() => { void connect(); });
 chrome.runtime.onInstalled.addListener(() => { void connect(); });
 void connect();

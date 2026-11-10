@@ -27,3 +27,17 @@ test('configuration cannot send the pairing credential to a remote server', () =
     assert.throws(() => validateConnection({ ...config, websocket_url: endpoint }), /invalid_companion_address/);
   }
 });
+
+test('keepalive sends independently of an unfinished discovery command and only after authentication', async () => {
+  const client = new CompanionConnection(config, { WebSocket: Socket, onCommand: () => new Promise(() => {}) });
+  const socket = Socket.latest;
+  socket.onopen();
+  assert.equal(client.keepAlive(), false);
+  await socket.onmessage({ data: JSON.stringify({ type: 'authenticated' }) });
+  void socket.onmessage({ data: JSON.stringify({ type: 'probe' }) });
+  assert.equal(client.keepAlive(), true);
+  assert.deepEqual(socket.sent.at(-1), { type: 'keepalive' });
+  socket.readyState = 3;
+  assert.equal(client.keepAlive(), false);
+  client.close();
+});

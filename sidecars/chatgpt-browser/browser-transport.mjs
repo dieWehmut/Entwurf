@@ -2,30 +2,48 @@ import { captureDownload } from './download-capture.mjs';
 import { captureOriginal } from './artifacts.mjs';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export class BrowserTransport {
-  constructor(browser) { this.browser = browser; }
+  constructor(browser, { rpcTimeoutMs = 15000, probeTimeoutMs = 2000, captureTimeoutMs = 60000 } = {}) {
+    Object.assign(this, { browser, rpcTimeoutMs, probeTimeoutMs, captureTimeoutMs });
+  }
   async call(tabId, type, args = {}) {
-    const reply = await this.browser.tabs.sendMessage(tabId, { scope: 'entwurf-chatgpt', type, ...args });
+    const timeoutMs = type === 'probe' ? this.probeTimeoutMs : type === 'capture' ? this.captureTimeoutMs : this.rpcTimeoutMs;
+    let timer;
+    let reply;
+    try {
+      reply = await Promise.race([
+        this.browser.tabs.sendMessage(tabId, { scope: 'entwurf-chatgpt', type, ...args }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('content_timeout')), timeoutMs); })
+      ]);
+    } finally { clearTimeout(timer); }
     if (!reply?.ok) throw new Error(reply?.error || 'content_unavailable');
     return reply.result;
   }
   async probe() {
     const tabs = await this.browser.tabs.query({ url: 'https://chatgpt.com/*' });
-    let loginRequired = false;
+    let loginRequired = false, responseDelayed = false;
     for (const tab of tabs) {
       try {
         const report = await this.call(tab.id, 'probe');
         if (report.available) return report;
         if (report.reason === 'login_required') loginRequired = true;
-      } catch { /* An existing tab may predate extension installation. */ }
+      } catch (error) {
+        if (error?.message === 'content_timeout') responseDelayed = true;
+        // An existing tab may predate installation or be frozen while locked.
+      }
     }
+    // Availability permits preparation, not an assertion about authentication.
+    // A new owned page must verify its live login controls and composer before
+    // submission. Never require a frozen user's tab to be activated or reloaded.
+    if (!loginRequired && responseDelayed) return { available: true, adapter: 'chatgpt-browser', origin: 'https://chatgpt.com', reason: 'existing_session_requires_verification' };
     return { available: false, adapter: 'chatgpt-browser', reason: loginRequired ? 'login_required' : tabs.length ? 'reload_chatgpt_tab' : 'open_existing_chatgpt_session' };
   }
   async prepare(run) {
     const report = await this.probe();
-    if (!report.available) throw new Error(report.reason === 'login_required' ? 'login_required' : 'existing_session_unavailable');
-    // The task tab is active inside its own window, so Chrome does not freeze it
-    // as an inactive tab. The window itself is never focused and shares the
-    // already-authenticated browser profile without disturbing the user's tabs.
+    if (report.reason === 'login_required') throw new Error('login_required');
+    if (report.reason === 'open_existing_chatgpt_session') throw new Error('existing_session_unavailable');
+    // Keep the task tab active without taking OS focus. Windows occlusion still
+    // backgrounds this page on lock; the content adapter holds a scoped Web Lock
+    // during the run to protect its background work from automatic freezing.
     const taskWindow = await this.browser.windows.create({ url: 'https://chatgpt.com/', focused: false });
     const windowId = taskWindow?.id;
     if (!Number.isInteger(windowId)) throw new Error('background_window_unavailable');

@@ -6,7 +6,7 @@ import { RunExecutor } from '../executor.mjs';
 const prompt = 'Generate a blue circle.';
 const request = { run_id: 'run-1', task_id: 'task-1', base_version_id: 'version-1', prompt,
   prompt_sha256: createHash('sha256').update(prompt).digest('hex') };
-function harness(records = new Map(), failure = null) {
+function harness(records = new Map(), failure = null, options = {}) {
   const events = [], actions = [];
   const transport = {
     async prepare(run) { actions.push(['prepare', run.run_id]); return { target: 7 }; },
@@ -21,7 +21,7 @@ function harness(records = new Map(), failure = null) {
   };
   const store = { async get(id) { return structuredClone(records.get(id)); },
     async put(record) { records.set(record.run_id, structuredClone(record)); } };
-  return { executor: new RunExecutor({ store, transport, emit: e => events.push(e) }), records, events, actions };
+  return { executor: new RunExecutor({ store, transport, emit: e => events.push(e), ...options }), records, events, actions };
 }
 
 test('submission intent survives a lost response and prevents replay after executor restart', async () => {
@@ -120,4 +120,84 @@ test('repeated cancellation of an old run preserves the next active run', async 
   await h.executor.cancel(request.run_id);
   assert.equal(h.executor.active, 'run-2');
   assert.equal(h.records.get('run-2').phase, 'submitted');
+});
+
+test('a slow background response keeps observing the submitted run without sending again', async () => {
+  const h = harness();
+  await h.executor.start(request);
+  h.executor.transport.observe = async () => { throw new Error('content_timeout'); };
+  await h.executor.tick(request.run_id);
+  assert.equal(h.records.get(request.run_id).phase, 'generating');
+  assert.equal(h.events.at(-1).detail, 'content_timeout');
+  h.executor.transport.observe = async () => ({ phase: 'image_ready' });
+  h.executor.transport.capture = async () => ({ mime_type: 'image/png', bytes_base64: 'aW1hZ2U=',
+    sha256: createHash('sha256').update('image').digest('hex') });
+  await h.executor.tick(request.run_id);
+  assert.equal(h.records.get(request.run_id).phase, 'awaiting_import');
+  assert.equal(h.actions.filter(action => action[0] === 'submit').length, 1);
+  await h.executor.cancel(request.run_id);
+  assert.equal(h.executor.active, null);
+});
+
+test('background response retries stop at the durable generation deadline without resubmission', async () => {
+  let now = 1000;
+  const h = harness(new Map(), null, { now: () => now });
+  await h.executor.start(request);
+  assert.equal(h.records.get(request.run_id).submitted_at, 1000);
+  let observations = 0;
+  h.executor.transport.observe = async () => { observations++; throw new Error('content_timeout'); };
+  now += 9 * 60 * 1000;
+  await h.executor.tick(request.run_id);
+  assert.equal(h.records.get(request.run_id).phase, 'generating');
+  now += 60 * 1000;
+  await h.executor.tick(request.run_id);
+  assert.equal(h.records.get(request.run_id).phase, 'paused');
+  assert.equal(h.records.get(request.run_id).detail, 'generation_timeout');
+  assert.equal(observations, 1);
+  await h.executor.start(request);
+  await h.executor.tick(request.run_id);
+  assert.equal(observations, 1);
+  assert.equal(h.actions.filter(action => action[0] === 'submit').length, 1);
+});
+
+test('an observation timeout crossing the deadline pauses during that tick', async () => {
+  let now = 1000;
+  const h = harness(new Map(), null, { now: () => now });
+  await h.executor.start(request);
+  h.executor.transport.observe = async () => { now += 10 * 60 * 1000; throw new Error('content_timeout'); };
+  await h.executor.tick(request.run_id);
+  assert.equal(h.records.get(request.run_id).phase, 'paused');
+  assert.equal(h.records.get(request.run_id).detail, 'generation_timeout');
+});
+
+test('executor restart preserves the submission deadline instead of granting another ten minutes', async () => {
+  let now = 1000;
+  const first = harness(new Map(), null, { now: () => now });
+  await first.executor.start(request);
+  now += 9 * 60 * 1000;
+  const reopened = harness(first.records, null, { now: () => now });
+  await reopened.executor.start(request);
+  now += 60 * 1000;
+  await reopened.executor.tick(request.run_id);
+  assert.equal(reopened.records.get(request.run_id).phase, 'paused');
+  assert.equal(reopened.records.get(request.run_id).detail, 'generation_timeout');
+  assert.equal(reopened.actions.length, 0);
+  assert.equal(reopened.records.get(request.run_id).submitted_at, 1000);
+});
+
+test('legacy submitted records receive one persisted deadline shared by later restarts', async () => {
+  let now = 1000;
+  const records = new Map([[request.run_id, { ...request, prompt: undefined, phase: 'submitted', target: 7 }]]);
+  const first = harness(records, null, { now: () => now });
+  first.executor.transport.observe = async () => { throw new Error('content_timeout'); };
+  await first.executor.tick(request.run_id);
+  assert.equal(records.get(request.run_id).generation_deadline_at, 1000 + 10 * 60 * 1000);
+  now += 9 * 60 * 1000;
+  const reopened = harness(records, null, { now: () => now });
+  await reopened.executor.start(request);
+  now += 60 * 1000;
+  await reopened.executor.tick(request.run_id);
+  assert.equal(records.get(request.run_id).detail, 'generation_timeout');
+  assert.equal(records.get(request.run_id).generation_deadline_at, 1000 + 10 * 60 * 1000);
+  assert.equal(reopened.actions.length, 0);
 });

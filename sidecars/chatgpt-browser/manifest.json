@@ -4,11 +4,11 @@
   "version": "0.1.0",
   "description": "Send explicitly started Entwurf image tasks to your existing ChatGPT browser session.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "tabs", "downloads", "unlimitedStorage"],
+  "permissions": ["storage", "tabs", "downloads", "unlimitedStorage", "alarms"],
   "host_permissions": ["https://chatgpt.com/*", "https://*.oaiusercontent.com/*", "http://127.0.0.1/*", "http://localhost/*"],
   "background": { "service_worker": "background.mjs", "type": "module" },
   "action": { "default_title": "Entwurf ChatGPT Companion", "default_popup": "options.html" },
   "options_page": "options.html",
   "content_scripts": [{ "matches": ["https://chatgpt.com/*"], "js": ["content.js"], "run_at": "document_idle" }],
-  "web_accessible_resources": [{ "resources": ["dom-adapter.mjs", "artifacts.mjs", "executor.mjs"], "matches": ["https://chatgpt.com/*"] }]
+  "web_accessible_resources": [{ "resources": ["dom-adapter.mjs", "background-work.mjs", "artifacts.mjs", "executor.mjs"], "matches": ["https://chatgpt.com/*"] }]
 }

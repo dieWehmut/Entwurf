@@ -47,3 +47,43 @@ test('cancelling a bound background task closes only its owned tab after page va
   await transport.cancel(2, 'run-1');
   assert.deepEqual(api.actions, ['cancel', ['tab-remove', 2]]);
 });
+
+test('an unresponsive tab cannot hang discovery or observation', { timeout: 250 }, async () => {
+  const api = browser({});
+  api.tabs.sendMessage = () => new Promise(() => {});
+  const transport = new BrowserTransport(api, { rpcTimeoutMs: 5, probeTimeoutMs: 5 });
+  assert.equal((await transport.probe()).reason, 'existing_session_requires_verification');
+  await assert.rejects(transport.observe(2, 'run-1'), /content_timeout/);
+});
+
+test('a frozen existing tab permits preparation only after the new owned page verifies readiness', { timeout: 250 }, async () => {
+  const api = browser({ 2: { available: true, reason: 'composer_detected' } });
+  const sendMessage = api.tabs.sendMessage;
+  api.tabs.sendMessage = (id, message) => id === 1 ? new Promise(() => {}) : sendMessage(id, message);
+  const transport = new BrowserTransport(api, { probeTimeoutMs: 5 });
+  assert.deepEqual(await transport.probe(), { available: true, adapter: 'chatgpt-browser', origin: 'https://chatgpt.com', reason: 'existing_session_requires_verification' });
+  assert.deepEqual(await transport.prepare({ run_id: 'run-1' }), { target: 2 });
+  assert.deepEqual(api.actions, [
+    ['window-create', { url: 'https://chatgpt.com/', focused: false }],
+    ['update', 2, { autoDiscardable: false }], 'probe', 'prepare'
+  ]);
+  assert.equal(api.actions.includes('submit'), false);
+});
+
+test('a frozen existing tab never permits Send when the new owned page requires login', { timeout: 250 }, async () => {
+  const api = browser({ 2: { available: false, reason: 'login_required' } });
+  const sendMessage = api.tabs.sendMessage;
+  api.tabs.sendMessage = (id, message) => id === 1 ? new Promise(() => {}) : sendMessage(id, message);
+  const transport = new BrowserTransport(api, { probeTimeoutMs: 5 });
+  await assert.rejects(transport.prepare({ run_id: 'run-1' }), /login_required/);
+  assert.equal(api.actions.includes('prepare'), false);
+  assert.equal(api.actions.includes('submit'), false);
+  assert.deepEqual(api.actions.at(-1), ['window-remove', 9]);
+});
+
+test('preparation requires an existing ChatGPT browser session tab', async () => {
+  const api = browser({});
+  api.tabs.query = async () => [];
+  await assert.rejects(new BrowserTransport(api).prepare({ run_id: 'run-1' }), /existing_session_unavailable/);
+  assert.deepEqual(api.actions, []);
+});
