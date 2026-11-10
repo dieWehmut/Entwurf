@@ -70,6 +70,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       pages: write
       id-token: write
@@ -79,3 +80,7 @@ jobs:
     steps:
       - uses: actions/deploy-pages@v4
         id: deployment
+        with:
+          # The backend remained in syncing_files past the 10-minute default.
+          # Keep waiting for its result, while retaining a bounded cancellation.
+          timeout: 1800000

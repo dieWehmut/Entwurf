@@ -341,10 +341,22 @@ ACK, reload, identical original download, stale-version rejection and cancellati
 The three HTTP runtime scenarios pass after `62687ee` updates the test to open the
 actual folded project-management form before creating a cloned-window project.
 
-The reviewed runtime and UI source is now on `main` at `b3a22d4`. The repository
-default and the GitHub Pages environment's allowed deployment branch are both
-`main`. [Pages run 42741441690](https://github.com/dieWehmut/Entwurf/actions/runs/42741441690)
-is building that source; successful deployment is not yet claimed.
+The reviewed runtime and UI source is integrated into `main`. The repository
+default, the GitHub Pages environment's allowed deployment branch and the Pages
+site's stored source branch are all `main`; its build type remains `workflow`.
+[Pages run 42741441690](https://github.com/dieWehmut/Entwurf/actions/runs/42741441690)
+passed the real WASM core, 99 frontend tests and browser gates, then failed at
+publication: the backend reported `syncing_files` until deploy-pages reached its
+ten-minute default and cancelled the deployment. No build or test failure was
+reported. The already queued [97442ba run 42742926085](https://github.com/dieWehmut/Entwurf/actions/runs/42742926085)
+is being observed through its original live job, without restarting it.
+
+The workflow now allows thirty minutes for the deployment action within a
+thirty-five-minute job. This changes only the bounded wait for the server result;
+all build/test gates, error handling, permissions and environment rules remain.
+The setting was checked against the official action's millisecond input and
+independently parsed as YAML. Successful publication remains a separate pending
+gate; a longer timeout is not evidence of deployment success.
 
 The final native locked-browser fixture passed on headed Chromium 156. It starts
 after the original fixture tab is frozen, then submits once in its owned window.
