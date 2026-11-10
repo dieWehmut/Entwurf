@@ -488,19 +488,53 @@ handle. An isolated bridge WebSocket authentication/probe check used empty run
 state and exited normally with code 0, but reported unavailable with
 `chatgpt_not_found`. This establishes application-process startup and the bridge
 control channel while locked, not an available target window, successful UIA
-operation, independent-window creation or generation. A later bounded read-only poll of the same PID and process lifetime found the
-unique visible, ownerless HWND `77534922`, without minimizing or focusing it.
-Managed UIA FromHandle succeeded but returned only eight non-client nodes, with
-no document, writable value, invoke/expand pattern or recognized ChatGPT/Images/
-File control. Window discovery while locked is established; actionable page
-controls remain unverified. The process was not launched again.
+operation, independent-window creation or generation. A later bounded read-only
+poll found HWND `77534922`. Further inspection identified it as a native `#32770`
+startup dialog titled Codex. Raw/control/content trees had 11/8/8 nodes, no
+Document or Chromium renderer host, and no recognized ChatGPT/Images/File control.
+The production UIA3 probe with the final DLL
+`01493f9da83bf9df5a0a0bd6a00e95001dcd0f5c1600a1aba69c7cb505e0643b`
+reported `image_surface_unavailable` before and after a standard read-only MSAA
+query, with normal bridge exits and empty owned run state. The eight-node tree
+does not establish any renderer accessibility or hidden-page condition.
+
+The startup dialog reported that organization settings could not be loaded
+safely. The public bootstrap code uses this generic message for home creation,
+preparation, policy reading, policy validation and node-permission failures.
+Its mention of an IT administrator does not establish elevation: the app, native
+probe and existing Explorer all had the same user, medium integrity and a filtered
+token. A public unauthenticated HEAD returned 200 from chatgpt.com and reset at
+auth.openai.com; system ProxyEnable was true. These observations do not identify
+the failing startup phase or prove that the application helper used that proxy.
+
+At `2026-11-10T06:51:40Z`, a unique visible enabled native Retry button was bound
+to its HWND, parent dialog, trusted PID and process lifetime, then invoked once
+through the standard MSAA default action. The pre-action receipt and completion
+record show one completed call while session 1 was disconnected and locked. The
+old dialog disappeared. A 104-second bounded read-only observation found the
+same application alive but later displaying a new `#32770` dialog, HWND
+`95819466`, with the same organization-settings error. There was no second Retry,
+application relaunch, foreground operation or selection of Sign out or Quit.
+This establishes one actual native application control operation while locked;
+it does not establish ChatGPT page input, independent-window creation or image
+generation. The vendor bootstrap may itself perform authentication recovery;
+manual button selection does not establish its internal account state.
+
+The exact fixed startup logger records for this app PID, at
+`2026-11-10T06:20:22.295Z` and after Retry at `2026-11-10T06:52:12.531Z`, both
+reported `phase=policy-read reason=process attempt=1 retrying=false`. Only the
+four documented safe tags were extracted. This narrows the failure to the
+startup-helper process path; it does not identify an OS error code, selected
+executable, security-policy denial or proxy failure. Further diagnosis is needed.
 
 The new self-contained `win-x64` bridge publish and production/full-test-project
 cross-compilation passed with zero warnings or errors. A source-linked Linux
-project passed 45 pure tests. The full Windows runtime suite cannot run on Linux
-and remains pending for this revision. These checks establish compilation and
-fixture behavior; they do not establish successful direct native ChatGPT control,
-real image generation or original-image retrieval while locked.
+project passed 45 pure tests. The subsequent complete Windows runtime suite ran on an exact 40-file tracked
+source snapshot of main `96e4530b7022f892563a8346cd778241d300ac49` using native
+SDK 10.0.403. Offline restore, Release build and all 184 tests passed with zero
+failed, skipped or aborted tests; the test process exited 0 and the TRX counters
+were independently checked. These automated tests do not establish ChatGPT page
+control, real image generation or original-image retrieval while locked.
 
 The frontend keeps browser as the default provider and offers the native client
 in connection settings. Its current guidance no longer requires unlocking or
