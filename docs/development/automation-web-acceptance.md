@@ -184,8 +184,9 @@ with `PropertyNotSupportedException`; the coordinator and native store retained
 the original run, and the native store still explicitly recorded
 `submit_intent: false`. The resume receipt is preserved and is not replayed.
 Subsequent bounded diagnostics found one outer application Document and two
-nested Documents, which the current adapter's whole-window document-count guard
-rejects. These observations do not prove the earlier property exception's cause.
+nested Documents, which the adapter's whole-window document-count guard at that
+time rejected. These observations do not prove the earlier property exception's
+cause.
 
 The user clarified that new generations must use an independent client window
 and new conversation, preserving the existing draft. Installed public application
@@ -297,8 +298,9 @@ has `submit_intent: false`; these tests do not establish real image generation.
 The resumed objective is automation in a logged-on Windows session that remains
 locked. The browser extension now prepares each explicit generation in a fresh,
 unfocused window in the existing browser profile. It preserves the user's
-conversation and draft. Foreground Windows UIA remains an optional provider
-whose input requirements still include an unlocked desktop.
+conversation and draft. At this stage, the Windows image adapter still required
+an unlocked foreground desktop; the later direct-native change below removes
+that adapter guard.
 
 Source `adaec41` makes browser automation the fresh-install default and migrates
 idle v1 installations once. An unfinished native run keeps its provider, tokens,
@@ -454,6 +456,59 @@ repeated samples, not continuous observation. These public fixtures still do not
 verify real ChatGPT login, live selectors or every Edge sleeping-tab policy;
 live-account acceptance remains open.
 
+## Direct native ChatGPT control — 2026-11-10
+
+The image executor now uses UIA ValuePattern, InvokePattern and ExpandCollapse
+directly. `WindowsImageSurface` no longer checks input-desktop unlock or requires
+foreground focus, and it does not call SetFocus/SetForegroundWindow or inject
+keyboard/mouse input. Every mutation remains bound to the trusted package, exact
+HWND, PID and process start time, with identity checked before and after the
+operation. Visible/enabled controls and supported patterns, the unique independent
+New Window menu command, fresh conversation, prompt identity, submission intent
+and the bound Save As owner chain remain required. The separate structured
+`TaskEnvelope` entrypoint's `WindowsAutomation.CheckSafety()` retains its unlocked
+input-desktop and foreground guard.
+
+Public installed-source inspection of
+`OpenAI.Codex_26.1103.4239.0_x64__2p2nqsd0c76g0` found the New Window callback
+calling `createFreshWindow('/')`. File-menu insertion depends on `multiWindow`,
+supplied by renderer feature gate `459748632`; production defaults it to false
+until renderer feature state arrives. The shipped command is source evidence,
+not proof that the current signed-in client's gate is enabled. An earlier live
+menu inspection found the command absent; the current version needs its own
+live menu and independent-window check. An earlier observation on 2026-11-10
+found the session unlocked and cannot support a locked-session claim.
+
+The later native launch check observed session 1 disconnected and locked in WTS
+before and after the operation, with an inaccessible input desktop. One standard
+main-AUMID launch started ChatGPT PID `51604` at
+`2026-11-10T06:19:18.9728400Z`; five trusted ChatGPT processes belonged to that
+same session. About 0.6 seconds after startup, the checked process had no window
+handle. An isolated bridge WebSocket authentication/probe check used empty run
+state and exited normally with code 0, but reported unavailable with
+`chatgpt_not_found`. This establishes application-process startup and the bridge
+control channel while locked, not an available target window, successful UIA
+operation, independent-window creation or generation. A later bounded read-only poll of the same PID and process lifetime found the
+unique visible, ownerless HWND `77534922`, without minimizing or focusing it.
+Managed UIA FromHandle succeeded but returned only eight non-client nodes, with
+no document, writable value, invoke/expand pattern or recognized ChatGPT/Images/
+File control. Window discovery while locked is established; actionable page
+controls remain unverified. The process was not launched again.
+
+The new self-contained `win-x64` bridge publish and production/full-test-project
+cross-compilation passed with zero warnings or errors. A source-linked Linux
+project passed 45 pure tests. The full Windows runtime suite cannot run on Linux
+and remains pending for this revision. These checks establish compilation and
+fixture behavior; they do not establish successful direct native ChatGPT control,
+real image generation or original-image retrieval while locked.
+
+The frontend keeps browser as the default provider and offers the native client
+in connection settings. Its current guidance no longer requires unlocking or
+bringing the client to the foreground. Legacy `windows_locked` and
+`foreground_unavailable` reasons direct users to update the local companion and
+reconnect. Existing paused runs and submission intents are retained; neither an
+update nor reconnect authorizes replay.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
@@ -476,17 +531,20 @@ real generation request or additional same-run resume click. The earlier explici
 resume receipt described above remains preserved.
 
 The installed unified client previously exposed ChatGPT mode and its Images
-composer, but the supported independent `File > New Window` command was absent
-in the last unlocked live check. Final independent-window preparation remains
-unverified. An unlocked, connected desktop and a supported independent new window
-are required before any real prompt is sent; existing drafts must be preserved.
+composer, but an earlier unlocked live check did not expose the supported
+independent `File > New Window` command. Current-version independent-window
+preparation remains unverified. Before any real prompt, the selected signed-in
+application must pass the independent-window and fresh-conversation checks while
+preserving existing drafts. Direct native locked-session generation and original
+image retrieval remain open acceptance gates.
 
-One sparse real-account generation from each frontend is still required, now
-using an explicitly connected, signed-in browser extension for locked-session
-automation. Native independent-client preparation remains a separate optional
-provider gate. Reviewed implementation changes are integrated into `main`, with
-repository default and Pages policy updated as requested; this does not declare
-live-account acceptance complete. These gates remain open despite
-completed implementation tests, fixture checks and prior release checks. Private
+One sparse real-account generation from each frontend is still required with its
+explicitly selected, connected provider. The requested native ChatGPT-client
+acceptance must include actual locked/background execution; the completed
+browser fixtures do not establish native-provider behavior. Earlier reviewed
+changes are integrated into `main`, with repository default and Pages policy
+updated as requested; the new direct-pattern change's compilation and pure-test
+results do not declare live-account acceptance complete. These gates remain open
+despite completed implementation tests, fixture checks and prior release checks. Private
 source images, account information and generated acceptance images remain outside
 Git.

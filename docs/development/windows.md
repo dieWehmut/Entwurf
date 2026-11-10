@@ -1,6 +1,6 @@
 # Windows development
 
-Use a native **Windows 10/11 x64** checkout on a local drive, for example `C:\src\Entwurf`. WSL can run frontend and Rust core checks, but cannot establish the Windows shell, installer or foreground automation acceptance. Build from a local Windows path rather than a WSL UNC path: Node package-manager wrappers may use `cmd.exe`, which does not support a UNC working directory.
+Use a native **Windows 10/11 x64** checkout on a local drive, for example `C:\src\Entwurf`. WSL can run frontend and Rust core checks, but cannot establish the Windows shell, installer or native UI Automation acceptance. Build from a local Windows path rather than a WSL UNC path: Node package-manager wrappers may use `cmd.exe`, which does not support a UNC working directory.
 
 ## Prerequisites
 
@@ -82,10 +82,22 @@ dotnet test sidecars/gpt-bridge/Entwurf.Bridge.Tests/Entwurf.Bridge.Tests.csproj
 ## Release gate
 
 Actual results and remaining environment limits are in [acceptance status](progress.md).
-The Windows UIA adapter requires window discovery, reliable input, completion
-detection and reliable retrieval to pass in a real unlocked foreground session
-on the target ChatGPT version. Unit tests and CSS zoom screenshots do not establish
-native OS scaling or physical multi-monitor behavior.
+The image adapter's `WindowsImageSurface` uses UIA patterns directly and does not
+require an unlocked input desktop or foreground focus. It still binds the trusted
+package, HWND, PID and process start time, requires visible enabled controls, and
+preserves independent-window and Save As ownership checks. The structured
+`TaskEnvelope` entrypoint's `WindowsAutomation` retains its separate unlocked and
+foreground safety guard.
+
+Image release acceptance requires real window discovery, independent-window
+creation, reliable input, completion detection and original-image retrieval on
+the target ChatGPT version. Locked-session operation must also pass in an actually
+locked Windows session; compilation and pure tests do not establish that result.
+The current Store package's File > New Window command depends on runtime feature
+gate `459748632`; public source confirms the command but not its live availability.
+See the [image executor contract](../../sidecars/gpt-bridge/WINDOWS_IMAGE_AUTOMATION.md).
+Unit tests and CSS zoom screenshots do not establish native OS scaling or physical
+multi-monitor behavior.
 
 The installed-app harness uses an owned test installation under
 `%LOCALAPPDATA%\Programs\Entwurf` and a separate project/evidence directory. It
