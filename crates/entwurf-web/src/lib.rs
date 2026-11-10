@@ -62,7 +62,6 @@ pub struct ServerState {
 impl ServerState {
     pub fn new(config: ServerConfig) -> Result<Arc<Self>, String> {
         let store = store::Store::new(config.data_dir.clone())?;
-        let first_launch = !config.data_dir.join("automation/automation.json").exists();
         let mut native = native_host::NativeHost::new(
             config.native_adapter.clone(),
             config.data_dir.join("automation/windows"),
@@ -72,11 +71,6 @@ impl ServerState {
             config.port,
         )
         .map_err(|e| e.to_string())?;
-        if first_launch && native.available() {
-            automation
-                .set_provider("windows")
-                .map_err(|e| e.to_string())?;
-        }
         if automation.provider().map_err(|e| e.to_string())? == "windows" {
             // Already-paired Pages clients reuse their saved capability after a
             // service restart. Restore the selected adapter without requiring

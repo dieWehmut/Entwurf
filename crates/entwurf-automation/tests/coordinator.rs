@@ -1286,15 +1286,16 @@ async fn failed_artifact_storage_disconnects_and_reconnect_retries_bytes_not_pro
 }
 
 #[tokio::test]
-async fn legacy_database_migrates_stable_independent_native_credential() {
+async fn legacy_native_selection_migrates_once_to_locked_session_browser_mode() {
     let f = Fixture::with_database(Some(json!({
-        "schema_version":1,"extension_token":"legacy-browser-token","access":[],"runs":{}
+        "schema_version":1,"extension_token":"legacy-browser-token","provider":"windows","access":[],"runs":{}
     })))
     .await;
     assert_eq!(f.state.status().unwrap()["provider"], "browser");
     let disk: Value =
         serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
             .unwrap();
+    assert_eq!(disk["schema_version"], 2);
     assert_eq!(disk["provider"], "browser");
     let native = disk["native_token"]
         .as_str()
@@ -1310,12 +1311,198 @@ async fn legacy_database_migrates_stable_independent_native_credential() {
         serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
             .unwrap();
     assert_eq!(second["native_token"], native);
+    reopened.set_provider("windows").unwrap();
+    let selected = AutomationState::new(f.dir.path(), f.port).unwrap();
+    assert_eq!(selected.provider().unwrap(), "windows");
+    assert_eq!(selected.native_pairing_info().extension_token, native);
+    assert_eq!(
+        selected.pairing_info().extension_token,
+        "legacy-browser-token"
+    );
+}
+
+#[tokio::test]
+async fn transport_keepalive_preserves_readiness_and_run_state_without_commands() {
+    let f = Fixture::new().await;
+    let mut socket = f.ready().await;
+    let path = f.dir.path().join("automation.json");
+    let before = std::fs::read(&path).unwrap();
+    let status = f.state.status().unwrap();
+    socket
+        .send(Message::Text(
+            json!({"type":"keepalive"}).to_string().into(),
+        ))
+        .await
+        .unwrap();
+    // Ping/Pong on the same socket proves the preceding text was processed,
+    // without relying on an observation sleep or another adapter message.
+    socket.send(Message::Ping(vec![7].into())).await.unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(3), socket.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(response, Message::Pong(vec![7].into()));
+    assert_eq!(f.state.status().unwrap(), status);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    socket.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn legacy_migration_keeps_unfinished_native_runs_and_retained_images_with_their_adapter() {
+    let f = Fixture::new().await;
+    f.state.set_provider("windows").unwrap();
+    let native = f.state.native_pairing_info().extension_token;
+    let mut socket = authenticate_token(&f, &native, true).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"probe","available":true,"reason":"ready"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    socket.send(Message::Ping(vec![1].into())).await.unwrap();
+    assert_eq!(
+        socket.next().await.unwrap().unwrap(),
+        Message::Pong(vec![1].into())
+    );
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["type"], "start");
+    generating(&mut socket).await;
+    f.phase("generating").await;
+    let (bytes, sha, artifact) = image();
+    socket
+        .send(Message::Text(artifact.to_string().into()))
+        .await
+        .unwrap();
+    f.phase("awaiting_import").await;
+    let path = f.dir.path().join("automation.json");
+    let original: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for phase in ["queued", "generating", "paused", "awaiting_import"] {
+        let mut legacy = original.clone();
+        legacy["schema_version"] = json!(1);
+        legacy["runs"]["run-1"]["phase"] = json!(phase);
+        let migrated_fixture = Fixture::with_database(Some(legacy)).await;
+        std::fs::write(
+            migrated_fixture.dir.path().join("images/run-1.image"),
+            &bytes,
+        )
+        .unwrap();
+        let restored = &migrated_fixture.state;
+        assert_eq!(restored.provider().unwrap(), "windows", "phase: {phase}");
+        assert_eq!(restored.native_pairing_info().extension_token, native);
+        assert_eq!(restored.issue_access("owner", ORIGIN).unwrap(), f.token);
+        let migrated: Value = serde_json::from_slice(
+            &std::fs::read(migrated_fixture.dir.path().join("automation.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(migrated["schema_version"], 2);
+        for field in [
+            "run_id",
+            "task_id",
+            "base_version_id",
+            "prompt_sha256",
+            "sha256",
+            "mime_type",
+            "image_id",
+            "owner",
+        ] {
+            assert_eq!(
+                migrated["runs"]["run-1"][field],
+                original["runs"]["run-1"][field]
+            );
+        }
+        assert_eq!(
+            restored.set_provider("browser").unwrap_err().0,
+            "run_active"
+        );
+        let mut peer = authenticate_token(&migrated_fixture, &native, true).await;
+        assert_eq!(
+            read(&mut peer).await,
+            json!({"type":"status","run_id":"run-1"})
+        );
+        // Only completed capture is downloadable. Earlier phases still retain
+        // identity and recover through their original peer without a new start.
+        if phase != "awaiting_import" {
+            assert_eq!(
+                std::fs::read(migrated_fixture.dir.path().join("images/run-1.image")).unwrap(),
+                bytes
+            );
+            peer.close(None).await.unwrap();
+            continue;
+        }
+        let router = restored.router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/automation/runs/run-1/artifact")
+                    .header("host", format!("127.0.0.1:{}", migrated_fixture.port))
+                    .header("origin", ORIGIN)
+                    .header("authorization", format!("Bearer {}", f.token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(response.into_body(), bytes.len())
+                .await
+                .unwrap()
+                .as_ref(),
+            bytes
+        );
+        assert_eq!(migrated["runs"]["run-1"]["sha256"], sha);
+        let (status, ack) = migrated_fixture
+            .http(
+                "POST",
+                "/api/automation/runs/run-1/ack",
+                &f.token,
+                json!({"sha256":sha,"image_id":"restored-image"}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ack["phase"], "completed");
+        assert_eq!(
+            read(&mut peer).await,
+            json!({"type":"artifact_accepted","run_id":"run-1"})
+        );
+        restored.set_provider("browser").unwrap();
+        closed_without_start(&mut peer).await;
+    }
+    socket.close(None).await.unwrap();
+}
+
+#[test]
+fn unsupported_database_version_is_rejected_without_rewriting_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AutomationState::new(dir.path(), 48123).unwrap();
+    let path = dir.path().join("automation.json");
+    let current: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(current["schema_version"], 2);
+    for version in [0, 3] {
+        let mut invalid = current.clone();
+        invalid["schema_version"] = json!(version);
+        let bytes = invalid.to_string().into_bytes();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(
+            matches!(AutomationState::new(dir.path(), 48123), Err(e) if e.0 == "invalid_automation_state")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    drop(state);
 }
 
 #[tokio::test]
 async fn selected_native_provider_rejects_browser_token_before_peer_claim() {
     let f = Fixture::with_database(Some(json!({
-        "schema_version":1,"extension_token":"browser-token","native_token":"native-token",
+        "schema_version":2,"extension_token":"browser-token","native_token":"native-token",
         "provider":"windows","access":[],"runs":{}
     })))
     .await;

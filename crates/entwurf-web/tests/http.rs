@@ -40,6 +40,20 @@ fn application(data: &std::path::Path) -> axum::Router {
     router(ServerState::new(config).unwrap())
 }
 
+#[test]
+fn fresh_install_prefers_browser_even_when_native_adapter_is_bundled() {
+    let temp = tempfile::tempdir().unwrap();
+    let adapter = temp.path().join("bundled-adapter.exe");
+    std::fs::write(&adapter, b"fixture executable path").unwrap();
+    let mut config = ServerConfig::new(temp.path().join("data"), "".into());
+    config.native_adapter = Some(adapter);
+    let state = ServerState::new(config.clone()).unwrap();
+    assert_eq!(state.automation.provider().unwrap(), "browser");
+    assert!(!config.data_dir.join("automation/windows").exists());
+    let restarted = ServerState::new(config).unwrap();
+    assert_eq!(restarted.automation.provider().unwrap(), "browser");
+}
+
 #[tokio::test]
 async fn shutdown_rejects_local_requests_and_keeps_persisted_pairing() {
     let temp = tempfile::tempdir().unwrap();

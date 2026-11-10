@@ -404,6 +404,10 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
         return Err(AutomationError("unauthorized"));
     }
     match field(&value, "type")? {
+        // Browser MV3 workers exchange transport traffic independently of page
+        // probes; a slow/occluded tab must not expire the worker's WebSocket.
+        // This reports no readiness and cannot change durable run state.
+        "keepalive" => return Ok(()),
         "probe" => {
             i.available = value.get("available") == Some(&Value::Bool(true));
             i.reason = reason(value.get("reason"));

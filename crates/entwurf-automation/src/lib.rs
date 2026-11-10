@@ -13,6 +13,7 @@ use std::{
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 pub const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+const DATABASE_SCHEMA_VERSION: u32 = 2;
 type Result<T> = std::result::Result<T, AutomationError>;
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -180,11 +181,11 @@ impl AutomationState {
             fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
                 .map_err(|_| AutomationError("automation_storage_failed"))?;
         }
-        let database = match fs::read(directory.join("automation.json")) {
+        let mut database = match fs::read(directory.join("automation.json")) {
             Ok(bytes) => serde_json::from_slice::<Database>(&bytes)
                 .map_err(|_| AutomationError("invalid_automation_state"))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Database {
-                schema_version: 1,
+                schema_version: DATABASE_SCHEMA_VERSION,
                 extension_token: token(),
                 native_token: token(),
                 provider: default_provider(),
@@ -193,8 +194,23 @@ impl AutomationState {
             },
             Err(_) => return Err(AutomationError("automation_storage_failed")),
         };
-        if database.schema_version != 1 || !valid_provider(&database.provider) {
+        if !valid_provider(&database.provider) {
             return Err(AutomationError("invalid_automation_state"));
+        }
+        match database.schema_version {
+            // v1 installations preferred the foreground Windows UIA adapter on
+            // fresh Windows installs. Prefer browser DOM automation for idle
+            // installations, but keep unfinished runs with their original
+            // adapter so recovery and image ACK still reach the same run.
+            // Later explicit provider choices are stored as v2 and retained.
+            1 => {
+                database.schema_version = DATABASE_SCHEMA_VERSION;
+                if !database.runs.values().any(|run| active(&run.view.phase)) {
+                    database.provider = default_provider();
+                }
+            }
+            DATABASE_SCHEMA_VERSION => {}
+            _ => return Err(AutomationError("invalid_automation_state")),
         }
         let state = Self(Arc::new(Shared {
             directory,
