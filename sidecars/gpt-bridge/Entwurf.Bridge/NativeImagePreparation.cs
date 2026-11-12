@@ -11,6 +11,7 @@ internal sealed class NativeImagePreparation
     bool creationAttempted;
     bool creationReturned;
     bool imagesInvoked;
+    bool blankRefreshAttempted;
     string? documentId;
 
     internal void Begin(NativeImageTarget original, IReadOnlyList<NativeImageTarget> windows,
@@ -32,7 +33,8 @@ internal sealed class NativeImagePreparation
         creationReturned = true;
     }
     internal NativeImageNode? Advance(IReadOnlyList<NativeImageTarget> windows, Func<NativeImageTarget, NativeImageFrame> capture,
-        Func<NativeImageTarget, NativeImageNode, string?> readWritable, Action<NativeImageTarget, string> invoke, CancellationToken cancellation)
+        Func<NativeImageTarget, NativeImageNode, string?> readWritable, Action<NativeImageTarget, string> invoke, CancellationToken cancellation,
+        Action<NativeImageTarget>? refreshBlankWindow = null)
     {
         cancellation.ThrowIfCancellationRequested();
         if (!creationReturned || source is null) throw new ImageAutomationException("independent_window_unavailable");
@@ -53,6 +55,17 @@ internal sealed class NativeImagePreparation
         var nodes = frame.Nodes;
         if (HasLogin(nodes)) throw new ImageAutomationException("chatgpt_login_required");
         if (NativeImagePage.HasTranscriptOrGeneration(nodes)) throw new ImageAutomationException("conversation_changed");
+        // The observed new renderer can stall at only Document + empty root groups.
+        // Refresh layout once on this independently-created HWND, never on a source
+        // or a page already exposing controls/content. It still must load a fresh
+        // empty chat and pass normal Images navigation before becoming writable.
+        if (!imagesInvoked && !blankRefreshAttempted && refreshBlankWindow is not null && IsBlankDocument(frame))
+        {
+            blankRefreshAttempted = true;
+            cancellation.ThrowIfCancellationRequested();
+            refreshBlankWindow(Target);
+            return null;
+        }
         // Newer fresh windows omit the mode switch; Images navigation must be actionable before composer reads.
         var images = !imagesInvoked ? Button(nodes, "图像", "Images") : null;
         if (!imagesInvoked && images is null) return null;
@@ -72,6 +85,10 @@ internal sealed class NativeImagePreparation
         }
         return imageHome ? edit : null;
     }
+    static bool IsBlankDocument(NativeImageFrame frame) => !frame.HasAdditionalContent && frame.Nodes.Count is 2 or 3
+        && frame.Nodes.Count(x => x.Id == frame.DocumentId && x.Role == "Document") == 1
+        && frame.Nodes.All(x => x.Name.Length == 0 && x.Speaker is null && x.Visible && x.Enabled
+            && (x.Id == frame.DocumentId ? x.Role == "Document" : x.Role == "Group"));
     internal static NativeImageTarget SelectSource(IReadOnlyList<NativeImageTarget> windows, NativeImageTarget? cached, nint foreground)
     {
         if (cached is not null) return windows.Contains(cached) ? cached : throw new ImageAutomationException("conversation_changed");
