@@ -21,7 +21,7 @@
   "inputs": {
     "Cargo.lock": "0a088eea8d3b84c552dfdb08977f882208eb3430ade78e8197a660a08c3fdd5e",
     "apps/desktop/pnpm-lock.yaml": "df86e8de79926dc7a021778b1685e335cc4aff8affbba0979e02f03593f6366c",
-    "apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json": "472b1c6e2b3e6fcf703ea6b9e8ba037ae3bda94494e6c4bf2c0a2e5e94c01130"
+    "apps/desktop/src-tauri/resources/gpt-bridge/Entwurf.Bridge.deps.json": "b0066fd86012d9da7f7a817c4ab8c555ba70b1f0f1cad5721348d5063699a0b2"
   },
   "package_count": 614,
   "unresolved": [],
