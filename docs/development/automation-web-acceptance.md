@@ -698,6 +698,52 @@ the Windows task checkout, with the later checks under
 `artifacts/continuation-20261112`, and excluded from Git. Original generation/download,
 SQLite import/ACK, all three frontends and locked-session acceptance remain pending.
 
+## Native generated-response follow-up — 2026-11-12
+
+The fresh blank-window layout change passed **271/271** native Windows tests and
+was merged through PR #6 at `5a388b9`. It refreshes only the independently created
+empty HWND once, preserves activation/Z order and restores the exact bounds.
+Fresh production preparation remains a separate live gate.
+
+At `09:23:27Z`, one dedicated native diagnostic submitted the sparse Bayes-diagram
+prompt once. The owned window displayed the generated diagram, with a retained
+private window capture. Its initial automatic observer failed `conversation_changed`
+because it bound a temporary prompt Text control before the submitted turn settled.
+This diagnostic is distinct from the original paused coordinator run and does not
+establish local WebUI, Pages or desktop import/ACK acceptance.
+
+The response matcher now excludes composer copies, binds the exact prompt hash
+inside a new real h4 user heading and retains that heading while the prompt Text
+ID changes. The generated numbered Button/Image pair is accepted only with exact
+matching bounded labels and an immediate parent relationship inside its assistant
+fragment. Generic `下载` / `Download` is accepted only inside the exact newly
+opened, named image preview; it cannot become a transcript download action.
+Recovery also refuses to replace an already saved image/action/assistant response.
+These changes at `c1b8890` passed **335/335** native Windows tests, zero failed or
+skipped, exit 0, on a source-hash-verified private snapshot.
+
+At `12:42:41Z`, read-only inspection found that the same diagnostic window had
+navigated to a home page with neither the submitted prompt nor generated-image
+control. The exact previously captured title `Create Bayes Diagram` still existed
+as one actionable chat entry. One no-submit recovery opened that entry at
+`13:09:09Z`; the updated production response matcher positively verified the
+existing submitted turn, assistant fragment and generated image. The adapter
+opened its exact preview and invoked its scoped download. It then ended with
+`download_dialog_unavailable` at `13:09:49Z`: no owned standard Save As dialog was
+verified. The original source input hash was identical before and after. No new
+prompt write or submission was performed by recovery. Later native enumeration
+found the diagnostic HWND absent; its cause was not established. No original
+image bytes, import, ACK or successful download are claimed.
+
+A separate current production Probe/Prepare reported `ready` at `12:50:51Z`, then
+failed with `PropertyNotSupportedException` before returning a prepared binding.
+It performed no prompt write or Send. Private generation, recovery, source receipts
+and TRX results are retained in `artifacts/continuation-20261112` and
+`artifacts/response-fix-20261112` in the Windows task checkout, outside Git.
+Original Save As, complete fresh-window preparation, coordinated original-byte
+import/ACK in all three frontends and actual native locked/background execution
+remain required. The diagnostic generation and fixture tests do not close them.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
