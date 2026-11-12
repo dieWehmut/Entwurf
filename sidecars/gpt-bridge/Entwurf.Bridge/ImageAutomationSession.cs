@@ -133,6 +133,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     bool PreSubmitRetryable(ImageRunRecord record)
     {
         if (record.Phase != "paused" || record.SubmitIntent is not false || record.SurfaceBinding is not null
+            || record.Stage is not (null or "prepare")
             || record.Sha256 is not null || record.MimeType is not null || !running.IsCompleted
             || (record.ResumeRequestIds?.Length ?? 0) >= MaximumResumeRequests
             || records.Values.Any(other => other.RunId != record.RunId && !other.Terminal)) return false;
@@ -241,7 +242,11 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             cancellation.ThrowIfCancellationRequested();
             await SetStageAsync(run.RunId, "prepare", cancellation);
             prepared = await ObserveMethodAsync("PrepareAsync", () => surface.PrepareAsync(run, cancellation));
-            await SetStageAsync(run.RunId, "write", cancellation);
+            // Persist the exact prepared binding before dispatching a possibly asynchronous
+            // draft write. A crash cannot rely on failure handling or cleanup to save it.
+            // Providers without exported bindings still retain the durable write stage,
+            // which also refuses replay of older interrupted write-stage records.
+            await SetStageAsync(run.RunId, "write", cancellation, prepared);
             await ObserveMethodAsync("WriteAndVerifyPromptAsync", () => surface.WriteAndVerifyPromptAsync(prepared, run.Prompt, cancellation));
             await SetStageAsync(run.RunId, "submit", cancellation);
             await ChangeAsync(run.RunId, "submitting", null, cancellation, prepared);
@@ -358,7 +363,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         await ReportAsync(record, cancellation);
     }
 
-    async Task SetStageAsync(string id, string stage, CancellationToken cancellation)
+    async Task SetStageAsync(string id, string stage, CancellationToken cancellation, PreparedImageConversation? prepared = null)
     {
         await gate.WaitAsync(cancellation);
         try
@@ -366,7 +371,8 @@ public sealed class ImageAutomationSession : IAsyncDisposable
             cancellation.ThrowIfCancellationRequested();
             var record = records[id];
             if (record.Terminal) throw new OperationCanceledException(cancellation);
-            Save(record with { Stage = stage });
+            Save(record with { Stage = stage,
+                SurfaceBinding = prepared is null ? record.SurfaceBinding : surface.ExportBinding(prepared) ?? record.SurfaceBinding });
         }
         finally { gate.Release(); }
     }

@@ -284,7 +284,9 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var run = Cast(conversation);
         lock (uiGate)
         {
-            if (run.Submitted) return;
+            // A precondition or durable-binding failure can leave a prepared window
+            // without any owned write. Matching text alone cannot authorize cleanup.
+            if (run.Submitted || !run.PromptWriteDispatched) return;
             var frame = BeforeSubmit(run, cancellation);
             var edit = frame.Elements[run.EditId];
             var value = ReadValue(edit);

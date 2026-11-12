@@ -88,6 +88,102 @@ public sealed class NativeResumeTests
         Assert.Equal(0, restartedSurface.Submissions);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_snapshot_taken_during_pending_write_cannot_replay_after_abrupt_restart(bool exportsBinding)
+    {
+        using var fixture = new Fixture();
+        using var interrupted = new Fixture();
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var surface = new Surface
+        {
+            HoldWrite = hold.Task,
+            Binding = exportsBinding ? ImageAutomationJson.Element(new { window = 20, document_id = "owned", draft_cleanup_state = "not_started" }) : null
+        };
+        byte[]? snapshot = null;
+        surface.BeforeWrite = () =>
+        {
+            var persisted = fixture.Record();
+            Assert.Equal("write", persisted.GetProperty("stage").GetString());
+            Assert.False(persisted.GetProperty("submit_intent").GetBoolean());
+            if (exportsBinding) Assert.Equal("owned", persisted.GetProperty("surface_binding").GetProperty("document_id").GetString());
+            snapshot = File.ReadAllBytes(fixture.Database);
+        };
+        await using var active = fixture.Session(surface);
+        await active.HandleAsync(Start(Run()), default);
+        await surface.WriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.NotNull(snapshot);
+        Assert.DoesNotContain(Run().Prompt, System.Text.Encoding.UTF8.GetString(snapshot));
+        // Copy the authoritative in-flight disk state before either failure handling
+        // or cleanup runs, as an abruptly stopped process would leave it.
+        System.IO.Directory.CreateDirectory(interrupted.Directory);
+        File.WriteAllBytes(interrupted.Database, snapshot);
+        var restartedSurface = new Surface();
+        await using var restarted = interrupted.Session(restartedSurface);
+        await restarted.ConnectedAsync(default);
+        await restarted.HandleAsync(Start(Run()), default);
+        await restarted.HandleAsync(Status("same-run"), default);
+        Assert.False(interrupted.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
+        await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        Assert.Contains(interrupted.Messages, x => x.GetProperty("type").GetString() == "resume_rejected");
+        Assert.Equal(0, restartedSurface.Prepares);
+        Assert.False(restartedSurface.WriteEntered.Task.IsCompleted);
+        Assert.Equal(0, restartedSurface.Submissions);
+        Assert.False(hold.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task A_failed_binding_export_prevents_the_first_prompt_write()
+    {
+        using var fixture = new Fixture();
+        var surface = new Surface
+        {
+            FailingBindingExports = 1,
+            Binding = ImageAutomationJson.Element(new { window = 20, document_id = "owned" })
+        };
+        await using var session = fixture.Session(surface);
+        await session.HandleAsync(Start(Run()), default);
+        await fixture.Until(() => fixture.Messages.Any(x => x.TryGetProperty("exception_type", out _)));
+        Assert.False(surface.WriteEntered.Task.IsCompleted);
+        Assert.Equal(0, surface.Submissions);
+        Assert.False(fixture.Record().GetProperty("submit_intent").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_failed_binding_persist_prevents_the_first_prompt_write()
+    {
+        using var fixture = new Fixture();
+        var cleanupEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var surface = new Surface
+        {
+            Binding = ImageAutomationJson.Element(new { window = 20, document_id = "owned" }),
+            BeforePrepare = () =>
+            {
+                File.Move(fixture.Database, fixture.Database + ".preserved");
+                System.IO.Directory.CreateDirectory(fixture.Database);
+            },
+            BeforeCleanup = () => cleanupEntered.TrySetResult(),
+            Cleanup = releaseCleanup.Task
+        };
+        var session = fixture.Session(surface);
+        try
+        {
+            await session.HandleAsync(Start(Run()), default);
+            await cleanupEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(surface.WriteEntered.Task.IsCompleted);
+            Assert.Equal(0, surface.Submissions);
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(fixture.Database)) System.IO.Directory.Delete(fixture.Database);
+            if (File.Exists(fixture.Database + ".preserved")) File.Move(fixture.Database + ".preserved", fixture.Database);
+            releaseCleanup.TrySetResult();
+            await session.DisposeAsync();
+        }
+    }
+
     [Fact]
     public async Task Consumed_resume_is_not_executable_after_failure_restart_start_status_or_reconnect()
     {
@@ -111,6 +207,8 @@ public sealed class NativeResumeTests
     [InlineData("null_intent")]
     [InlineData("submitted")]
     [InlineData("binding")]
+    [InlineData("interrupted_write")]
+    [InlineData("interrupted_submit")]
     [InlineData("sha")]
     [InlineData("mime")]
     [InlineData("artifact")]
@@ -149,18 +247,25 @@ public sealed class NativeResumeTests
         using var fixture = new Fixture(); fixture.Seed();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var surface = new Surface { Fail = "write", Cleanup = release.Task };
-        await using var session = fixture.Session(surface);
-        await session.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
-        await fixture.Until(() => fixture.Messages.Any(x => x.TryGetProperty("phase", out var phase) && phase.GetString() == "paused" && x.TryGetProperty("exception_type", out _)));
-        try
+        await using (var session = fixture.Session(surface))
         {
-            await session.HandleAsync(Status("same-run"), default);
-            Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
             await session.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
-            Assert.Equal(1, surface.Prepares);
+            await fixture.Until(() => fixture.Messages.Any(x => x.TryGetProperty("phase", out var phase) && phase.GetString() == "paused" && x.TryGetProperty("exception_type", out _)));
+            try
+            {
+                await session.HandleAsync(Status("same-run"), default);
+                Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
+                await session.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+                Assert.Equal(1, surface.Prepares);
+            }
+            finally { release.TrySetResult(); }
         }
-        finally { release.TrySetResult(); }
-        await fixture.Until(() => fixture.Messages.Any(x => x.TryGetProperty("pre_submit_retryable", out var value) && value.GetBoolean()));
+        var restartedSurface = new Surface();
+        await using var restarted = fixture.Session(restartedSurface);
+        await restarted.HandleAsync(Status("same-run"), default);
+        Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
+        await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        Assert.Equal(0, restartedSurface.Prepares);
     }
 
     [Fact]
@@ -261,6 +366,8 @@ public sealed class NativeResumeTests
             if (condition == "null_intent") record["submit_intent"] = null;
             if (condition == "submitted") record["submit_intent"] = true;
             if (condition == "binding") record["surface_binding"] = new { owned = true };
+            if (condition is "interrupted_write" or "interrupted_submit")
+            { record["phase"] = "preparing"; record["stage"] = condition == "interrupted_write" ? "write" : "submit"; }
             if (condition == "sha") record["sha256"] = new string('a', 64);
             if (condition == "mime") record["mime_type"] = "image/png";
             if (condition == "artifact") File.WriteAllBytes(Artifact, Png);
@@ -280,16 +387,20 @@ public sealed class NativeResumeTests
         public Task HoldWrite = Task.CompletedTask;
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string? Fail; public int Prepares; public int Submissions; public Action? BeforePrepare; public Task Cleanup = Task.CompletedTask;
-        public JsonElement? Binding; public Action? BeforeCleanup;
+        public JsonElement? Binding; public Action? BeforeCleanup; public Action? BeforeWrite; public int FailingBindingExports;
         void Check(string stage) { if (Fail == stage) throw Failure(); }
         public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken token) => Task.FromResult(new ImageSurfaceProbe(true, "ready"));
         public Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Prepares); BeforePrepare?.Invoke(); Check("prepare"); return Task.FromResult<PreparedImageConversation>(new Conversation()); }
-        public async Task WriteAndVerifyPromptAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) { WriteEntered.TrySetResult(); await HoldWrite.WaitAsync(token); Check("write"); }
+        public async Task WriteAndVerifyPromptAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) { BeforeWrite?.Invoke(); WriteEntered.TrySetResult(); await HoldWrite.WaitAsync(token); Check("write"); }
         public Task SubmitOnceAsync(PreparedImageConversation conversation, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Submissions); Check("submit"); return Task.CompletedTask; }
         public Task WaitForGeneratedImageAsync(PreparedImageConversation conversation, CancellationToken token) { Check("wait"); return Task.CompletedTask; }
         public Task<string> DownloadOriginalAsync(PreparedImageConversation conversation, string directory, CancellationToken token) { Check("download"); var path = Path.Combine(directory, "original.png"); File.WriteAllBytes(path, Png); return Task.FromResult(path); }
         public Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) { BeforeCleanup?.Invoke(); return Cleanup.WaitAsync(token); }
-        public JsonElement? ExportBinding(PreparedImageConversation conversation) => Binding;
+        public JsonElement? ExportBinding(PreparedImageConversation conversation)
+        {
+            if (FailingBindingExports > 0) { FailingBindingExports--; throw Failure(); }
+            return Binding;
+        }
         public void Dispose() { }
     }
 }
