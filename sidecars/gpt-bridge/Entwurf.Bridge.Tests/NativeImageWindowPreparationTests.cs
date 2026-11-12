@@ -240,6 +240,20 @@ public sealed class NativeImageWindowPreparationTests
         Assert.Equal(new[] { "images" }, actions);
     }
 
+    [Fact]
+    public void An_unreadable_identity_after_document_binding_stops_without_replaying_navigation()
+    {
+        var preparation = Started(); var actions = new List<string>();
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty,
+            (_, id) => actions.Add(id), default));
+        Assert.Equal("image_surface_unavailable", Assert.Throws<ImageAutomationException>(() =>
+            preparation.Advance([Source, Created], _ => throw new ImageAutomationException("image_surface_unavailable"),
+                (_, _) => throw new Exception("No reads from an unidentified node"),
+                (_, _) => throw new Exception("No navigation replay"), default)).Reason);
+        Assert.Equal(new[] { "images" }, actions);
+        Assert.Equal(Created, preparation.Target);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

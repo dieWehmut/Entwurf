@@ -461,7 +461,12 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             cancellation.ThrowIfCancellationRequested();
             if (nodes.Count >= 4096 || watch.Elapsed > TimeSpan.FromSeconds(7)) throw new ImageAutomationException("image_surface_unavailable");
             var element = item.Element;
-            var id = string.Join(".", element.Properties.RuntimeId.Value);
+            // The fresh Chromium document can expose a node before UIA assigns its
+            // runtime identity. Preparation may wait only before document binding;
+            // never invent an identity or omit that node from the captured frame.
+            var runtimeId = element.Properties.RuntimeId.ValueOrDefault;
+            if (runtimeId is not { Length: > 0 }) throw new ImageAutomationException("image_surface_unavailable");
+            var id = string.Join(".", runtimeId);
             if (!elements.TryAdd(id, element)) throw new ImageAutomationException("image_surface_unavailable");
             var role = element.ControlType.ToString();
             // Only transient, bounded matching values; account fields, edit values and arbitrary message text are never exported.
