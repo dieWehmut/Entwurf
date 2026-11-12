@@ -97,14 +97,14 @@ until it is no longer visible and the original prompt and user heading return.
 New previews, replacement controls and changed user evidence remain fatal;
 cancellation or timeout never triggers another close action.
 
-Live acceptance checkpoint at 2026-11-12T21:33:48Z: the existing diagnostic
+Live acceptance checkpoint at 2026-11-12T21:16:44Z: the existing diagnostic
 response was positively reverified without resending its prompt. Its scoped
 original Download action produced a standard Save As dialog in the trusted
 ChatGPT process, but the dialog had no native owner chain. The adapter refused
 filename input and Save, so no original bytes or frontend import ACK were
 obtained. This confirms the ownership blocker on the installed client; the
 strict owner checks remain in place. The old Entwurf main window then exited
-through its normal CloseRequested path. A native read-only check confirmed no
+through its normal CloseRequested path. At 2026-11-12T21:33:48Z, a native read-only check confirmed no
 application/adapter processes or local-service listener remained, and the
 workspace, paused coordinator and native run-journal bytes were unchanged.
 The final installation update and locked-session delivery still require
