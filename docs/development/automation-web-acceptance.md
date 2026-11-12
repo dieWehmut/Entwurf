@@ -744,6 +744,47 @@ Original Save As, complete fresh-window preparation, coordinated original-byte
 import/ACK in all three frontends and actual native locked/background execution
 remain required. The diagnostic generation and fixture tests do not close them.
 
+## Native runtime-identity and fresh-window verification — 2026-11-12
+
+A production preparation attempt at `15:08:08Z` successfully selected the owned
+Images source and created a new same-process window, but failed while reading a
+new node's RuntimeId property. The private stack identified the property access
+in frame capture. Treating absent identity as unavailable allowed a bounded wait
+without omitting nodes or inventing IDs; that intermediate attempt still timed
+out at `15:14:33Z`, preserving the original source input hash.
+
+The reader now preserves an available RuntimeId property and otherwise uses the
+UIA client's native `GetRuntimeId()` method. Neither path returning an identity
+still stops capture. A read-only comparison at `15:37:47Z` inspected 24 nodes in
+each of four existing windows: property and native IDs were identical on every
+observed node, including the source's unchanged outer Document identity. This
+comparison establishes compatibility of the two paths on those loaded nodes; it
+does not prove every loading provider exposes the fallback.
+
+The final `0d21e8d` source passed **342/342** native Windows tests, zero failed or
+skipped, exit 0, and self-contained win-x64 publishing exited 0. Code/source hashes
+match the retained private test receipt. The added checks preserve existing IDs,
+require a real nonempty native fallback, refuse absent IDs and stop without
+navigation replay if identity becomes unavailable after document binding.
+
+At `15:47:46Z`, a no-submit helper reused the exact owned Images source selected
+by the prior production probe. Its diagnostic setup seeded that already-verified
+source identity; it does not establish cold-start source disambiguation among all
+the now-open diagnostic windows. The updated public `PrepareAsync` created a new
+same-process HWND `36308392`, verified its fresh empty page, navigated Images and
+returned its unique truly empty composer at `15:48:21Z`. The binding remained
+`draft_cleanup_state: not_started`, without prompt write or submit intent; the
+original source input hash was unchanged. This proves the complete fresh-window
+preparation sequence on that source and client version.
+
+The prepared diagnostic window remains separate from both the original paused
+coordinator run and the earlier real Bayes-diagram diagnostic. Original Save As
+and original-byte retrieval, coordinated frontend import/ACK and actual native
+locked/background generation remain unverified. Private receipt, comparison,
+TRX, publish and prepared binding files remain under
+`artifacts/runtime-id-fix-20261112` and `artifacts/runtime-id-native-fix-20261112`
+in the Windows task checkout and are excluded from Git.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
