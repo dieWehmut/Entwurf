@@ -342,10 +342,35 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         return frame;
     }
     static Conversation Cast(PreparedImageConversation conversation) => conversation as Conversation ?? throw new ImageAutomationException("invalid_run");
-    static string ReadValue(AutomationElement edit)
+    string ReadValue(AutomationElement edit)
     {
         if (!edit.Patterns.Value.IsSupported || edit.Patterns.Value.Pattern.IsReadOnly.Value) throw new ImageAutomationException("image_surface_unavailable");
-        return edit.Patterns.Value.Pattern.Value.Value;
+        var value = edit.Patterns.Value.Pattern.Value.Value;
+        if (!NativeComposerValue.HasClass(edit.Properties.ClassName.ValueOrDefault ?? "", "ProseMirror")) return value;
+        var placeholder = edit.Name;
+        if (placeholder.Length is 0 or > 256 || value != placeholder + "\n") return value;
+        automation ??= new UIA3Automation { ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2) };
+        var walker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var queue = new Queue<(AutomationElement Element, string? Parent)>();
+        queue.Enqueue((edit, null));
+        var nodes = new List<NativeComposerNode>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var watch = Stopwatch.StartNew();
+        while (queue.TryDequeue(out var item))
+        {
+            if (nodes.Count >= 32 || watch.Elapsed > TimeSpan.FromSeconds(2)) throw new ImageAutomationException("image_surface_unavailable");
+            var node = item.Element;
+            var id = string.Join(".", node.Properties.RuntimeId.Value);
+            if (!ids.Add(id)) throw new ImageAutomationException("image_surface_unavailable");
+            nodes.Add(new(id, item.Parent, node.ControlType.ToString(), node.Name,
+                node.Properties.ClassName.ValueOrDefault ?? "", node.Properties.AriaRole.ValueOrDefault ?? ""));
+            for (var child = walker.GetFirstChild(node); child is not null; child = walker.GetNextSibling(child))
+            {
+                queue.Enqueue((child, id));
+                if (queue.Count > 32) throw new ImageAutomationException("image_surface_unavailable");
+            }
+        }
+        return NativeComposerValue.Read(value, placeholder, nodes);
     }
     void Invoke(NativeImageTarget target, AutomationElement element, CancellationToken cancellation)
         => windowAccess.Perform(target, cancellation, () => InvokePattern(element, cancellation));
