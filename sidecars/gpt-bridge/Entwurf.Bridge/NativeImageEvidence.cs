@@ -16,6 +16,8 @@ public static class NativeImageEvidence
     public static bool IsDownload(string name) => name is "下载图像" or "下载图片" or "Download image";
     public static bool IsPreviewDownload(string name) => IsDownload(name) || name is "下载" or "Download";
     public static bool IsPreviewDialog(string name) => name is "图像预览" or "图片预览" or "Image preview";
+    public static bool IsPreviewClose(string name) => name is "关闭图像预览" or "关闭图片预览" or "Close image preview"
+        or "关闭查看器" or "Close viewer" or "关闭" or "Close";
     public static bool IsPreview(string name) => name is "打开图像预览" or "打开图片预览" or "Open image preview" or "查看图像" or "View image";
     public static bool IsGeneratedImageLabel(string name)
     {
@@ -61,6 +63,15 @@ public static class NativeImageEvidence
             && IsPreviewDownload(x.Name) && IsWithin(x.Id, previewRootId, map)).ToArray();
         if (downloads.Length > 1) throw new ImageAutomationException("download_unavailable");
         return downloads.SingleOrDefault();
+    }
+
+    internal static NativeImageNode FindPreviewClose(IReadOnlyList<NativeImageNode> nodes, string previewRootId)
+    {
+        var map = nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
+        var close = nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled
+            && IsPreviewClose(x.Name) && IsWithin(x.Id, previewRootId, map)).ToArray();
+        if (close.Length != 1) throw new ImageAutomationException("download_unavailable");
+        return close[0];
     }
 
     public static bool MatchesHash(string text, string sha256) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text))) == sha256;
