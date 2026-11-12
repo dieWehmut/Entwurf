@@ -207,6 +207,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         lock (uiGate)
         {
             RequireWindow(run.Target, cancellation);
+            if (SaveDialog(run.Target) is not null) throw new ImageAutomationException("download_dialog_unavailable");
             var frame = Capture(run.Target, cancellation, run);
             var current = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
             if (!NativeImageEvidence.SameResponse(current, expected) || frame.Nodes.Any(x => x.Visible && NativeImageEvidence.IsGenerating(x.Name)))
@@ -234,52 +235,77 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                     if (previews.Length == 0) continue;
                     run.PreviewRootId = previews[0].Id;
                     var download = NativeImageEvidence.FindPreviewDownload(frame.Nodes, beforePreview, run.PreviewRootId);
-                    if (download is not null) { Invoke(run.Target, frame.Elements[download.Id], cancellation); opened = true; }
+                    if (download is not null)
+                    {
+                        if (SaveDialog(run.Target) is not null) throw new ImageAutomationException("download_dialog_unavailable");
+                        Invoke(run.Target, frame.Elements[download.Id], cancellation);
+                        opened = true;
+                    }
                 }
             }
             if (!opened) throw new ImageAutomationException("download_unavailable");
         }
         var destination = Path.Combine(Path.GetFullPath(ownedDirectory), "generated-" + Guid.NewGuid().ToString("N") + ".png");
         ImageAutomationSession.EnsureOrdinaryPath(destination);
-        var saved = false;
-        var timer = Stopwatch.StartNew();
-        while (timer.Elapsed < TimeSpan.FromSeconds(25))
+        NativeSaveDialog? ReadOwnedDialog()
         {
-            cancellation.ThrowIfCancellationRequested();
             lock (uiGate)
             {
                 RequireWindow(run.Target, cancellation);
                 var dialog = SaveDialog(run.Target);
-                if (dialog is not null)
-                {
-                    if (saved) throw new ImageAutomationException("download_failed");
-                    var edits = dialog.FindAllDescendants(x => x.ByControlType(ControlType.Edit))
-                        .Where(x => !x.IsOffscreen && x.Patterns.Value.IsSupported && (x.AutomationId == "1001"
-                            || x.Name is "文件名(N):" or "文件名:" or "File name:" or "File name")).ToArray();
-                    var save = dialog.FindAllDescendants(x => x.ByControlType(ControlType.Button))
-                        .Where(x => !x.IsOffscreen && x.IsEnabled && x.AutomationId == "1" && x.Name is "保存(S)" or "保存" or "Save" or "&Save").ToArray();
-                    if (edits.Length != 1 || save.Length != 1) throw new ImageAutomationException("download_dialog_unavailable");
-                    SetValue(run.Target, edits[0], destination, cancellation);
-                    if (ReadValue(edits[0]) != destination) throw new ImageAutomationException("download_dialog_unavailable");
-                    cancellation.ThrowIfCancellationRequested();
-                    Invoke(run.Target, save[0], cancellation);
-                    saved = true;
-                }
+                if (dialog is null) return null;
+                var dialogId = ReadRuntimeId(dialog);
+                var controls = ReadSaveControls(dialog);
+                return new(dialogId, () => SaveOwnedDialog(dialogId), SaveControlsReady(controls));
             }
-            if (saved && File.Exists(destination))
+        }
+        (AutomationElement? Edit, AutomationElement? Save) ReadSaveControls(AutomationElement dialog)
+        {
+            var edits = dialog.FindAllDescendants(x => x.ByControlType(ControlType.Edit))
+                .Where(x => !x.IsOffscreen && (x.AutomationId == "1001"
+                    || x.Name is "文件名(N):" or "文件名:" or "File name:" or "File name")).ToArray();
+            var save = dialog.FindAllDescendants(x => x.ByControlType(ControlType.Button))
+                .Where(x => !x.IsOffscreen && x.AutomationId == "1" && x.Name is "保存(S)" or "保存" or "Save" or "&Save").ToArray();
+            if (edits.Length > 1 || save.Length > 1) throw new ImageAutomationException("download_dialog_unavailable");
+            return (edits.SingleOrDefault(), save.SingleOrDefault());
+        }
+        bool SaveControlsReady((AutomationElement? Edit, AutomationElement? Save) controls)
+            => controls.Edit is not null && controls.Save is not null
+                && controls.Edit.IsEnabled && controls.Edit.Patterns.Value.IsSupported && !controls.Edit.Patterns.Value.Pattern.IsReadOnly.Value
+                && controls.Save.IsEnabled && controls.Save.Patterns.Invoke.IsSupported;
+        void SaveOwnedDialog(string expectedId)
+        {
+            lock (uiGate)
+            {
+                RequireWindow(run.Target, cancellation);
+                var dialog = SaveDialog(run.Target);
+                if (dialog is null || ReadRuntimeId(dialog) != expectedId)
+                    throw new ImageAutomationException("download_dialog_unavailable");
+                var controls = ReadSaveControls(dialog);
+                if (!SaveControlsReady(controls)) throw new ImageAutomationException("download_dialog_unavailable");
+                SetValue(run.Target, controls.Edit!, destination, cancellation);
+                if (ReadValue(controls.Edit!) != destination) throw new ImageAutomationException("download_dialog_unavailable");
+                cancellation.ThrowIfCancellationRequested();
+                Invoke(run.Target, controls.Save!, cancellation);
+            }
+        }
+        bool FileReady()
+        {
+            if (File.Exists(destination))
             {
                 try
                 {
                     ImageAutomationSession.EnsureOrdinaryPath(destination);
                     using var file = new FileStream(destination, FileMode.Open, FileAccess.Read, FileShare.None);
                     if (file.Length > ImageAutomationSession.MaximumImageBytes) throw new ImageAutomationException("artifact_invalid");
-                    if (file.Length > 0) return destination;
+                    if (file.Length > 0) return true;
                 }
                 catch (IOException) { }
             }
-            await Task.Delay(300, cancellation);
+            return false;
         }
-        throw new ImageAutomationException(saved ? "download_failed" : "download_dialog_unavailable");
+        await NativeImageSaveLifecycle.WaitAsync(ReadOwnedDialog, FileReady, cancellation);
+        return destination;
     }
 
     public async Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken cancellation)
