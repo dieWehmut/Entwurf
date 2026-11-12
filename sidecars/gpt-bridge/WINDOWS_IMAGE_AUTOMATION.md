@@ -59,6 +59,17 @@ remain unverified. Current fresh-window preparation and actual locked/background
 execution also remain open; see
 [the detailed acceptance record](../../docs/development/automation-web-acceptance.md).
 
+The subsequent runtime-identity repair passed 342 native Windows tests and
+self-contained win-x64 publishing. Capture preserves an available identity and
+uses the native UIA client GetRuntimeId method only when the property is absent;
+missing identity from both paths remains unavailable. A no-submit production
+PrepareAsync on the previously verified source created a new independent window,
+verified its fresh empty page, navigated Images and returned a truly empty composer
+at 2026-11-12T15:48:21Z. The original source input hash was unchanged. The diagnostic
+seeded the prior source identity, so cold-start disambiguation among its additional
+windows remains outside that proof. Original download/import and actual locked
+execution still require acceptance.
+
 The structured `TaskEnvelope` bridge remains a separate named-pipe entrypoint. Its `WindowsAutomation.CheckSafety()` still checks an unlocked input desktop and foreground target. Those existing capability gates and protocol are independent of the direct-pattern image executor and must not be presented as image-mode restrictions.
 
 

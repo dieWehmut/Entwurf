@@ -393,7 +393,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         {
             if (nodes.Count >= 32 || watch.Elapsed > TimeSpan.FromSeconds(2)) throw new ImageAutomationException("image_surface_unavailable");
             var node = item.Element;
-            var id = string.Join(".", node.Properties.RuntimeId.Value);
+            var id = ReadRuntimeId(node);
             if (!ids.Add(id)) throw new ImageAutomationException("image_surface_unavailable");
             nodes.Add(new(id, item.Parent, node.ControlType.ToString(), node.Name,
                 node.Properties.ClassName.ValueOrDefault ?? "", node.Properties.AriaRole.ValueOrDefault ?? ""));
@@ -461,7 +461,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             cancellation.ThrowIfCancellationRequested();
             if (nodes.Count >= 4096 || watch.Elapsed > TimeSpan.FromSeconds(7)) throw new ImageAutomationException("image_surface_unavailable");
             var element = item.Element;
-            var id = string.Join(".", element.Properties.RuntimeId.Value);
+            // The fresh Chromium document can expose a node before UIA assigns its
+            // runtime identity. Preparation may wait only before document binding;
+            // never invent an identity or omit that node from the captured frame.
+            var id = ReadRuntimeId(element);
             if (!elements.TryAdd(id, element)) throw new ImageAutomationException("image_surface_unavailable");
             var role = element.ControlType.ToString();
             // Only transient, bounded matching values; account fields, edit values and arbitrary message text are never exported.
@@ -516,6 +519,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             or "选择 ChatGPT 模型" or "Choose a ChatGPT model" or "Select ChatGPT model" or "登录" or "注册" or "Log in" or "Sign up"
             or "发送" or "Send" or "Send prompt" or "Send message" or "关闭图像预览" or "关闭图片预览" or "Close image preview" or "关闭" or "Close"
             or "你说：" or "You said:" or "ChatGPT 说：" or "ChatGPT said:";
+
+    static string ReadRuntimeId(AutomationElement element, string unavailableReason = "image_surface_unavailable")
+        => NativeRuntimeIdentity.Read(element.Properties.RuntimeId.ValueOrDefault,
+            () => ((UIA3FrameworkAutomationElement)element.FrameworkAutomationElement).NativeElement.GetRuntimeId(), unavailableReason);
 
     internal NativeImageTarget DiscoverSource(IReadOnlyList<NativeImageTarget> targets, nint foreground)
         => NativeImagePreparation.SelectSource(targets, sourceTarget, foreground);
@@ -600,7 +607,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 cancellation.ThrowIfCancellationRequested();
                 if (nodes.Count >= 4096 || watch.Elapsed > TimeSpan.FromSeconds(3)) throw new ImageAutomationException("independent_window_unavailable");
                 var element = item.Element;
-                var id = string.Join(".", element.Properties.RuntimeId.Value);
+                var id = ReadRuntimeId(element, "independent_window_unavailable");
                 if (!seen.Add(id)) throw new ImageAutomationException("independent_window_unavailable");
                 elements[id] = element;
                 var role = element.ControlType.ToString();
