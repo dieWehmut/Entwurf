@@ -14,13 +14,16 @@ internal sealed class NativeImagePreparation
     string? documentId;
 
     internal void Begin(NativeImageTarget original, IReadOnlyList<NativeImageTarget> windows,
-        Func<NativeImageTarget, NativeImageFrame> capture, Action<NativeImageTarget> createWindow, CancellationToken cancellation)
+        Func<NativeImageTarget, NativeImageFrame> capture, Action<NativeImageTarget> createWindow, CancellationToken cancellation,
+        Func<NativeImageTarget, bool>? verifiedImageHome = null)
     {
         cancellation.ThrowIfCancellationRequested();
         if (creationAttempted) throw new ImageAutomationException("independent_window_unavailable");
         if (!windows.Contains(original)) throw new ImageAutomationException("conversation_changed");
         var frame = capture(original);
-        if (HasLogin(frame.Nodes) || !HasMode(frame.Nodes)) throw new ImageAutomationException("chatgpt_mode_required");
+        // The fallback verifies writable capabilities from this capture without reading the source draft.
+        if (HasLogin(frame.Nodes) || (!HasMode(frame.Nodes) && verifiedImageHome?.Invoke(original) != true))
+            throw new ImageAutomationException("chatgpt_mode_required");
         source = original;
         before = windows.ToArray();
         creationAttempted = true; // A thrown native call cannot justify a second window action.
@@ -50,7 +53,9 @@ internal sealed class NativeImagePreparation
         var nodes = frame.Nodes;
         if (HasLogin(nodes)) throw new ImageAutomationException("chatgpt_login_required");
         if (NativeImagePage.HasTranscriptOrGeneration(nodes)) throw new ImageAutomationException("conversation_changed");
-        if (!imagesInvoked && !HasMode(nodes)) return null;
+        // Newer fresh windows omit the mode switch; Images navigation must be actionable before composer reads.
+        var images = !imagesInvoked ? Button(nodes, "图像", "Images") : null;
+        if (!imagesInvoked && images is null) return null;
         var edit = WritableEdit(nodes, node => readWritable(Target, node));
         if (edit is null) return null;
         if (readWritable(Target, edit)?.Length != 0) throw new ImageAutomationException("user_changed_composer");
@@ -59,11 +64,10 @@ internal sealed class NativeImagePreparation
         {
             // createFreshWindow('/') must expose an empty chat, not a carried Images session.
             if (imageHome) throw new ImageAutomationException("conversation_changed");
-            var images = Button(nodes, "图像", "Images") ?? throw new ImageAutomationException("image_surface_unavailable");
             documentId = frame.DocumentId;
             imagesInvoked = true;
             cancellation.ThrowIfCancellationRequested();
-            invoke(Target, images.Id);
+            invoke(Target, images!.Id);
             return null;
         }
         return imageHome ? edit : null;

@@ -40,12 +40,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         cancellation.ThrowIfCancellationRequested();
         lock (uiGate)
         {
-            return ProbeSource(DiscoverTargets(), GetForegroundWindow(), target =>
-            {
-                var frame = Capture(target, cancellation);
-                return ChatGptProduct(frame) && GlobalImages(frame) is not null
-                    ? new ImageSurfaceProbe(true, "ready") : new ImageSurfaceProbe(false, "chatgpt_mode_required");
-            });
+            return ProbeSource(DiscoverTargets(), GetForegroundWindow(), target => ProbeTarget(target, cancellation));
         }
     }), cancellation);
 
@@ -70,12 +65,12 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         lock (uiGate)
         {
             cancellation.ThrowIfCancellationRequested();
-            var source = Discover();
+            var source = Discover(cancellation);
             preparation.Begin(source, DiscoverTargets(), ReadFrame, target =>
             {
                 sourceTarget = target;
                 OpenNewWindow(target, cancellation);
-            }, cancellation);
+            }, cancellation, target => ImageHome(frames[target]));
         }
         var deadline = Stopwatch.StartNew();
         while (deadline.Elapsed < TimeSpan.FromSeconds(35))
@@ -479,13 +474,42 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 
     internal ImageSurfaceProbe ProbeSource(IReadOnlyList<NativeImageTarget> targets, nint foreground, Func<NativeImageTarget, ImageSurfaceProbe> read)
     {
-        var target = DiscoverSource(targets, foreground);
+        NativeImageTarget target;
+        try { target = DiscoverSource(targets, foreground); }
+        catch (ImageAutomationException error) when (sourceTarget is null && error.Reason == "ambiguous_chatgpt_windows")
+        {
+            // When another app is foreground, only a unique verified product surface
+            // can be selected. Unknown provider failures and multiple valid surfaces
+            // remain ambiguous; package identity and enumeration order are insufficient.
+            var qualified = new List<NativeImageTarget>();
+            foreach (var candidate in targets)
+            {
+                var candidateProbe = read(candidate);
+                if (candidateProbe.Available) qualified.Add(candidate);
+                else if (candidateProbe.Reason != "chatgpt_mode_required") return candidateProbe;
+            }
+            if (qualified.Count == 0) return new(false, "chatgpt_mode_required");
+            if (qualified.Count != 1) throw new ImageAutomationException("ambiguous_chatgpt_windows");
+            sourceTarget = qualified[0];
+            return new(true, "ready");
+        }
         var probe = read(target);
         if (probe.Available) sourceTarget = target;
         return probe;
     }
 
-    NativeImageTarget Discover() => DiscoverSource(DiscoverTargets(), GetForegroundWindow());
+    ImageSurfaceProbe ProbeTarget(NativeImageTarget target, CancellationToken cancellation)
+    {
+        var frame = Capture(target, cancellation);
+        return ChatGptProduct(frame) && GlobalImages(frame) is not null
+            ? new(true, "ready") : new(false, "chatgpt_mode_required");
+    }
+
+    NativeImageTarget Discover(CancellationToken cancellation)
+    {
+        var probe = ProbeSource(DiscoverTargets(), GetForegroundWindow(), target => ProbeTarget(target, cancellation));
+        return probe.Available ? sourceTarget! : throw new ImageAutomationException(probe.Reason);
+    }
 
     static List<NativeImageTarget> DiscoverTargets()
     {
