@@ -785,42 +785,87 @@ TRX, publish and prepared binding files remain under
 `artifacts/runtime-id-fix-20261112` and `artifacts/runtime-id-native-fix-20261112`
 in the Windows task checkout and are excluded from Git.
 
+## Native Save As lifecycle follow-up — 2026-11-13
+
+The save loop previously treated a still-visible dialog on the first observation
+following Save as `download_failed`, before checking whether the owned file was
+ready. UIA Invoke acknowledges dispatch rather than completion. The loop now pins
+the first owned dialog identity, waits for its unique filename and enabled Save
+controls, dispatches Save once and continues checking the new owned destination.
+It refuses replacement dialogs before or after dispatch, ambiguous controls and
+cancellation. An existing owned Save As is checked before opening the image and
+again immediately before the scoped preview Download invocation. Filename and
+Save controls are revalidated before changing the filename; the owner-chain,
+ordinary-path, size and exclusive-file-access requirements remain intact.
+
+The final source snapshot passed **352/352** native Windows tests, zero failed or
+skipped, exit 0, and self-contained win-x64 publishing exited 0. All 53 retained
+source/project hashes match the tested snapshot. Ten source-linked lifecycle tests
+also passed on Linux, including a real exclusive writer that releases the owned
+file later, delayed control readiness, replacement dialogs, timeout and
+cancellation. These are implementation tests; no test asserts a successful live
+ChatGPT original download. Private source receipts, TRX and publish files are
+retained under `artifacts/save-dialog-final-20261113` in the Windows task checkout.
+
+Read-only public-package inspection of
+`OpenAI.Codex_26.1103.7773.0_x64__2p2nqsd0c76g0` found that the image save service
+calls `showSaveDialog` with options alone, without a BrowserWindow argument.
+The shipped main asset is `.vite/build/early-bootstrap-480-5def667ddfcd786d.js`,
+SHA-256 `be8eba3b9283d6a9784fa069a019b83a89fd02277cc13e4f7d32d57faf0ada65`;
+`selectSavePath` and this call occur at byte offsets 3115980 and 3116105. This is
+source evidence for investigating dialog ownership, not proof of an observed
+native owner chain or the cause of the earlier missing Save As. The adapter
+continues to require an owner chain reaching the exact bound conversation HWND.
+
+At `2026-11-12T17:29:00Z`, the live Windows session was connected and unlocked,
+with the default input desktop accessible. At `17:35:47Z`, read-only UIA capture
+confirmed that the prepared owned HWND `36308392` retained its exact Document
+identity and truly empty Images composer. The known Bayes chat title was absent
+from that document, including offscreen Button nodes. Its fixed Home button
+exposed ExpandCollapse rather than Invoke; a prior attempted Invoke was refused
+before dispatch because the pattern was absent. No prompt was written or sent.
+These diagnostics do not supply original image bytes or frontend import/ACK.
+
+The same owned window's Home and sidebar controls were expanded through their
+advertised UIA patterns at `17:37:12Z` and `17:40:48Z`. The known chat title then
+appeared offscreen; its exact ScrollItem action made it visible at `17:42:56Z`.
+Opening that exact existing title performed no prompt write or send. At
+`17:48:43Z`, a no-submit observer revalidated the original diagnostic prompt hash,
+its level-four user heading and its generated image in the owned window. This
+new diagnostic binding is not a coordinator rebind or frontend ACK. Opening its
+exact preview then failed during whole-frame capture with
+`UIA_E_ELEMENTNOTAVAILABLE` (`0x80040201`), before the scoped Download invocation
+or a Save As observation. The receipt identifies the preview-wait capture call;
+no partial UI frame was accepted. Original bytes remain undelivered.
+
 ## Remaining release gates
 
-At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
-disconnected and locked; the input desktop could not be opened. Both the final
-local WebUI and deployed Pages preparation reported `windows_locked`. The user
-was asked to reconnect and unlock that session while independent delivery work
-continued.
+Historical checks on November 4–5 found a locked or disconnected session, and
+older local WebUI/Pages companions reported `windows_locked`. The latest native
+snapshot above was connected and unlocked. Actual locked/background native image
+generation and original retrieval still require live acceptance.
 
-The session was connected and unlocked again at `2026-11-05T06:15:52Z`, allowing
-real tray testing. It disconnected and locked during the final installer check;
-the `2026-11-05T07:21:15Z` probe confirmed an inaccessible input desktop. The user
-was asked to reconnect and unlock it. Independent-window preparation and
-real-account generation acceptance remain open.
+The last inspected original local coordinator run remained paused with
+`submit_intent: false`, no image and its original submission intent preserved.
+Reinstall startup changed its reason to `adapter_restarted` without submitting.
+The existing explicit resume receipt remains preserved. Pages and desktop had no
+submission intents. The real Bayes-diagram diagnostic is a separate run: its
+single submission and generated response do not establish a frontend transaction
+and cannot be rebound to the paused coordinator run.
 
-The original local run remains paused with native `submit_intent: false`, no
-image, and its original submission intent preserved. Reinstall startup updated
-the pause reason to `adapter_restarted`; it did not submit or replay the run.
-Pages and desktop still have no submission intents. This continuation made no
-real generation request or additional same-run resume click. The earlier explicit
-resume receipt described above remains preserved.
+The current client has passed complete no-submit production fresh-window
+preparation on a previously verified source, with the original source input hash
+unchanged. That proof used the retained source identity; cold-start selection
+among the additional diagnostic windows is outside its scope. The correlated
+real response and its preview are verified, but an accepted owned Save As and
+original-byte retrieval remain unverified.
 
-The installed unified client previously exposed ChatGPT mode and its Images
-composer, but an earlier unlocked live check did not expose the supported
-independent `File > New Window` command. Current-version independent-window
-preparation remains unverified. Before any real prompt, the selected signed-in
-application must pass the independent-window and fresh-conversation checks while
-preserving existing drafts. Direct native locked-session generation and original
-image retrieval remain open acceptance gates.
-
-One sparse real-account generation from each frontend is still required with its
-explicitly selected, connected provider. The requested native ChatGPT-client
-acceptance must include actual locked/background execution; the completed
-browser fixtures do not establish native-provider behavior. Earlier reviewed
-changes are integrated into `main`, with repository default and Pages policy
-updated as requested; the new direct-pattern change's compilation and pure-test
-results do not declare live-account acceptance complete. These gates remain open
-despite completed implementation tests, fixture checks and prior release checks. Private
-source images, account information and generated acceptance images remain outside
-Git.
+One coordinated real native generation from each frontend is still required with
+its explicitly selected, connected provider, preserving unrelated drafts. Each
+must deliver original bytes into the application transaction, receive
+`artifact_accepted`, retain the generated version after reload and download the
+same committed image. Acceptance must include actual locked/background execution.
+Implementation tests, browser fixtures and no-submit diagnostics cannot establish
+these native-provider behaviors. Final source integration, release/installer and
+Pages checks must be refreshed after the remaining changes. Private source
+images, account information and generated acceptance images remain outside Git.
