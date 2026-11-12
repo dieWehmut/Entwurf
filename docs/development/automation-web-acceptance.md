@@ -921,6 +921,30 @@ plugin was checked against the exact native Unicode plugin bytes instead.
 Ten metadata/refusal checks passed. This inspection proves package contents,
 not installation, startup or original-image delivery.
 
+## Native cold backup and deployed-site smoke — 2026-11-13
+
+At `2026-11-12T22:51:21Z`, the native cold backup completed with exit 0.
+It retained and reread all 308 installed files, 40 application-owned files and
+1,135 project files, plus the independently pinned rollback installer: **608,311,240
+bytes** total. The recovery ACL is protected and grants only the current user,
+SYSTEM and Administrators access. Saved metadata survived the real PowerShell
+5.1 CLIXML round trip, and installation, project, application, registry and
+shortcut snapshots still matched their cold sources. The original coordinator
+and native journal remained paused with explicit false submission intent. No
+installer, desktop or bridge was started by this backup. The recovery path was
+kept short enough for every destination file to remain below 260 characters.
+
+PR #14 merged the package-verification record into main `f06807a`; its exact
+[Pages workflow](https://github.com/dieWehmut/Entwurf/actions/runs/43323098460)
+completed successfully. A fresh Playwright QA profile loaded the deployed
+[application](https://diewehmut.github.io/Entwurf/), opened Settings and returned
+to the project workbench. Desktop 1440×900 and mobile 390×844 captures were
+reviewed; the mobile page had no horizontal overflow, all eleven requested
+resources returned 200, and the console had zero errors or warnings. Browser
+plugin was unavailable, so regular Playwright supplied this basic smoke check.
+It does not establish an existing paired Pages profile, real image generation,
+original-byte import/ACK, locked operation or native installation.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
