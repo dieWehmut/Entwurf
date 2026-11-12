@@ -377,11 +377,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (run.PreviewRootId is { } preview && frame.Nodes.Any(x => x.Id == preview && x.Visible && IsPreviewDialog(x.Name)))
             {
                 RequireWindow(target, cancellation);
-                var map = frame.Nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
-                var close = frame.Nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && NativeImageEvidence.IsWithin(x.Id, preview, map)
-                    && x.Name is "关闭图像预览" or "关闭图片预览" or "Close image preview" or "关闭" or "Close").ToArray();
-                if (close.Length != 1) throw new ImageAutomationException("download_unavailable");
-                Invoke(target, frame.Elements[close[0].Id], cancellation);
+                var close = NativeImageEvidence.FindPreviewClose(frame.Nodes, preview);
+                Invoke(target, frame.Elements[close.Id], cancellation);
                 run.PreviewRootId = null;
             }
         }
@@ -560,12 +557,13 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         return (visible, interactive);
     }
 
-    static bool KnownLabel(string label) => NativeImageEvidence.IsPreviewDownload(label) || NativeImageEvidence.IsPreview(label)
+    internal static bool KnownLabel(string label) => NativeImageEvidence.IsPreviewDownload(label) || NativeImageEvidence.IsPreview(label)
+        || NativeImageEvidence.IsPreviewClose(label)
         || NativeImageEvidence.IsGeneratedImageLabel(label)
         || NativeImageEvidence.IsGenerating(label) || IsPreviewDialog(label)
         || label is "图像" or "Images" or "切换模式，当前模式：ChatGPT" or "Switch mode, current mode: ChatGPT"
             or "选择 ChatGPT 模型" or "Choose a ChatGPT model" or "Select ChatGPT model" or "登录" or "注册" or "Log in" or "Sign up"
-            or "发送" or "Send" or "Send prompt" or "Send message" or "关闭图像预览" or "关闭图片预览" or "Close image preview" or "关闭" or "Close"
+            or "发送" or "Send" or "Send prompt" or "Send message"
             or "你说：" or "You said:" or "ChatGPT 说：" or "ChatGPT said:";
 
     static string ReadRuntimeId(AutomationElement element, string unavailableReason = "image_surface_unavailable")
