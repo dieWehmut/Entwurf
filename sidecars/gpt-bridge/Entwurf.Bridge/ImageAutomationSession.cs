@@ -269,8 +269,19 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         {
             if (prepared is not null)
             {
-                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(6));
                 try { await surface.ClearOwnedDraftAsync(prepared, run.Prompt, cleanup.Token); } catch { }
+                // A failed pre-submit write already retains its owned binding and
+                // cannot be retried. Preserve the final cleanup acknowledgement too;
+                // an empty early snapshot must not erase evidence of an in-flight write.
+                await gate.WaitAsync();
+                try
+                {
+                    if (records.TryGetValue(run.RunId, out var record) && record.SubmitIntent is false
+                        && surface.ExportBinding(prepared) is { } binding)
+                        Save(record with { SurfaceBinding = binding });
+                }
+                finally { gate.Release(); }
             }
         }
     }
@@ -517,7 +528,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     {
         lifetime.Cancel();
         runningControl?.Cancellation.Cancel();
-        try { await running.WaitAsync(TimeSpan.FromSeconds(5)); } catch (TimeoutException) { }
+        try { await running.WaitAsync(TimeSpan.FromSeconds(7)); } catch (TimeoutException) { }
         // A stalled UIA provider can retain the surface lock even after cancellation. Keep disposal
         // under that lock, but let this dedicated adapter process exit and reclaim it if cleanup stalls.
         try { await Task.Run(surface.Dispose).WaitAsync(TimeSpan.FromSeconds(1)); }

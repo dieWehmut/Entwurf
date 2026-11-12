@@ -55,6 +55,39 @@ public sealed class NativeResumeTests
         Assert.Equal("same-run", fixture.Record().GetProperty("run_id").GetString());
     }
 
+    [Theory]
+    [InlineData("write_unconfirmed")]
+    [InlineData("clear_unconfirmed")]
+    [InlineData("cleared")]
+    public async Task A_failed_write_preserves_final_cleanup_binding_and_cannot_replay_after_restart(string cleanupState)
+    {
+        using var fixture = new Fixture();
+        var surface = new Surface
+        {
+            Fail = "write",
+            Binding = ImageAutomationJson.Element(new { window = 20, document_id = "owned", draft_cleanup_state = "write_unconfirmed" }),
+            BeforeCleanup = () => { },
+            Cleanup = cleanupState == "cleared" ? Task.CompletedTask : Task.FromException(new ImageAutomationException("image_surface_unavailable"))
+        };
+        surface.BeforeCleanup = () => surface.Binding = ImageAutomationJson.Element(new { window = 20, document_id = "owned", draft_cleanup_state = cleanupState });
+        await using (var session = fixture.Session(surface))
+        {
+            await session.HandleAsync(Start(Run()), default);
+            await fixture.Until(() => fixture.Messages.Any(x => x.TryGetProperty("exception_type", out _)));
+        }
+        var saved = fixture.Record();
+        Assert.False(saved.GetProperty("submit_intent").GetBoolean());
+        Assert.Equal(cleanupState, saved.GetProperty("surface_binding").GetProperty("draft_cleanup_state").GetString());
+        Assert.DoesNotContain(Run().Prompt, File.ReadAllText(fixture.Database));
+        var restartedSurface = new Surface();
+        await using var restarted = fixture.Session(restartedSurface);
+        await restarted.HandleAsync(Status("same-run"), default);
+        Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
+        await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        Assert.Equal(0, restartedSurface.Prepares);
+        Assert.Equal(0, restartedSurface.Submissions);
+    }
+
     [Fact]
     public async Task Consumed_resume_is_not_executable_after_failure_restart_start_status_or_reconnect()
     {
@@ -247,6 +280,7 @@ public sealed class NativeResumeTests
         public Task HoldWrite = Task.CompletedTask;
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string? Fail; public int Prepares; public int Submissions; public Action? BeforePrepare; public Task Cleanup = Task.CompletedTask;
+        public JsonElement? Binding; public Action? BeforeCleanup;
         void Check(string stage) { if (Fail == stage) throw Failure(); }
         public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken token) => Task.FromResult(new ImageSurfaceProbe(true, "ready"));
         public Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Prepares); BeforePrepare?.Invoke(); Check("prepare"); return Task.FromResult<PreparedImageConversation>(new Conversation()); }
@@ -254,7 +288,8 @@ public sealed class NativeResumeTests
         public Task SubmitOnceAsync(PreparedImageConversation conversation, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Submissions); Check("submit"); return Task.CompletedTask; }
         public Task WaitForGeneratedImageAsync(PreparedImageConversation conversation, CancellationToken token) { Check("wait"); return Task.CompletedTask; }
         public Task<string> DownloadOriginalAsync(PreparedImageConversation conversation, string directory, CancellationToken token) { Check("download"); var path = Path.Combine(directory, "original.png"); File.WriteAllBytes(path, Png); return Task.FromResult(path); }
-        public Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) => Cleanup.WaitAsync(token);
+        public Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) { BeforeCleanup?.Invoke(); return Cleanup.WaitAsync(token); }
+        public JsonElement? ExportBinding(PreparedImageConversation conversation) => Binding;
         public void Dispose() { }
     }
 }

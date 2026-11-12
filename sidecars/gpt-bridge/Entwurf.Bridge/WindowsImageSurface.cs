@@ -20,7 +20,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     NativeImageTarget? sourceTarget;
     sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId);
     sealed record Binding(int Version, long Window, int ProcessId, long ProcessStartedUtcTicks, string DocumentId,
-        string EditId, string[] BeforeIds, string PromptSha256, string? UserId, NativeGeneratedImage? Result, string? PreviewRootId);
+        string EditId, string[] BeforeIds, string PromptSha256, string? UserId, NativeGeneratedImage? Result, string? PreviewRootId,
+        string DraftCleanupState = "not_started");
     sealed class Conversation(NativeImageTarget target, string documentId, string editId, HashSet<string> before, string? prompt, string promptSha256) : PreparedImageConversation
     {
         public NativeImageTarget Target { get; } = target;
@@ -33,6 +34,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         public string? UserId;
         public NativeGeneratedImage? Result;
         public string? PreviewRootId;
+        public bool PromptWriteDispatched, PromptWriteAcknowledged, PromptClearDispatched, PromptClearAcknowledged;
     }
 
     public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken cancellation) => Task.Run(() => ReadProbe(() =>
@@ -112,9 +114,9 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             var edit = frame.Elements[run.EditId];
             if (ReadValue(edit).Length != 0 || prompt != run.Prompt) throw new ImageAutomationException("user_changed_composer");
             RequireWindow(run.Target, cancellation);
-            SetValue(run.Target, edit, prompt, cancellation);
-            if (ReadValue(edit) != prompt) throw new ImageAutomationException("user_changed_composer");
+            SetValue(run.Target, edit, prompt, cancellation, () => run.PromptWriteDispatched = true);
         }
+        var promptObserved = false;
         var settled = Stopwatch.StartNew();
         while (settled.Elapsed < TimeSpan.FromSeconds(4))
         {
@@ -122,7 +124,16 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             lock (uiGate)
             {
                 var frame = BeforeSubmit(run, cancellation);
-                if (ReadValue(frame.Elements[run.EditId]) != prompt) throw new ImageAutomationException("user_changed_composer");
+                var value = ReadValue(frame.Elements[run.EditId]);
+                // Chromium dispatches SetValue asynchronously. An empty snapshot can
+                // precede renderer acknowledgement; a different draft never can.
+                if (value != prompt)
+                {
+                    if (value.Length != 0 || promptObserved) throw new ImageAutomationException("user_changed_composer");
+                    continue;
+                }
+                promptObserved = true;
+                run.PromptWriteAcknowledged = true;
                 var parent = frame.Nodes.Single(x => x.Id == run.EditId).ParentId;
                 if (frame.Nodes.Count(x => x.ParentId == parent && x.Role == "Button" && x.Visible && x.Enabled
                     && x.Name is "发送" or "Send" or "Send prompt" or "Send message") == 1) return;
@@ -268,24 +279,43 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         throw new ImageAutomationException(saved ? "download_failed" : "download_dialog_unavailable");
     }
 
-    public Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken cancellation)
+    public async Task ClearOwnedDraftAsync(PreparedImageConversation conversation, string prompt, CancellationToken cancellation)
     {
         var run = Cast(conversation);
         lock (uiGate)
         {
-            if (run.Submitted) return Task.CompletedTask;
+            if (run.Submitted) return;
             var frame = BeforeSubmit(run, cancellation);
             var edit = frame.Elements[run.EditId];
-            if (ReadValue(edit) == prompt) SetValue(run.Target, edit, "", cancellation);
+            var value = ReadValue(edit);
+            if (value.Length == 0 && (!run.PromptWriteDispatched || run.PromptWriteAcknowledged))
+            { run.PromptClearAcknowledged = true; return; }
+            if (value != prompt) throw new ImageAutomationException(value.Length == 0 ? "image_surface_unavailable" : "user_changed_composer");
+            run.PromptWriteAcknowledged = true;
+            SetValue(run.Target, edit, "", cancellation, () => run.PromptClearDispatched = true);
         }
-        return Task.CompletedTask;
+        var settled = Stopwatch.StartNew();
+        while (settled.Elapsed < TimeSpan.FromSeconds(4))
+        {
+            await Task.Delay(100, cancellation);
+            lock (uiGate)
+            {
+                var frame = BeforeSubmit(run, cancellation);
+                var value = ReadValue(frame.Elements[run.EditId]);
+                if (value.Length == 0) { run.PromptClearAcknowledged = true; return; }
+                if (value != prompt) throw new ImageAutomationException("user_changed_composer");
+            }
+        }
+        throw new ImageAutomationException("image_surface_unavailable");
     }
 
     public JsonElement? ExportBinding(PreparedImageConversation conversation)
     {
         var run = Cast(conversation);
         return ImageAutomationJson.Element(new Binding(1, run.Target.Handle.ToInt64(), run.Target.ProcessId, run.Target.Started.Ticks,
-            run.DocumentId, run.EditId, run.Before.ToArray(), run.PromptSha256, run.UserId, run.Result, run.PreviewRootId));
+            run.DocumentId, run.EditId, run.Before.ToArray(), run.PromptSha256, run.UserId, run.Result, run.PreviewRootId,
+            run.Submitted ? "submitted" : run.PromptClearAcknowledged ? "cleared" : run.PromptClearDispatched ? "clear_unconfirmed"
+                : run.PromptWriteAcknowledged ? "draft_present_or_changed" : run.PromptWriteDispatched ? "write_unconfirmed" : "not_started"));
     }
 
     public async Task<PreparedImageConversation?> RestoreSubmittedAsync(ImageRunRecord record, JsonElement saved, CancellationToken cancellation)
@@ -370,7 +400,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     void Invoke(NativeImageTarget target, AutomationElement element, CancellationToken cancellation)
         => windowAccess.Perform(target, cancellation, () => InvokePattern(element, cancellation));
 
-    void SetValue(NativeImageTarget target, AutomationElement element, string value, CancellationToken cancellation)
+    void SetValue(NativeImageTarget target, AutomationElement element, string value, CancellationToken cancellation, Action? dispatching = null)
         => windowAccess.Perform(target, cancellation, () =>
         {
             if (!element.IsEnabled || element.IsOffscreen || !element.Patterns.Value.IsSupported)
@@ -378,6 +408,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             var pattern = element.Patterns.Value.Pattern;
             if (pattern.IsReadOnly.Value) throw new ImageAutomationException("image_surface_unavailable");
             cancellation.ThrowIfCancellationRequested();
+            dispatching?.Invoke();
             pattern.SetValue(value);
         });
 
@@ -501,8 +532,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     ImageSurfaceProbe ProbeTarget(NativeImageTarget target, CancellationToken cancellation)
     {
         var frame = Capture(target, cancellation);
-        return ChatGptProduct(frame) && GlobalImages(frame) is not null
-            ? new(true, "ready") : new(false, "chatgpt_mode_required");
+        if (!ChatGptProduct(frame) || GlobalImages(frame) is null) return new(false, "chatgpt_mode_required");
+        return IsIconic(target.Handle) ? new(false, "image_surface_unavailable") : new(true, "ready");
     }
 
     NativeImageTarget Discover(CancellationToken cancellation)
@@ -639,7 +670,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         try
         {
             using var process = Process.GetProcessById(id);
-            return new(window, id, process.StartTime.ToUniversalTime(), PackageVersion(process) is not null);
+            return new(window, id, process.StartTime.ToUniversalTime(), PackageVersion(process) is not null, IsIconic(window));
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         { return null; }
@@ -680,6 +711,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     delegate bool EnumWindowProc(nint window, nint parameter);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowProc callback, nint parameter);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] static extern nint GetWindow(nint window, uint command);
     [DllImport("user32.dll")] static extern nint GetForegroundWindow();
