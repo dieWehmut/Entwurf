@@ -25,6 +25,46 @@ public sealed class NativeImageWindowAccessTests
         Assert.Equal(4, checks);
     }
 
+    [Fact]
+    public void A_minimized_window_can_be_observed_but_cannot_queue_a_native_mutation()
+    {
+        var access = new NativeImageWindowAccess(_ => Identity with { Minimized = true });
+        access.Require(Target, default);
+        var calls = 0;
+        var error = Assert.Throws<ImageAutomationException>(() => access.Perform(Target, default, () => calls++));
+        Assert.Equal("image_surface_unavailable", error.Reason);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public void Restoration_allows_a_new_operation_without_replaying_a_refused_mutation()
+    {
+        var current = Identity with { Minimized = true };
+        var access = new NativeImageWindowAccess(_ => current);
+        var calls = 0;
+        Assert.Throws<ImageAutomationException>(() => access.Perform(Target, default, () => calls++));
+        current = Identity;
+        access.Perform(Target, default, () => calls++);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void Minimization_during_a_native_call_is_reported_without_replaying_it()
+    {
+        var current = Identity;
+        var access = new NativeImageWindowAccess(_ => current);
+        var calls = 0;
+        var error = Assert.Throws<ImageAutomationException>(() => access.Perform(Target, default, () =>
+        {
+            calls++;
+            current = Identity with { Minimized = true };
+        }));
+        Assert.Equal("image_surface_unavailable", error.Reason);
+        Assert.Equal(1, calls);
+        Assert.Throws<ImageAutomationException>(() => access.Perform(Target, default, () => calls++));
+        Assert.Equal(1, calls);
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("handle")]

@@ -30,6 +30,135 @@ public sealed class NativeImageWindowPreparationTests
         Assert.Equal(new[] { "new-window:10", "images:20" }, actions);
     }
 
+    [Fact]
+    public void A_source_without_the_mode_button_requires_the_same_captured_verified_image_home()
+    {
+        var preparation = new NativeImagePreparation(); var actions = new List<string>();
+        NativeImageFrame? captured = null;
+        preparation.Begin(Source, [Source], target =>
+        {
+            Assert.Equal(Source, target);
+            return captured = Frame(images: true, mode: false);
+        }, target => actions.Add($"new-window:{target.Handle}"), default, target =>
+        {
+            Assert.Equal(Source, target);
+            Assert.NotNull(captured);
+            return NativeImagePage.IsHome(captured.Nodes, "composer");
+        });
+        Assert.Null(preparation.Target);
+        Assert.Equal(new[] { "new-window:10" }, actions);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_unverified_mode_less_source_cannot_create_a_window(bool imageHome)
+    {
+        var preparation = new NativeImagePreparation();
+        Assert.Equal("chatgpt_mode_required", Assert.Throws<ImageAutomationException>(() => preparation.Begin(Source, [Source],
+            _ => Frame(images: imageHome, mode: false), _ => throw new Exception("No unverified creation"), default)).Reason);
+        Assert.Null(preparation.Target);
+    }
+
+    [Fact]
+    public void A_failed_image_home_verification_prevents_source_window_creation()
+    {
+        var preparation = new NativeImagePreparation();
+        Assert.Equal("chatgpt_mode_required", Assert.Throws<ImageAutomationException>(() => preparation.Begin(Source, [Source],
+            _ => Frame(images: true, mode: false), _ => throw new Exception("No unverified creation"), default, _ => false)).Reason);
+        Assert.Null(preparation.Target);
+    }
+
+    [Fact]
+    public void A_login_source_cannot_use_the_verified_image_home_fallback()
+    {
+        var preparation = new NativeImagePreparation();
+        var frame = NativeImageFrame.Capture(Frame(images: true, mode: false).Nodes.Append(new NativeImageNode("login", "rail", "Button", "Log in")).ToArray());
+        Assert.Equal("chatgpt_mode_required", Assert.Throws<ImageAutomationException>(() => preparation.Begin(Source, [Source], _ => frame,
+            _ => throw new Exception("No logged-out creation"), default, _ => throw new Exception("Login must precede source fallback"))).Reason);
+        Assert.Null(preparation.Target);
+    }
+
+    [Fact]
+    public void A_fresh_empty_window_without_a_mode_button_navigates_once_and_waits_for_genuine_image_home()
+    {
+        var preparation = Started(); var actions = new List<string>();
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty,
+            (target, id) => actions.Add($"{id}:{target.Handle}"), default));
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty,
+            (_, _) => throw new Exception("Images must not replay"), default));
+        var edit = preparation.Advance([Source, Created], _ => Frame(images: true, mode: false), ReadEmpty,
+            (_, _) => throw new Exception("Images must not replay"), default);
+        Assert.Equal("composer", edit?.Id);
+        Assert.Equal(new[] { "images:20" }, actions);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("hidden")]
+    [InlineData("disabled")]
+    [InlineData("duplicate")]
+    public void A_mode_less_window_requires_unique_actionable_images_navigation_before_composer_reads(string condition)
+    {
+        var nodes = Frame(mode: false, imagesNavigation: condition != "missing").Nodes;
+        if (condition == "hidden") nodes = nodes.Select(x => x.Id == "images" ? x with { Visible = false } : x).ToArray();
+        if (condition == "disabled") nodes = nodes.Select(x => x.Id == "images" ? x with { Enabled = false } : x).ToArray();
+        if (condition == "duplicate") nodes = nodes.Append(new NativeImageNode("other-images", "rail", "Button", "Images")).ToArray();
+        var preparation = Started();
+        Assert.Null(preparation.Advance([Source, Created], _ => NativeImageFrame.Capture(nodes),
+            (_, _) => throw new Exception("No reads before unique actionable Images navigation"),
+            (_, _) => throw new Exception("No unverified navigation"), default));
+    }
+
+    [Theory]
+    [InlineData("readonly")]
+    [InlineData("duplicate")]
+    [InlineData("whitespace-draft")]
+    public void A_mode_less_window_requires_one_truly_empty_writable_edit_before_navigation(string condition)
+    {
+        var nodes = Frame(mode: false).Nodes;
+        if (condition == "duplicate") nodes = nodes.Append(new NativeImageNode("other-edit", "row", "Edit", "")).ToArray();
+        var preparation = Started();
+        var error = Record.Exception(() => preparation.Advance([Source, Created], _ => NativeImageFrame.Capture(nodes),
+            (_, node) => node.Role != "Edit" || condition == "readonly" ? null : condition == "whitespace-draft" ? " \n" : "",
+            (_, _) => throw new Exception("No unverified navigation"), default));
+        Assert.True(error is null or ImageAutomationException);
+        if (condition == "whitespace-draft") Assert.Equal("user_changed_composer", Assert.IsType<ImageAutomationException>(error).Reason);
+    }
+
+    [Fact]
+    public void A_draft_appearing_after_the_writable_probe_prevents_mode_less_navigation()
+    {
+        var preparation = Started(); var reads = 0;
+        Assert.Equal("user_changed_composer", Assert.Throws<ImageAutomationException>(() => preparation.Advance([Source, Created],
+            _ => Frame(mode: false), (_, _) => ++reads == 1 ? "" : "new draft",
+            (_, _) => throw new Exception("No navigation after a changed composer"), default)).Reason);
+        Assert.Equal(2, reads);
+    }
+
+    [Fact]
+    public void Generation_in_a_mode_less_new_window_prevents_composer_reads_and_navigation()
+    {
+        var preparation = Started();
+        var frame = NativeImageFrame.Capture(Frame(mode: false).Nodes.Append(new NativeImageNode("generation", "main", "Text", "Creating image")).ToArray());
+        Assert.Equal("conversation_changed", Assert.Throws<ImageAutomationException>(() => preparation.Advance([Source, Created], _ => frame,
+            (_, _) => throw new Exception("No generation composer reads"), (_, _) => throw new Exception("No generation navigation"), default)).Reason);
+    }
+
+    [Theory]
+    [InlineData("missing-heading")]
+    [InlineData("unrelated-model")]
+    public void Mode_less_navigation_never_binds_an_edit_without_genuine_image_home(string condition)
+    {
+        var preparation = Started();
+        preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty, (_, _) => { }, default);
+        var nodes = Frame(images: true, mode: false).Nodes;
+        nodes = condition == "missing-heading" ? nodes.Where(x => x.Id != "heading").ToArray()
+            : nodes.Select(x => x.Id == "model" ? x with { ParentId = "rail" } : x).ToArray();
+        Assert.Null(preparation.Advance([Source, Created], _ => NativeImageFrame.Capture(nodes), ReadEmpty,
+            (_, _) => throw new Exception("Images must not replay"), default));
+    }
+
     [Theory]
     [InlineData("two-new")]
     [InlineData("reused-hwnd")]
@@ -51,12 +180,12 @@ public sealed class NativeImageWindowPreparationTests
     [Theory]
     [InlineData("draft")]
     [InlineData("transcript")]
-    [InlineData("wrong-mode")]
+    [InlineData("no-images-navigation")]
     [InlineData("old-images")]
     public void A_new_HWND_does_not_authorize_images_without_a_fresh_empty_chat(string condition)
     {
         var preparation = Started(); var actions = new List<string>();
-        var error = Record.Exception(() => preparation.Advance([Source, Created], _ => Frame(images: condition == "old-images", transcript: condition == "transcript", mode: condition != "wrong-mode"),
+        var error = Record.Exception(() => preparation.Advance([Source, Created], _ => Frame(images: condition == "old-images", transcript: condition == "transcript", mode: false, imagesNavigation: condition != "no-images-navigation"),
             (_, node) => node.Role == "Edit" ? condition == "draft" ? "carried draft" : "" : null, (_, id) => actions.Add(id), default));
         Assert.True(error is null or ImageAutomationException);
         Assert.Empty(actions);
@@ -68,17 +197,17 @@ public sealed class NativeImageWindowPreparationTests
     public void Replacing_the_bound_window_or_document_never_redirects_input(bool document)
     {
         var preparation = Started();
-        preparation.Advance([Source, Created], _ => Frame(), ReadEmpty, (_, _) => { }, default);
+        preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty, (_, _) => { }, default);
         Assert.Equal("conversation_changed", Assert.Throws<ImageAutomationException>(() => preparation.Advance(
-            document ? [Source, Created] : [Source, Created with { Handle = 30 }], _ => Frame(images: true, document: document ? "replacement" : "doc"),
+            document ? [Source, Created] : [Source, Created with { Handle = 30 }], _ => Frame(images: true, mode: false, document: document ? "replacement" : "doc"),
             ReadEmpty, (_, _) => throw new Exception("Must not navigate"), default)).Reason);
     }
 
     [Fact]
     public void A_nonempty_image_composer_never_becomes_owned()
     {
-        var preparation = Started(); preparation.Advance([Source, Created], _ => Frame(), ReadEmpty, (_, _) => { }, default);
-        Assert.Equal("user_changed_composer", Assert.Throws<ImageAutomationException>(() => preparation.Advance([Source, Created], _ => Frame(images: true),
+        var preparation = Started(); preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty, (_, _) => { }, default);
+        Assert.Equal("user_changed_composer", Assert.Throws<ImageAutomationException>(() => preparation.Advance([Source, Created], _ => Frame(images: true, mode: false),
             (_, node) => node.Role == "Edit" ? "other draft" : null, (_, _) => throw new Exception("Must not navigate"), default)).Reason);
     }
 
@@ -114,14 +243,14 @@ public sealed class NativeImageWindowPreparationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void A_partial_document_waits_for_product_mode_before_reading_any_composer(bool editPresent)
+    public void A_partial_document_waits_for_images_navigation_before_reading_any_composer(bool editPresent)
     {
         var preparation = Started(); var actions = new List<string>();
-        var partial = Frame(mode: false);
+        var partial = Frame(mode: false, imagesNavigation: false);
         if (!editPresent) partial = NativeImageFrame.Capture(partial.Nodes.Where(x => x.Id != "composer").ToArray());
-        Assert.Null(preparation.Advance([Source, Created], _ => partial, (_, _) => throw new Exception("Product mode must precede Value reads"), (_, id) => actions.Add(id), default));
+        Assert.Null(preparation.Advance([Source, Created], _ => partial, (_, _) => throw new Exception("Images navigation must precede Value reads"), (_, id) => actions.Add(id), default));
         Assert.Empty(actions);
-        Assert.Null(preparation.Advance([Source, Created], _ => Frame(), ReadEmpty, (_, id) => actions.Add(id), default));
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty, (_, id) => actions.Add(id), default));
         Assert.Equal(new[] { "images" }, actions);
     }
 
@@ -129,9 +258,9 @@ public sealed class NativeImageWindowPreparationTests
     public void A_provisional_loading_document_does_not_bind_the_later_verified_chat_page()
     {
         var preparation = Started(); var actions = new List<string>();
-        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false, document: "loading"), (_, _) => throw new Exception("No reads before product"), (_, id) => actions.Add(id), default));
-        Assert.Null(preparation.Advance([Source, Created], _ => Frame(document: "ready"), ReadEmpty, (_, id) => actions.Add(id), default));
-        Assert.NotNull(preparation.Advance([Source, Created], _ => Frame(images: true, document: "ready"), ReadEmpty, (_, id) => actions.Add(id), default));
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false, document: "loading", imagesNavigation: false), (_, _) => throw new Exception("No reads before Images navigation"), (_, id) => actions.Add(id), default));
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false, document: "ready"), ReadEmpty, (_, id) => actions.Add(id), default));
+        Assert.NotNull(preparation.Advance([Source, Created], _ => Frame(images: true, mode: false, document: "ready"), ReadEmpty, (_, id) => actions.Add(id), default));
         Assert.Equal(new[] { "images" }, actions);
     }
 
@@ -175,15 +304,16 @@ public sealed class NativeImageWindowPreparationTests
         return preparation;
     }
     static string? ReadEmpty(NativeImageTarget target, NativeImageNode node) => node.Role == "Edit" ? "" : null;
-    static NativeImageFrame Frame(bool images = false, bool transcript = false, bool mode = true, string document = "doc")
+    static NativeImageFrame Frame(bool images = false, bool transcript = false, bool mode = true, string document = "doc", bool imagesNavigation = true)
     {
         var nodes = new List<NativeImageNode>
         {
             new(document, null, "Document", ""), new("root", document, "Group", ""), new("shell", "root", "Group", ""),
-            new("rail", "shell", "Group", ""), new("images", "rail", "Button", "图像"),
+            new("rail", "shell", "Group", ""),
             new("main", "shell", "Group", ""), new("row", "main", "Group", ""),
             new("composer", "row", "Edit", ""), new("model", "row", "Button", "选择 ChatGPT 模型")
         };
+        if (imagesNavigation) nodes.Add(new("images", "rail", "Button", "图像"));
         if (mode) nodes.Add(new("mode", "rail", "Button", "切换模式，当前模式：ChatGPT"));
         if (images) nodes.Add(new("heading", "main", "Text", "图像"));
         if (transcript) nodes.Add(new("old-turn", "main", "Text", "你说：", Speaker: "user"));

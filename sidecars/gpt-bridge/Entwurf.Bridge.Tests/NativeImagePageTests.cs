@@ -30,6 +30,37 @@ public sealed class NativeImagePageTests
     }
 
     [Fact]
+    public void The_native_26_1103_picker_wrapper_still_belongs_to_the_same_composer_row()
+    {
+        var wrapped = Home().Select(x => x.Id == "model" ? x with { ParentId = "model-wrap" } : x)
+            .Append(new NativeImageNode("model-wrap", "composer-row", "Group", "")).ToArray();
+        Assert.True(NativeImagePage.IsHome(wrapped, "composer"));
+    }
+
+    [Theory]
+    [InlineData("elsewhere")]
+    [InlineData("nested")]
+    [InlineData("document")]
+    [InlineData("hidden")]
+    [InlineData("named")]
+    public void An_unrelated_or_unobserved_picker_wrapper_cannot_authorize_input(string kind)
+    {
+        var wrapped = Home().Select(x => x.Id == "model" ? x with { ParentId = "model-wrap" } : x)
+            .Append(new NativeImageNode("model-wrap", kind == "elsewhere" ? "rail" : kind == "nested" ? "intermediate" : "composer-row",
+                kind == "document" ? "Document" : "Group", kind == "named" ? "other panel" : "", Visible: kind != "hidden"))
+            .Append(new NativeImageNode("intermediate", "composer-row", "Group", "")).ToArray();
+        Assert.False(NativeImagePage.IsHome(wrapped, "composer"));
+    }
+
+    [Fact]
+    public void Two_model_pickers_in_the_composer_remain_ambiguous()
+    {
+        var wrapped = Home().Append(new NativeImageNode("model-wrap", "composer-row", "Group", ""))
+            .Append(new NativeImageNode("other-model", "model-wrap", "Button", "选择 ChatGPT 模型")).ToArray();
+        Assert.False(NativeImagePage.IsHome(wrapped, "composer"));
+    }
+
+    [Fact]
     public void An_images_page_with_a_reappearing_old_transcript_cannot_authorize_prompt_input()
     {
         var changed = Home().Append(new NativeImageNode("old-turn", "main", "Text", "你说：", Speaker: "user")).ToArray();

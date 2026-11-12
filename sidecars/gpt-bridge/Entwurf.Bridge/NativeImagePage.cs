@@ -7,7 +7,9 @@ public static class NativeImagePage
         if (HasTranscriptOrGeneration(nodes)) return false;
         var map = nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
         if (!map.TryGetValue(editId, out var edit) || edit.Role != "Edit" || !edit.Visible || !edit.Enabled) return false;
-        if (nodes.Count(x => x.ParentId == edit.ParentId && x.Role == "Button" && x.Visible && IsModelPicker(x.Name)) != 1) return false;
+        if (nodes.Count(x => x.Role == "Button" && x.Visible && IsModelPicker(x.Name)
+            && (x.ParentId == edit.ParentId || (x.ParentId is { } id && map.TryGetValue(id, out var wrapper)
+                && wrapper.Role == "Group" && wrapper.Name == "" && wrapper.Visible && wrapper.ParentId == edit.ParentId))) != 1) return false;
         var navigation = nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && x.Name is "图像" or "Images").ToArray();
         if (navigation.Length != 1) return false;
         var parentId = edit.ParentId;

@@ -607,6 +607,97 @@ original Save As, SQLite import/ACK, all three frontends and native locked-sessi
 acceptance remain pending. Unlocking resolved the session condition; it did not
 establish a usable image composer.
 
+## Native composer compatibility follow-up — 2026-11-12
+
+A scoped maximize/restore diagnostic and Images navigation eventually exposed a
+loaded Images page in the already-owned HWND `6096260`. A template preview dialog
+was dismissed on that window. These diagnostics do not establish a renderer
+startup fix or locked-session acceptance.
+
+UIA3 reads the empty ProseMirror composer as its accessible hint plus LF. A raw
+five-node subtree independently exposes the genuinely empty paragraph's
+`placeholder` class and `ProseMirror-trailingBreak`. The public renderer installs
+that paragraph marker only for a single empty paragraph; its CSS generates the
+hint. The adapter now recognizes this exact structure. Identical user text,
+whitespace drafts, extra content, missing markers and ambiguous trees remain
+unchanged. The native Windows suite passed **201/201** after this change.
+
+A bounded UIA3 capture of the real Images page showed the model picker inside one
+unnamed Group directly under the composer's row. The page matcher now accepts
+that observed wrapper, with negative tests for unrelated/deeper/hidden wrappers
+and multiple pickers. At `2026-11-12T07:36:29Z`, the updated reader returned an empty
+composer and the actual page passed `NativeImagePage.IsHome`; the original source
+input hash and foreground HWND were unchanged.
+
+Preparation now accepts an already-verified Images source without the optional
+ChatGPT mode button. A fresh same-process HWND must expose one actionable Images
+button and a unique truly empty writable Edit before navigation; genuine Images
+Home is still required before prompt input. With another app foreground, source
+selection can use only one verified product surface. Multiple valid surfaces,
+unreadable alternatives and changed cached identities do not authorize fallback.
+The complete native Windows suite passed **232/232**, with zero skipped tests.
+
+The direct no-submit input preflight at `2026-11-12T07:37:14Z` failed
+`user_changed_composer`: after ValuePattern SetValue, the immediate read still
+returned the empty hint. A later read at `07:39:46Z` also found that hint and no
+preflight marker. The original source's raw input hash remained unchanged. The
+foreground HWND changed during this diagnostic; its cause was not established.
+Both top-level ChatGPT windows were later observed minimized, despite the
+composer reporting visible. A diagnostic `SW_SHOWNOACTIVATE` restored only the
+owned window at `07:47:33Z`; the foreground HWND was unchanged and the original
+source remained minimized. At `07:49:31Z`, the original preflight marker appeared
+with its exact SHA-256. This proves the earlier empty observations did not exclude
+a queued write. Scoped cleanup of that exact marker positively verified the
+empty-paragraph marker at `07:51:58Z`; the original source input hash remained
+unchanged. A cleanup operation changed the foreground HWND, so no focus-preserving
+input/cleanup acceptance is claimed.
+
+The adapter now refuses pattern mutations on minimized windows, waits for exact
+prompt acknowledgement and an enabled Send control, and verifies empty state
+after clearing its exact owned prompt. A pre-submit failure already retains its
+owned window/document binding and is not eligible for retry. The binding now
+records whether draft writing or clearing remains unconfirmed, and the session
+persists the final cleanup result. The cleanup cancellation budget permits the
+full native acknowledgement polling interval. Minimization after a dispatched
+request can still defer the external renderer; this remains an uncertain bound
+operation rather than proof of a clean or retryable run.
+
+A current read-only check at `2026-11-12T09:01:15Z` found the same bound Images
+window restored, with an empty canonical composer and the original source's
+unchanged input hash. One no-submit production write/clear preflight at
+`09:02:57Z` acknowledged the exact new marker and then positively verified the
+empty composer; the final exported binding recorded `draft_cleanup_state:
+cleared`. The helper exited 0. Its foreground queries returned zero before and
+after, so these samples do not establish focus-preserving execution.
+
+Review found that an abrupt exit during prompt acknowledgement could occur
+before failure handling saved the binding. The executor now saves the write
+stage and prepared binding before dispatch. Historical interrupted write/submit
+stages also refuse pre-submit retry even without a binding. Cleanup returns
+without UI access if this conversation never dispatched its prompt write,
+preserving a user's draft that happens to equal the planned prompt. The complete
+Windows suite on the matching source snapshot passed **246/246**, with zero
+failed or skipped tests and process exit 0; the new cases inspect an in-flight
+disk snapshot before failure/cleanup and reopen that state for restart checks.
+
+The current production Probe/Prepare preflight at `09:04:25Z` reported `ready`,
+created a third same-process window, HWND `30736958`, and ended at `09:05:07Z`
+with `image_surface_unavailable`. Subsequent read-only inspection found 15 nodes
+and no writable composer in that new window. No prompt write or Submit was
+called by preparation. The earlier successful input preflight on an already
+loaded diagnostic window does not close this fresh-window preparation gate.
+
+A separate public Probe/Prepare call reported `ready` but then failed
+`independent_window_unavailable` before binding another window. Neither helper
+called Submit, and the production run remains paused without submission intent.
+These are preparation/input diagnostics, not generated-image acceptance.
+
+Private source receipts, TRX reports and native preflight records are retained in
+`artifacts/prosemirror-fix-20261112` and `artifacts/compatibility-fix-20261112` in
+the Windows task checkout, with the later checks under
+`artifacts/continuation-20261112`, and excluded from Git. Original generation/download,
+SQLite import/ACK, all three frontends and locked-session acceptance remain pending.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
