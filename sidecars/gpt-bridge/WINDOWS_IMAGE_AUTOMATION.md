@@ -29,7 +29,7 @@ The state directory belongs exclusively to one executor. `runs.json` stores run 
 2. Snapshot eligible window identities, expand the source's application File menu through UIA, and invoke its unique visible enabled New Window command once. If the command is absent or unsupported, stop with `independent_window_unavailable`. Accept exactly one new HWND from the same process and process start time. Bind that window and its document, verify an empty fresh ChatGPT page without transcript or generation, then open Images in that new window. Wait for the actual image-page heading, model picker, and a unique empty writable composer. Never navigate, fill, or clear the original conversation/draft; keep both windows open.
 3. Persist the write stage and native window/document binding before setting the prompt through UIA ValuePattern. Wait for the exact value and an enabled Send control, then durably record submission intent before the sole Invoke. Chromium can acknowledge pattern writes asynchronously; an early empty snapshot does not prove no write occurred. Cancel and submit transitions have one ordering. Cleanup only clears a dispatched, exact owned prompt and waits for positive empty-state acknowledgement; unconfirmed writing or clearing remains bound and cannot authorize retry.
 4. Bind the response to a newly observed user turn matching this prompt and its actual level-four speaker heading. Exclude prompt copies inside the composer; retain the user heading when its exact prompt Text control is rerendered. Follow the document's accessibility order from that user heading into the assistant response and stop at the next user heading. Accept a newly observed image/action only within its assistant fragment; reject user attachments, old images, ambiguous images, changed conversations, and active generation. Require stable image/control identity before downloading. A numbered generated-image button must be its exactly labelled image's immediate parent. A saved response cannot be replaced by a later image during recovery.
-5. Invoke that response's original-image download, opening its preview if required. A generic `下载` / `Download` action is accepted only inside the exact new named preview. Use the standard Save As dialog whose native owner chain reaches the exact bound window, and a new file under the run's owned directory. A shared process ID alone does not establish dialog ownership. Never scan the user's Downloads directory. Screenshots cannot become artifacts.
+5. Invoke that response's original-image download, opening its preview if required. A generic `下载` / `Download` action is accepted only inside the exact new named preview. Use the standard Save As dialog whose native owner chain reaches the exact bound window, and a new file under the run's owned directory. A shared process ID alone does not establish dialog ownership. Refuse an existing owned Save As immediately before Download; pin the new dialog before waiting for controls, revalidate its unique filename and Save controls before writing, and dispatch Save once. A still-visible same dialog is allowed while the owned file finishes; replacement dialogs are refused. Never scan the user's Downloads directory. Screenshots cannot become artifacts.
 6. Read bounded original bytes, check the image signature and SHA-256, and stage them atomically. Send `artifact` and remain `awaiting_import`. Only `artifact_accepted`, after the destination application's validated database commit, persists `completed` and removes staged bytes.
 
 Disconnected/restarted sessions never resubmit. Reconnection reports durable state and retransmits an existing staged artifact. Interrupted runs without a completed artifact pause. A `status` request can resume observation/download for an already submitted run whose minimal UI binding was persisted. This recovery path never prepares a new chat, fills the prompt, or submits. It revalidates the original process/start time, document, and new user turn against the stored prompt hash. A bound image preview can be closed to revalidate its source; an unrelated conversation is refused. The destination image import retains responsibility for full decoding, dimensions, and its application transaction.
@@ -55,8 +55,8 @@ The 2026-11-12 response-binding and scoped preview-download changes passed all
 recovery positively verified the earlier real Bayes-diagram response and opened
 its preview, preserving the original source input hash. The owned standard Save
 As dialog was not found, so original-image download and coordinated import/ACK
-remain unverified. Current fresh-window preparation and actual locked/background
-execution also remain open; see
+remain unverified. This recovery did not validate fresh-window preparation or
+actual locked/background execution; see
 [the detailed acceptance record](../../docs/development/automation-web-acceptance.md).
 
 The subsequent runtime-identity repair passed 342 native Windows tests and
@@ -69,6 +69,14 @@ at 2026-11-12T15:48:21Z. The original source input hash was unchanged. The diagn
 seeded the prior source identity, so cold-start disambiguation among its additional
 windows remains outside that proof. Original download/import and actual locked
 execution still require acceptance.
+
+The 2026-11-13 save lifecycle repair passed 352 native Windows tests and
+self-contained win-x64 publishing on the exact retained source snapshot. It waits
+for the same owned dialog to become ready and for the exclusive owned file to
+finish, without repeating Save. Delayed controls, dialog replacement, timeout and
+cancellation are covered. Public shipped source invokes its image Save As without
+a BrowserWindow argument; actual native dialog ownership and original retrieval
+still require live verification. The adapter retains exact-window owner checks.
 
 The structured `TaskEnvelope` bridge remains a separate named-pipe entrypoint. Its `WindowsAutomation.CheckSafety()` still checks an unlocked input desktop and foreground target. Those existing capability gates and protocol are independent of the direct-pattern image executor and must not be presented as image-mode restrictions.
 
