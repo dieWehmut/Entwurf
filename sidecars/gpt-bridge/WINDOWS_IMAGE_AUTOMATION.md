@@ -78,6 +78,15 @@ cancellation are covered. Public shipped source invokes its image Save As withou
 a BrowserWindow argument; actual native dialog ownership and original retrieval
 still require live verification. The adapter retains exact-window owner checks.
 
+The subsequent stale-frame repair passed 369 native Windows tests and
+self-contained win-x64 publishing. Only a direct stale-element COM error causes
+a whole-frame reread, at most four times within a bounded retry-start window.
+Complete captures revalidate the bound process, document and login state;
+discarded captures restart image stability timing. Missing runtime identity,
+other errors and mutation failures remain fatal. The retry callback contains
+only reads and never replays preview, Download or Save. Live original delivery
+still requires acceptance.
+
 The structured `TaskEnvelope` bridge remains a separate named-pipe entrypoint. Its `WindowsAutomation.CheckSafety()` still checks an unlocked input desktop and foreground target. Those existing capability gates and protocol are independent of the direct-pattern image executor and must not be presented as image-mode restrictions.
 
 

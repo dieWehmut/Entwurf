@@ -176,7 +176,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             lock (uiGate)
             {
                 RequireWindow(run.Target, cancellation);
-                var frame = Capture(run.Target, cancellation, run);
+                var remaining = TimeSpan.FromMinutes(8) - elapsed.Elapsed;
+                if (remaining <= TimeSpan.Zero) break;
+                var frame = CaptureComplete(run.Target, cancellation, run, () => stableId = null,
+                    remaining < TimeSpan.FromSeconds(3) ? remaining : TimeSpan.FromSeconds(3));
                 if (frame.DocumentId != run.DocumentId || HasLogin(frame)) throw new ImageAutomationException("conversation_changed");
                 var ownUser = NativeImageEvidence.FindUserTurnByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
                 if (ownUser is not null) { run.UserId = ownUser.TextId; run.UserHeadingId = ownUser.HeadingId; }
@@ -228,7 +231,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 lock (uiGate)
                 {
                     RequireWindow(run.Target, cancellation);
-                    var frame = Capture(run.Target, cancellation, run);
+                    var remaining = TimeSpan.FromSeconds(15) - wait.Elapsed;
+                    if (remaining <= TimeSpan.Zero) break;
+                    var frame = CaptureComplete(run.Target, cancellation, run, timeout:
+                        remaining < TimeSpan.FromSeconds(3) ? remaining : TimeSpan.FromSeconds(3));
                     var previews = frame.Nodes.Where(x => x.Visible && x.Role is "Window" or "Group"
                         && !beforePreview.Contains(x.Id) && IsPreviewDialog(x.Name)).ToArray();
                     if (previews.Length > 1) throw new ImageAutomationException("download_unavailable");
@@ -471,6 +477,22 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     }
 
     Frame Capture(NativeImageTarget target, CancellationToken cancellation, Conversation? conversation = null)
+        => CaptureComplete(target, cancellation, conversation);
+
+    Frame CaptureComplete(NativeImageTarget target, CancellationToken cancellation, Conversation? conversation,
+        Action? onDiscard = null, TimeSpan? timeout = null)
+        => NativeImageFrameReadiness.Read(() =>
+        {
+            // Discarding a stale provider snapshot must rebuild the whole tree.
+            // Never retry an action or reuse nodes from the incomplete traversal.
+            var frame = CaptureOnce(target, cancellation, conversation);
+            RequireWindow(target, cancellation);
+            if (conversation is not null && (frame.DocumentId != conversation.DocumentId || HasLogin(frame)))
+                throw new ImageAutomationException("conversation_changed");
+            return frame;
+        }, cancellation, onDiscard, timeout);
+
+    Frame CaptureOnce(NativeImageTarget target, CancellationToken cancellation, Conversation? conversation)
     {
         RequireWindow(target, cancellation);
         automation ??= new UIA3Automation { ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2) };

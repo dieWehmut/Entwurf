@@ -838,6 +838,47 @@ exact preview then failed during whole-frame capture with
 or a Save As observation. The receipt identifies the preview-wait capture call;
 no partial UI frame was accepted. Original bytes remain undelivered.
 
+## Native stale-frame capture follow-up — 2026-11-13
+
+The proven preview-load failure called a property on an element that had been
+removed (`UIA_E_ELEMENTNOTAVAILABLE`, `0x80040201`). Capture now retries only that
+direct COM error. Every attempt starts from the bound HWND and rebuilds its entire
+node/element tree. No incomplete frame is returned. A complete frame revalidates
+the trusted process lifetime, exact bound Document and login state before any
+subsequent action. Other HRESULTs, wrapped errors, missing runtime identity and
+cancellation remain fatal. Invoke and SetValue stay outside the retry callback.
+
+The helper allows at most four reads and waits at most 100 ms between reads,
+within a three-second window for starting retries. The existing synchronous
+provider/capture limits remain observable; a valid first read is not rejected
+merely because it finished after the retry-start window. Generation and preview
+pass their remaining phase time, and discarding a frame resets the two-second
+image stability observation. Preview, Download and Save are never reinvoked by
+capture retries.
+
+Source `94609b3` passed **369/369** native Windows tests, zero failed or skipped,
+exit 0, and self-contained win-x64 publishing exited 0. All 55 retained source
+hashes match the tested snapshot. Seventeen source-linked tests also passed on
+Linux, covering full reconstruction, fatal errors, attempt/deadline bounds,
+cancellation, stability reset, changed bindings and no action replay. Private
+receipts/TRX/publish files are retained under `artifacts/stale-frame-fix-20261113`
+in the Windows task checkout.
+
+The known owned preview remained visible in a read-only capture at
+`2026-11-12T17:54:29Z`. Later recovery launches encountered WSL transport timeouts.
+A native process inspection at `18:22:20Z` found no process for that specific
+recovery job. The next launch ended at compilation, before creating its action
+claim; a diagnostic Windows path literal was corrected. Its subsequent launch
+and process-observation attempts again timed out, without a new receipt. Those
+transport failures do not prove whether the corrected job started or became
+terminal. No additional prompt was written or sent, and original-byte delivery
+and frontend ACK remain unverified.
+
+PR #9 was merged to main `a521f14`, and its exact Pages workflow
+[43274450200](https://github.com/dieWehmut/Entwurf/actions/runs/43274450200)
+completed successfully. That deployment check does not replace native-account
+acceptance, and the subsequent stale-frame source still requires integration.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
