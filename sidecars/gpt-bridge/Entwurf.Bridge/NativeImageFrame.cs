@@ -1,6 +1,6 @@
 namespace Entwurf.Bridge;
 
-internal sealed record NativeImageFrame(IReadOnlyList<NativeImageNode> Nodes, string DocumentId)
+internal sealed record NativeImageFrame(IReadOnlyList<NativeImageNode> Nodes, string DocumentId, bool HasAdditionalContent = false)
 {
     internal static NativeImageFrame Capture(IReadOnlyList<NativeImageNode> nodes)
     {
@@ -29,6 +29,7 @@ internal sealed record NativeImageFrame(IReadOnlyList<NativeImageNode> Nodes, st
         if (outerDocuments.Count != 1) throw new ImageAutomationException("image_surface_unavailable");
         var documentId = outerDocuments[0];
         // Controls inside an embedded document belong to that document, even if labels match the main product.
-        return new(nodes.Where(x => owners[x.Id] == documentId).ToArray(), documentId);
+        return new(nodes.Where(x => owners[x.Id] == documentId).ToArray(), documentId,
+            nodes.Any(x => x.Role == "Document" && x.Id != documentId));
     }
 }

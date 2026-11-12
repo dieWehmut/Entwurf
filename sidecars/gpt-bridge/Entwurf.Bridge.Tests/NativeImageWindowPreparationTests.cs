@@ -243,6 +243,97 @@ public sealed class NativeImageWindowPreparationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void Only_the_owned_root_only_document_is_refreshed_once_before_normal_empty_page_verification(bool secondGroup)
+    {
+        var preparation = Started();
+        var refreshes = new List<NativeImageTarget>();
+        var navigation = new List<string>();
+        NativeImageFrame ReadBlank(NativeImageTarget target) { Assert.Equal(Created, target); return Blank(secondGroup); }
+        Assert.Null(preparation.Advance([Source, Created], ReadBlank,
+            (_, _) => throw new Exception("Blank renderer has no composer"),
+            (_, _) => throw new Exception("Blank renderer cannot navigate"), default, target => refreshes.Add(target)));
+        Assert.Null(preparation.Advance([Source, Created], ReadBlank,
+            (_, _) => throw new Exception("Still no composer"),
+            (_, _) => throw new Exception("Still no navigation"), default, _ => throw new Exception("Refresh cannot replay")));
+        Assert.Equal(new[] { Created }, refreshes);
+        Assert.Null(preparation.Advance([Source, Created], _ => Frame(mode: false), ReadEmpty,
+            (target, id) => { Assert.Equal(Created, target); navigation.Add(id); }, default,
+            _ => throw new Exception("Loaded page cannot refresh")));
+        Assert.NotNull(preparation.Advance([Source, Created], _ => Frame(images: true, mode: false), ReadEmpty,
+            (_, _) => throw new Exception("Navigation cannot replay"), default, _ => throw new Exception("Images cannot refresh")));
+        Assert.Equal(new[] { "images" }, navigation);
+    }
+
+    [Theory]
+    [InlineData("edit")]
+    [InlineData("hidden-edit")]
+    [InlineData("button")]
+    [InlineData("text")]
+    [InlineData("named-group")]
+    [InlineData("redacted-group-name")]
+    [InlineData("embedded-document")]
+    [InlineData("additional-groups")]
+    public void A_nonblank_or_unsupported_new_page_never_authorizes_layout_mutations(string condition)
+    {
+        var nodes = Blank().Nodes.ToList();
+        if (condition is "edit" or "hidden-edit") nodes.Add(new("possible-user-composer", "root", "Edit", "", Visible: condition == "edit"));
+        if (condition == "button") nodes.Add(new("other-button", "root", "Button", ""));
+        if (condition == "text") nodes.Add(new("other-text", "root", "Text", ""));
+        if (condition == "named-group") nodes.Add(new("other-group", "root", "Group", "unrelated panel"));
+        if (condition == "embedded-document")
+        {
+            nodes.Add(new("embedded", "root", "Document", ""));
+            nodes.Add(new("embedded-edit", "embedded", "Edit", ""));
+        }
+        if (condition == "additional-groups")
+        {
+            nodes.Add(new("extra-1", "root", "Group", ""));
+            nodes.Add(new("extra-2", "extra-1", "Group", ""));
+        }
+        var frame = NativeImageFrame.Capture(nodes);
+        if (condition == "redacted-group-name") frame = frame with { HasAdditionalContent = true };
+        var preparation = Started();
+        Assert.Null(preparation.Advance([Source, Created], _ => frame,
+            (_, _) => throw new Exception("No Images navigation permits no composer reads"),
+            (_, _) => throw new Exception("No navigation"), default, _ => throw new Exception("Nonblank page cannot refresh")));
+    }
+
+    [Fact]
+    public void A_blank_refresh_is_consumed_before_an_uncertain_native_call()
+    {
+        var preparation = Started(); var refreshes = 0;
+        Assert.Throws<InvalidOperationException>(() => preparation.Advance([Source, Created], _ => Blank(), ReadEmpty,
+            (_, _) => throw new Exception("No navigation"), default,
+            _ => { refreshes++; throw new InvalidOperationException(); }));
+        Assert.Null(preparation.Advance([Source, Created], _ => Blank(), ReadEmpty,
+            (_, _) => throw new Exception("No navigation"), default, _ => refreshes++));
+        Assert.Equal(1, refreshes);
+    }
+
+    [Fact]
+    public void Cancellation_after_blank_capture_prevents_refresh()
+    {
+        var preparation = Started();
+        using var cancellation = new CancellationTokenSource();
+        Assert.ThrowsAny<OperationCanceledException>(() => preparation.Advance([Source, Created],
+            _ => { cancellation.Cancel(); return Blank(); }, ReadEmpty,
+            (_, _) => throw new Exception("No cancelled navigation"), cancellation.Token,
+            _ => throw new Exception("No cancelled resize")));
+    }
+
+    [Fact]
+    public void Missing_or_unreadable_new_windows_cannot_resize_the_source()
+    {
+        var preparation = Started();
+        Assert.Null(preparation.Advance([Source], _ => throw new Exception("Do not capture source"), ReadEmpty,
+            (_, _) => throw new Exception("No navigation"), default, _ => throw new Exception("Source cannot refresh")));
+        Assert.Null(preparation.Advance([Source, Created], _ => throw new ImageAutomationException("image_surface_unavailable"), ReadEmpty,
+            (_, _) => throw new Exception("No navigation"), default, _ => throw new Exception("Unreadable tree cannot refresh")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void A_partial_document_waits_for_images_navigation_before_reading_any_composer(bool editPresent)
     {
         var preparation = Started(); var actions = new List<string>();
@@ -304,6 +395,12 @@ public sealed class NativeImageWindowPreparationTests
         return preparation;
     }
     static string? ReadEmpty(NativeImageTarget target, NativeImageNode node) => node.Role == "Edit" ? "" : null;
+    static NativeImageFrame Blank(bool secondGroup = false)
+    {
+        var nodes = new List<NativeImageNode> { new("doc", null, "Document", ""), new("root", "doc", "Group", "") };
+        if (secondGroup) nodes.Add(new("empty-root", "root", "Group", ""));
+        return NativeImageFrame.Capture(nodes);
+    }
     static NativeImageFrame Frame(bool images = false, bool transcript = false, bool mode = true, string document = "doc", bool imagesNavigation = true)
     {
         var nodes = new List<NativeImageNode>

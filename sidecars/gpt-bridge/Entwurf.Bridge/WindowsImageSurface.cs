@@ -18,7 +18,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     readonly NativeImageWindowAccess windowAccess = new(ReadWindowIdentity);
     UIA3Automation? automation;
     NativeImageTarget? sourceTarget;
-    sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId);
+    sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId, bool HasAdditionalContent);
     sealed record Binding(int Version, long Window, int ProcessId, long ProcessStartedUtcTicks, string DocumentId,
         string EditId, string[] BeforeIds, string PromptSha256, string? UserId, NativeGeneratedImage? Result, string? PreviewRootId,
         string DraftCleanupState = "not_started");
@@ -62,7 +62,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         {
             var frame = Capture(target, cancellation);
             frames[target] = frame;
-            return new(frame.Nodes, frame.DocumentId);
+            return new(frame.Nodes, frame.DocumentId, frame.HasAdditionalContent);
         }
         lock (uiGate)
         {
@@ -92,7 +92,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 {
                     RequireWindow(target, cancellation);
                     Invoke(target, frames[target].Elements[id], cancellation);
-                }, cancellation);
+                }, cancellation, target => RefreshBlankWindow(target, cancellation));
                 if (edit is not null)
                 {
                     var target = preparation.Target!;
@@ -446,6 +446,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var walker = automation.TreeWalkerFactory.GetControlViewWalker();
         var elements = new Dictionary<string, AutomationElement>(StringComparer.Ordinal);
         var nodes = new List<NativeImageNode>();
+        var namedGroups = new HashSet<string>(StringComparer.Ordinal);
         var queue = new Queue<(AutomationElement Element, string? Parent)>();
         queue.Enqueue((root, null));
         var watch = Stopwatch.StartNew();
@@ -462,6 +463,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (role is "Button" or "Text" or "MenuItem" or "Window" or "Group")
             {
                 var label = element.Name;
+                if (role == "Group" && label.Length != 0) namedGroups.Add(id);
                 if (KnownLabel(label)) name = label;
                 else if (role == "Text" && conversation is not null && label.Length <= 200_000
                     && !conversation.Before.Contains(id) && (conversation.UserId is null || id == conversation.UserId)
@@ -483,7 +485,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             }
         }
         var scoped = NativeImageFrame.Capture(nodes);
-        return new(scoped.Nodes.ToList(), scoped.Nodes.ToDictionary(x => x.Id, x => elements[x.Id], StringComparer.Ordinal), scoped.DocumentId);
+        return new(scoped.Nodes.ToList(), scoped.Nodes.ToDictionary(x => x.Id, x => elements[x.Id], StringComparer.Ordinal), scoped.DocumentId,
+            scoped.HasAdditionalContent || scoped.Nodes.Any(x => namedGroups.Contains(x.Id)));
     }
 
     internal static (bool Visible, bool Enabled) ReadAvailability(IAutomationProperty<bool> offscreen, IAutomationProperty<bool> enabled)
@@ -680,6 +683,17 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
 
     void RequireWindow(NativeImageTarget target, CancellationToken cancellation) => windowAccess.Require(target, cancellation);
 
+    void RefreshBlankWindow(NativeImageTarget target, CancellationToken cancellation)
+        => NativeImageWindowLayout.Refresh(target, windowAccess, current =>
+        {
+            if (!GetWindowRect(current.Handle, out var bounds)) throw new ImageAutomationException("image_surface_unavailable");
+            return new(bounds.Left, bounds.Top, checked(bounds.Right - bounds.Left), checked(bounds.Bottom - bounds.Top));
+        }, (current, bounds) =>
+        {
+            if (!SetWindowPos(current.Handle, 0, bounds.Left, bounds.Top, bounds.Width, bounds.Height, NativeImageWindowLayout.PositionFlags))
+                throw new ImageAutomationException("image_surface_unavailable");
+        }, token => Task.Delay(TimeSpan.FromMilliseconds(500), token).GetAwaiter().GetResult(), cancellation);
+
     internal static bool OwnedSaveDialog(nint window, nint targetWindow, Func<nint, nint> owner)
     {
         var visited = new HashSet<nint> { window };
@@ -714,6 +728,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowProc callback, nint parameter);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] static extern bool IsIconic(nint window);
+    [StructLayout(LayoutKind.Sequential)]
+    struct WindowRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(nint window, out WindowRect bounds);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] static extern nint GetWindow(nint window, uint command);
     [DllImport("user32.dll")] static extern nint GetForegroundWindow();
