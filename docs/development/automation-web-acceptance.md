@@ -879,6 +879,48 @@ PR #9 was merged to main `a521f14`, and its exact Pages workflow
 completed successfully. That deployment check does not replace native-account
 acceptance, and the subsequent stale-frame source still requires integration.
 
+## Native viewer recovery and merged release — 2026-11-13
+
+Source `7c318d9` passed **388/388** native Windows tests; source `1f4456d`
+passed **430/430**, both with zero failures or skipped tests and test/publish
+exit 0. The viewer-close repair recognizes `关闭查看器` / `Close viewer` only
+inside the bound preview. After one close dispatch, bounded read-only polling
+waits for that preview to disappear and the original prompt and user heading to
+return. Replacement previews, changed evidence, cancellation and timeout never
+replay the close action. These tests do not prove a live original download.
+
+At `2026-11-12T21:16:44Z`, no-submit recovery had reverified the existing real
+diagnostic response and invoked its scoped original Download. A standard Save As
+dialog appeared in the trusted ChatGPT process with no native owner chain to the
+bound conversation. The adapter returned `download_dialog_unavailable` without
+writing a filename or invoking Save; no original bytes or frontend ACK were
+obtained. The exact-window ownership requirement remains unsatisfied. The old
+Entwurf then exited through its normal CloseRequested path. At `21:33:48Z`, a
+native read-only check found no Entwurf application/adapter processes or local
+service listener, with the workspace, paused coordinator and native journal
+bytes unchanged.
+
+PRs #12 and #13 merged the viewer repairs into main `81117d5`. Its native Windows
+x64 NSIS build completed at `2026-11-12T22:01:13Z`, preserving tracked-source and
+frozen-resource hashes before and after the build. The retained production code
+matches the 430-test snapshot; the source difference is automation documentation.
+The candidate installer is **79,708,837 bytes**, SHA-256
+`7ea7687951608fef38700bd0838b1208b0d4c933453d73a9505d61f93a5df77b`.
+The build reused the tested 275-file bridge publication. Its manifest explicitly
+records `installed: false` and `locked_generation_validated: false`; installation
+and real locked-session delivery require separate proof.
+
+Linux inspection of that exact installer completed with extraction exit 0 and
+without executing Windows code. All 306 packaged resources match the sealed
+source bytes, including all 275 bridge files from the tested publication. The
+desktop payload differs from the raw build only at the expected three-byte
+`UNK` to `NSS` installer marker; its SHA-256 is
+`a96a899275546b577b9be77f39a9e46bbe71f951eb5483da84a3e2bdecefd210`.
+The solid-archive listing estimates the StartMenu plugin size; the extracted
+plugin was checked against the exact native Unicode plugin bytes instead.
+Ten metadata/refusal checks passed. This inspection proves package contents,
+not installation, startup or original-image delivery.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
@@ -898,8 +940,9 @@ The current client has passed complete no-submit production fresh-window
 preparation on a previously verified source, with the original source input hash
 unchanged. That proof used the retained source identity; cold-start selection
 among the additional diagnostic windows is outside its scope. The correlated
-real response and its preview are verified, but an accepted owned Save As and
-original-byte retrieval remain unverified.
+real response and its preview are verified. Live Download exposed an ownerless
+Save As dialog, so a supported exactly owned save path and original-byte
+retrieval remain required.
 
 One coordinated real native generation from each frontend is still required with
 its explicitly selected, connected provider, preserving unrelated drafts. Each
@@ -907,6 +950,9 @@ must deliver original bytes into the application transaction, receive
 `artifact_accepted`, retain the generated version after reload and download the
 same committed image. Acceptance must include actual locked/background execution.
 Implementation tests, browser fixtures and no-submit diagnostics cannot establish
-these native-provider behaviors. Final source integration, release/installer and
-Pages checks must be refreshed after the remaining changes. Private source
+these native-provider behaviors. The merged candidate still needs installation,
+two complete final uninstall/reinstall cycles preserving projects and generated
+images, and tray restoration/exit acceptance with a normal installed app left
+available. Release and Pages checks must be refreshed after the remaining
+changes, including a deployed-site smoke test. Private source
 images, account information and generated acceptance images remain outside Git.
