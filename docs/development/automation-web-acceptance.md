@@ -543,6 +543,70 @@ bringing the client to the foreground. Legacy `windows_locked` and
 reconnect. Existing paused runs and submission intents are retained; neither an
 update nor reconnect authorizes replay.
 
+## Unlocked native live preflight — 2026-11-12
+
+The resumed local test observed Windows session 1 connected and unlocked at
+`2026-11-12T05:35:03Z`: WTS flags were 1 and the default input desktop was
+accessible. The installed provider package had updated to
+`OpenAI.Codex_26.1103.7773.0_x64__2p2nqsd0c76g0`. Initially its processes had no
+visible eligible window and Entwurf's service was stopped. Standard installed-app
+and main-AUMID launches restored the actual localhost service and one trusted
+source window, HWND `264044`, PID `22512`, started at
+`2026-11-12T04:36:31.2500520Z`.
+
+The source exposed 75 UIA nodes, global Images navigation and the four anchored
+application menu controls. Its current home contained work/project/permission
+controls and a coding-model picker; the fixed ChatGPT mode selector and ChatGPT
+model picker were absent. The real installed adapter connected, but its
+read-only status reported `chatgpt_mode_required`. The page title alone was not
+accepted as proof of ChatGPT image mode.
+
+A separate scoped UIA diagnostic, outside WindowsImageSurface preparation,
+expanded the native File menu and exposed exactly one visible enabled
+`新建窗口` command with InvokePattern. One scoped Invoke at
+`2026-11-12T05:39:38Z` created HWND `6096260` in the same PID and process lifetime.
+The diagnostic subsequently exited 1 because its menu Collapse cleanup found an
+invalid menu state; it did not repeat Invoke. The subsequent window enumeration,
+not the helper exit code, establishes that creation occurred. Production menu
+cleanup already catches this provider failure.
+The original source window remained present. This closes the earlier uncertainty
+about the live New Window command on this coding/work home. The production
+adapter still refuses this source before window creation because HasMode is
+absent; neither ChatGPT source nor fresh-page acceptance passed. In the diagnostic,
+the new window retained only 15–16 UIA nodes, an outer Document and empty root,
+with no Edit, Images navigation or composer. A window-only diagnostic capture
+also showed the blank page. The same bound HWND still had no Edit at
+`2026-11-12T05:44:03Z`. One diagnostic SetForegroundWindow call returned false
+and did not select the window; this is not background or foreground generation
+acceptance.
+
+Public installed-source review confirms that `createFreshWindow('/')` still
+creates a real window and calls the renderer loader. The old mode-button string
+also remains, with alternate component branches depending on home/work state;
+its absence here does not establish a renamed or removed selector. Application
+`Reload Window` is restricted to non-production builds; browser-page reload
+targets an existing embedded page, and no usable page-reload target was validated
+in this root-only window.
+Static code and the root-only capture do not identify the renderer failure cause.
+
+The installed local WebUI returned HTTP 200 and listed the existing public
+acceptance project. Its actual task view displayed the original r1, the paused run
+and no generated image. With the diagnostic window also open, it reported
+`ambiguous_chatgpt_windows`, as required for multiple eligible sources. The same
+coordinator/native run retained its run, task and
+base-version IDs, `paused` phase and native `submit_intent: false`; its prior
+resume request history was unchanged. Coordinator original-image and native
+staged-image counts were both zero. No Start, resume, Send or prompt edit was
+requested during this preflight. The new window remains a preparation diagnostic,
+not a generated artifact. Private receipts and captures are retained under
+`artifacts/live-native-20261112` in the task checkouts and excluded from Git.
+
+The immediate live gates are a fully loaded independent ChatGPT/Images page and
+validated current controls. Real prompt submission, response correlation,
+original Save As, SQLite import/ACK, all three frontends and native locked-session
+acceptance remain pending. Unlocking resolved the session condition; it did not
+establish a usable image composer.
+
 ## Remaining release gates
 
 At `2026-11-04T16:28:15Z`, read-only Win32 checks found the application's session
