@@ -21,7 +21,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     sealed record Frame(List<NativeImageNode> Nodes, Dictionary<string, AutomationElement> Elements, string DocumentId, bool HasAdditionalContent);
     sealed record Binding(int Version, long Window, int ProcessId, long ProcessStartedUtcTicks, string DocumentId,
         string EditId, string[] BeforeIds, string PromptSha256, string? UserId, NativeGeneratedImage? Result, string? PreviewRootId,
-        string DraftCleanupState = "not_started");
+        string DraftCleanupState = "not_started", string? UserHeadingId = null);
     sealed class Conversation(NativeImageTarget target, string documentId, string editId, HashSet<string> before, string? prompt, string promptSha256) : PreparedImageConversation
     {
         public NativeImageTarget Target { get; } = target;
@@ -32,6 +32,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         public string PromptSha256 { get; } = promptSha256;
         public bool Submitted;
         public string? UserId;
+        public string? UserHeadingId;
         public NativeGeneratedImage? Result;
         public string? PreviewRootId;
         public bool PromptWriteDispatched, PromptWriteAcknowledged, PromptClearDispatched, PromptClearAcknowledged;
@@ -177,15 +178,17 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 RequireWindow(run.Target, cancellation);
                 var frame = Capture(run.Target, cancellation, run);
                 if (frame.DocumentId != run.DocumentId || HasLogin(frame)) throw new ImageAutomationException("conversation_changed");
-                var ownUsers = frame.Nodes.Where(x => x.Role == "Text" && !run.Before.Contains(x.Id) && NativeImageEvidence.MatchesHash(x.Name, run.PromptSha256)).ToArray();
-                if (run.UserId is null && ownUsers.Length == 1) run.UserId = ownUsers[0].Id;
+                var ownUser = NativeImageEvidence.FindUserTurnByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
+                if (ownUser is not null) { run.UserId = ownUser.TextId; run.UserHeadingId = ownUser.HeadingId; }
                 if (run.UserId is null && elapsed.Elapsed > TimeSpan.FromSeconds(20)) throw new ImageAutomationException("conversation_changed");
-                var result = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId);
+                var result = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
+                if (run.Result is not null && result is not null && !NativeImageEvidence.SameResponse(result, run.Result))
+                    throw new ImageAutomationException("conversation_changed");
                 var generating = frame.Nodes.Any(x => x.Visible && NativeImageEvidence.IsGenerating(x.Name));
                 if (result is not null && !generating)
                 {
                     var image = frame.Nodes.Single(x => x.Id == result.ImageId);
-                    var signature = result.ImageId + ":" + result.ActionId + ":" + image.Width + "x" + image.Height;
+                    var signature = result.ImageId + ":" + result.ActionId + ":" + result.AssistantId + ":" + result.UserHeadingId + ":" + image.Width + "x" + image.Height;
                     if (stableId != signature) { stableId = signature; stableSince = elapsed.Elapsed; }
                     else if (elapsed.Elapsed - stableSince >= TimeSpan.FromSeconds(2)) { run.Result = result; return; }
                 }
@@ -205,11 +208,14 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         {
             RequireWindow(run.Target, cancellation);
             var frame = Capture(run.Target, cancellation, run);
-            var current = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId);
-            if (current != expected || frame.Nodes.Any(x => x.Visible && NativeImageEvidence.IsGenerating(x.Name)))
+            var current = NativeImageEvidence.FindByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
+            if (!NativeImageEvidence.SameResponse(current, expected) || frame.Nodes.Any(x => x.Visible && NativeImageEvidence.IsGenerating(x.Name)))
                 throw new ImageAutomationException("conversation_changed");
+            expected = current!;
+            run.UserId = expected.UserId;
+            run.Result = expected;
             beforePreview = frame.Nodes.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
-            Invoke(run.Target, frame.Elements[current.ActionId], cancellation);
+            Invoke(run.Target, frame.Elements[expected.ActionId], cancellation);
         }
         if (expected.OpensPreview)
         {
@@ -227,11 +233,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                     if (previews.Length > 1) throw new ImageAutomationException("download_unavailable");
                     if (previews.Length == 0) continue;
                     run.PreviewRootId = previews[0].Id;
-                    var map = frame.Nodes.ToDictionary(x => x.Id, StringComparer.Ordinal);
-                    var downloads = frame.Nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && !beforePreview.Contains(x.Id)
-                        && NativeImageEvidence.IsDownload(x.Name) && NativeImageEvidence.IsWithin(x.Id, run.PreviewRootId, map)).ToArray();
-                    if (downloads.Length > 1) throw new ImageAutomationException("download_unavailable");
-                    if (downloads.Length == 1) { Invoke(run.Target, frame.Elements[downloads[0].Id], cancellation); opened = true; }
+                    var download = NativeImageEvidence.FindPreviewDownload(frame.Nodes, beforePreview, run.PreviewRootId);
+                    if (download is not null) { Invoke(run.Target, frame.Elements[download.Id], cancellation); opened = true; }
                 }
             }
             if (!opened) throw new ImageAutomationException("download_unavailable");
@@ -314,20 +317,22 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
     public JsonElement? ExportBinding(PreparedImageConversation conversation)
     {
         var run = Cast(conversation);
-        return ImageAutomationJson.Element(new Binding(1, run.Target.Handle.ToInt64(), run.Target.ProcessId, run.Target.Started.Ticks,
+        return ImageAutomationJson.Element(new Binding(2, run.Target.Handle.ToInt64(), run.Target.ProcessId, run.Target.Started.Ticks,
             run.DocumentId, run.EditId, run.Before.ToArray(), run.PromptSha256, run.UserId, run.Result, run.PreviewRootId,
             run.Submitted ? "submitted" : run.PromptClearAcknowledged ? "cleared" : run.PromptClearDispatched ? "clear_unconfirmed"
-                : run.PromptWriteAcknowledged ? "draft_present_or_changed" : run.PromptWriteDispatched ? "write_unconfirmed" : "not_started"));
+                : run.PromptWriteAcknowledged ? "draft_present_or_changed" : run.PromptWriteDispatched ? "write_unconfirmed" : "not_started", run.UserHeadingId));
     }
 
     public async Task<PreparedImageConversation?> RestoreSubmittedAsync(ImageRunRecord record, JsonElement saved, CancellationToken cancellation)
     {
         var binding = saved.Deserialize<Binding>(ImageAutomationJson.Options) ?? throw new ImageAutomationException("submission_uncertain");
-        if (record.SubmitIntent is not true || binding.Version != 1 || binding.PromptSha256 != record.PromptSha256 || binding.BeforeIds.Length > 4096
+        if (record.SubmitIntent is not true || binding.Version is not (1 or 2) || binding.PromptSha256 != record.PromptSha256 || binding.BeforeIds.Length > 4096
+            || (binding.Version == 2 && binding.UserId is not null && binding.UserHeadingId is null)
             || binding.Window == 0 || binding.ProcessId <= 0) throw new ImageAutomationException("submission_uncertain");
         var target = new NativeImageTarget((nint)binding.Window, binding.ProcessId, new DateTime(binding.ProcessStartedUtcTicks, DateTimeKind.Utc));
         var run = new Conversation(target, binding.DocumentId, binding.EditId, binding.BeforeIds.ToHashSet(StringComparer.Ordinal), null, binding.PromptSha256)
-            { Submitted = true, UserId = binding.UserId, Result = binding.Result, PreviewRootId = binding.PreviewRootId };
+            { Submitted = true, UserId = binding.UserId, UserHeadingId = binding.Version == 2 ? binding.UserHeadingId : null,
+                Result = binding.Result, PreviewRootId = binding.PreviewRootId };
         // A preview opened by this run can hide the source transcript from UIA. Close only that exact bound preview,
         // then revalidate the original user turn before considering a new download action.
         lock (uiGate)
@@ -352,10 +357,11 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         lock (uiGate)
         {
             var frame = Capture(target, cancellation, run);
-            var own = frame.Nodes.Where(x => x.Role == "Text" && !run.Before.Contains(x.Id) && (run.UserId is null || x.Id == run.UserId)
-                && NativeImageEvidence.MatchesHash(x.Name, run.PromptSha256)).ToArray();
-            if (frame.DocumentId != run.DocumentId || own.Length != 1) throw new ImageAutomationException("submission_uncertain");
-            run.UserId = own[0].Id;
+            if (frame.DocumentId != run.DocumentId) throw new ImageAutomationException("submission_uncertain");
+            var own = NativeImageEvidence.FindUserTurnByHash(frame.Nodes, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId);
+            if (own is null) throw new ImageAutomationException("submission_uncertain");
+            run.UserId = own.TextId;
+            run.UserHeadingId = own.HeadingId;
             return run;
         }
     }
@@ -427,7 +433,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         return matches.Length == 1 ? matches[0] : null;
     }
     static bool HasLogin(Frame frame) => frame.Nodes.Any(x => x.Role == "Button" && x.Visible && x.Name is "登录" or "注册" or "Log in" or "Sign up");
-    static bool IsPreviewDialog(string name) => name is "图像预览" or "图片预览" or "Image preview";
+    static bool IsPreviewDialog(string name) => NativeImageEvidence.IsPreviewDialog(name);
     static bool ImageHome(Frame frame) => !HasLogin(frame) && WritableEdit(frame) is { } edit && NativeImagePage.IsHome(frame.Nodes, edit.Id);
     static bool ChatGptProduct(Frame frame) => ImageHome(frame) || frame.Nodes.Any(x => x.Role == "Button" && x.Visible
         && x.Name is "切换模式，当前模式：ChatGPT" or "Switch mode, current mode: ChatGPT");
@@ -466,7 +472,7 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 if (role == "Group" && label.Length != 0) namedGroups.Add(id);
                 if (KnownLabel(label)) name = label;
                 else if (role == "Text" && conversation is not null && label.Length <= 200_000
-                    && !conversation.Before.Contains(id) && (conversation.UserId is null || id == conversation.UserId)
+                    && !conversation.Before.Contains(id) && (conversation.UserHeadingId is not null || conversation.UserId is null || id == conversation.UserId)
                     && NativeImageEvidence.MatchesHash(label, conversation.PromptSha256)) name = label;
             }
             var bounds = element.BoundingRectangle;
@@ -475,6 +481,11 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 speaker = NativeImageEvidence.SpeakerFromHeading(name, element.Properties.HeadingLevel.ValueOrDefault == HeadingLevel.Level4,
                     element.Properties.AriaRole.ValueOrDefault);
             var availability = ReadAvailability(element.Properties.IsOffscreen, element.Properties.IsEnabled);
+            if (role == "Image")
+            {
+                var label = element.Name;
+                if (NativeImageEvidence.IsGeneratedImageLabel(label)) name = label;
+            }
             nodes.Add(new(id, item.Parent, role, name, availability.Visible, availability.Enabled, bounds.Width, bounds.Height, speaker));
             var child = walker.GetFirstChild(element);
             while (child is not null)
@@ -498,7 +509,8 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         return (visible, interactive);
     }
 
-    static bool KnownLabel(string label) => NativeImageEvidence.IsDownload(label) || NativeImageEvidence.IsPreview(label)
+    static bool KnownLabel(string label) => NativeImageEvidence.IsPreviewDownload(label) || NativeImageEvidence.IsPreview(label)
+        || NativeImageEvidence.IsGeneratedImageLabel(label)
         || NativeImageEvidence.IsGenerating(label) || IsPreviewDialog(label)
         || label is "图像" or "Images" or "切换模式，当前模式：ChatGPT" or "Switch mode, current mode: ChatGPT"
             or "选择 ChatGPT 模型" or "Choose a ChatGPT model" or "Select ChatGPT model" or "登录" or "注册" or "Log in" or "Sign up"
