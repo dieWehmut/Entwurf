@@ -367,6 +367,10 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
                 Result = binding.Result, PreviewRootId = binding.PreviewRootId };
         // A preview opened by this run can hide the source transcript from UIA. Close only that exact bound preview,
         // then revalidate the original user turn before considering a new download action.
+        var dismissal = run.PreviewRootId is { } ownedPreview
+            ? new NativeImagePreviewDismissal(run.DocumentId, ownedPreview, run.Before, run.PromptSha256, run.UserId, run.UserHeadingId)
+            : null;
+        string? dispatchedCloseId = null;
         lock (uiGate)
         {
             RequireWindow(target, cancellation);
@@ -374,12 +378,37 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             if (PackageVersion(process) is null) throw new ImageAutomationException("conversation_changed");
             var frame = Capture(target, cancellation, run);
             if (frame.DocumentId != run.DocumentId) throw new ImageAutomationException("conversation_changed");
-            if (run.PreviewRootId is { } preview && frame.Nodes.Any(x => x.Id == preview && x.Visible && IsPreviewDialog(x.Name)))
+            if (dismissal is not null)
+            {
+                if (SaveDialog(target) is not null) throw new ImageAutomationException("download_dialog_unavailable");
+                if (dismissal.ReadPreview(new(frame.Nodes, frame.DocumentId)) is { } preview)
+                {
+                    RequireWindow(target, cancellation);
+                    var close = NativeImageEvidence.FindPreviewClose(frame.Nodes, preview.Id);
+                    dispatchedCloseId = close.Id;
+                    Invoke(target, frame.Elements[close.Id], cancellation);
+                }
+            }
+        }
+        if (dismissal is not null)
+        {
+            var own = await dismissal.WaitAsync(remaining =>
+            {
+                lock (uiGate)
+                {
+                    var frame = CaptureComplete(target, cancellation, run, timeout: remaining);
+                    if (SaveDialog(target) is not null) throw new ImageAutomationException("download_dialog_unavailable");
+                    RequireWindow(target, cancellation);
+                    return new(frame.Nodes, frame.DocumentId);
+                }
+            }, dispatchedCloseId, cancellation);
+            lock (uiGate)
             {
                 RequireWindow(target, cancellation);
-                var close = NativeImageEvidence.FindPreviewClose(frame.Nodes, preview);
-                Invoke(target, frame.Elements[close.Id], cancellation);
+                run.UserId = own.TextId;
+                run.UserHeadingId = own.HeadingId;
                 run.PreviewRootId = null;
+                return run;
             }
         }
         await Task.Delay(300, cancellation);

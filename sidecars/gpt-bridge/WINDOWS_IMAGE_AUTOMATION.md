@@ -87,6 +87,29 @@ other errors and mutation failures remain fatal. The retry callback contains
 only reads and never replays preview, Download or Save. Live original delivery
 still requires acceptance.
 
+The 2026-11-13 viewer-close compatibility repair passed 388 native Windows
+tests and self-contained win-x64 publishing. It retains the exact current
+`关闭查看器` / `Close viewer` labels and still requires one visible, enabled
+button inside the bound preview. The subsequent dismissal-wait repair passed
+430 native Windows tests and publishing, with zero failures or skipped tests.
+After one close dispatch, bounded read-only polling keeps the preview identity
+until it is no longer visible and the original prompt and user heading return.
+New previews, replacement controls and changed user evidence remain fatal;
+cancellation or timeout never triggers another close action.
+
+Live acceptance checkpoint at 2026-11-12T21:33:48Z: the existing diagnostic
+response was positively reverified without resending its prompt. Its scoped
+original Download action produced a standard Save As dialog in the trusted
+ChatGPT process, but the dialog had no native owner chain. The adapter refused
+filename input and Save, so no original bytes or frontend import ACK were
+obtained. This confirms the ownership blocker on the installed client; the
+strict owner checks remain in place. The old Entwurf main window then exited
+through its normal CloseRequested path. A native read-only check confirmed no
+application/adapter processes or local-service listener remained, and the
+workspace, paused coordinator and native run-journal bytes were unchanged.
+The final installation update and locked-session delivery still require
+separate acceptance evidence.
+
 The structured `TaskEnvelope` bridge remains a separate named-pipe entrypoint. Its `WindowsAutomation.CheckSafety()` still checks an unlocked input desktop and foreground target. Those existing capability gates and protocol are independent of the direct-pattern image executor and must not be presented as image-mode restrictions.
 
 
