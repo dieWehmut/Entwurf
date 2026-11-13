@@ -118,6 +118,18 @@ before execution, and include `resume_request_id` in status; a race rejection us
 and disconnect/restart requires a new authoritative report. The frontend retains
 an uncertain request ID across reloads and only queries its original run.
 
+A Windows run paused before preparation may remain in history while a new run
+uses a separate conversation. The adapter's fresh `pre_submit_parked: true`
+status releases only its execution slot: explicit unsubmitted intent, no surface
+binding or staged image/download, and completed worker cleanup are required.
+Missing evidence, other preparation stages, pending recovery, and submitted or
+retained-image runs still occupy the slot. This does not cancel, resume, complete,
+or change the old run's identity and receipts. The coordinator binds this proof
+to the current authenticated native peer and clears it on reconnect, including
+when disconnect persistence fails. `/status` reports the resulting `busy` state.
+Pre-submit recovery retains its separate 64-receipt limit and explicit action;
+exhausting that limit does not occupy a safe paused run's execution slot.
+
 State updates publish to memory only after atomic persistence succeeds. State and
 image files use private creation permissions where supported; state credentials
 remain local to this application directory. No real ChatGPT requests occur in

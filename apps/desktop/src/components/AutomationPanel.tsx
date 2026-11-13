@@ -12,7 +12,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
   const taskId = snapshot.selected_task_id!;
   const version = snapshot.current_version;
   const [service, setService] = useState<AutomationService | null>(null);
-  const [status, setStatus] = useState<{ connected: boolean; available: boolean; reason: string; provider?: string } | null>(null);
+  const [status, setStatus] = useState<{ connected: boolean; available: boolean; reason: string; provider?: string; busy?: boolean } | null>(null);
   const [runs, setRuns] = useState<AutomationRun[]>([]);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     finally { submitting.current = false; setBusy(false); }
   }
   async function start() {
-    if (!service || !version || submitting.current || runs.some(item => activePhases.has(item.phase))) return;
+    if (!service || !version || submitting.current || running) return;
     submitting.current = true; setBusy(true); setError(null);
     const pending: AutomationRun = { run_id: crypto.randomUUID(), task_id: taskId, base_version_id: version.id, prompt_sha256: "", phase: "queued", reason: "提交结果尚未确认，请勿重复发送。" };
     provisional.current = pending; setRuns(items => [...items, pending]);
@@ -103,7 +103,10 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     } catch (cause) { setError(`${errorMessage(cause)} 将继续查询原运行，不会自动重发。`); }
     finally { submitting.current = false; setBusy(false); }
   }
-  const running = runs.some(item => activePhases.has(item.phase));
+  const occupiesExecutionSlot = (item: AutomationRun) => activePhases.has(item.phase)
+    && !(status?.provider === "windows" && item.phase === "paused" && item.pre_submit_parked === true
+      && !item.sha256 && !item.mime_type && !resumePending(item));
+  const running = status?.busy === true || runs.some(occupiesExecutionSlot);
   const recoverable = runs.some(item => canResume(item) && !resumePending(item));
   return <section className="panel"><h2>ChatGPT 图片生成</h2>
     <p className="muted">使用已登录的 ChatGPT 会话。图片独立保存为任务结果，知识节点与来源保持原有审阅流程。</p>
@@ -111,7 +114,7 @@ export function AutomationPanel({ snapshot, client, run, locked }: Props) {
     <button className="text-button" disabled={locked || busy} onClick={() => { void run("打开连接设置", () => client.call("open_automation_setup", undefined)); }}>ChatGPT 连接设置</button>
     <p className="muted">默认使用浏览器扩展，也可在连接设置中选择 ChatGPT 客户端。请保持所选应用与本机服务运行；任务使用独立窗口，保留原有会话与草稿。客户端锁屏运行仍待实机验证。</p>
     {error && <p className="callout warn" role="alert">{error}</p>}
-    <label className="field">图片生成提示<textarea rows={5} disabled={locked || busy || (running && !recoverable)} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={recoverable ? "继续时需填写与这次运行完全相同的原提示" : "描述这次希望 ChatGPT 生成的图片"} /></label>
+    <label className="field">图片生成提示<textarea rows={5} disabled={locked || busy || (running && !recoverable)} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={recoverable ? (running ? "继续时需填写与这次运行完全相同的原提示" : "新任务可填写新提示；继续旧任务需填写原提示") : "描述这次希望 ChatGPT 生成的图片"} /></label>
     <p className="muted">{version ? `本次生成绑定任务 ${taskId} 的 r${version.revision}。` : "导入资料建立知识版本后可开始生成。"}</p>
     <button className="primary-button" disabled={locked || busy || running || !version || !prompt.trim() || !status?.connected || !status.available} onClick={() => { void start(); }}>启动一次图片生成</button>
     {runs.map(item => {

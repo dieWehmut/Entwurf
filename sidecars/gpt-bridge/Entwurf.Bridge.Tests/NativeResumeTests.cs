@@ -16,6 +16,132 @@ public sealed class NativeResumeTests
     static JsonElement Resume(ImageAutomationRun run, string request) => ImageAutomationJson.Element(new { type = "resume_pre_submit", request_id = request, run });
     static JsonElement Status(string id) => ImageAutomationJson.Element(new { type = "status", run_id = id });
 
+    [Fact]
+    public async Task New_runs_preserve_a_parked_run_and_its_consumed_resume_until_explicit_artifact_ack()
+    {
+        using var fixture = new Fixture(); fixture.Seed("history");
+        var surface = new Surface();
+        await using var session = fixture.Session(surface);
+        var original = fixture.Record().GetRawText();
+        var consumed = fixture.Record().GetProperty("resume_request_ids")[0].GetString()!;
+        await session.ConnectedAsync(default);
+        Assert.True(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_parked").GetBoolean());
+
+        await session.HandleAsync(Start(Run("new-run")), default);
+        await fixture.Until(() => fixture.Messages.Any(x => x.GetProperty("type").GetString() == "artifact" && x.GetProperty("run_id").GetString() == "new-run"));
+        await fixture.Until(() => fixture.Messages.Any(x => x.GetProperty("type").GetString() == "status" && x.GetProperty("run_id").GetString() == "same-run"
+            && x.GetProperty("pre_submit_parked").GetBoolean() && !x.GetProperty("pre_submit_retryable").GetBoolean()));
+        await session.HandleAsync(Start(Run()), default);
+        await session.HandleAsync(Resume(Run(), consumed), default);
+        await session.HandleAsync(Start(Run("blocked-third")), default);
+        Assert.Equal("adapter_busy", fixture.Record("blocked-third").GetProperty("reason").GetString());
+        Assert.Equal(original, fixture.Record().GetRawText());
+        Assert.Equal(new[] { "new-run" }, surface.PreparedRunIds);
+
+        await session.HandleAsync(ImageAutomationJson.Element(new { type = "artifact_accepted", run_id = "new-run" }), default);
+        Assert.True(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status" && x.GetProperty("run_id").GetString() == "same-run").GetProperty("pre_submit_retryable").GetBoolean());
+        await session.HandleAsync(Start(Run("second-new")), default);
+        await fixture.Until(() => fixture.Messages.Any(x => x.GetProperty("type").GetString() == "artifact" && x.GetProperty("run_id").GetString() == "second-new"));
+        Assert.Equal(new[] { "new-run", "second-new" }, surface.PreparedRunIds);
+        Assert.Equal(2, surface.Submissions);
+        Assert.Equal(original, fixture.Record().GetRawText());
+        Assert.DoesNotContain("pre_submit_parked", File.ReadAllText(fixture.Database));
+    }
+
+    [Fact]
+    public async Task Multiple_parked_runs_and_an_exhausted_resume_history_do_not_execute_or_block_new_runs()
+    {
+        using var fixture = new Fixture(); fixture.Seed("parked_limit");
+        var surface = new Surface { Fail = "prepare" };
+        await using var session = fixture.Session(surface);
+        var original = fixture.Record().GetRawText();
+        var other = fixture.Record("other-run").GetRawText();
+        await session.ConnectedAsync(default);
+        var initial = fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status" && x.GetProperty("run_id").GetString() == "same-run");
+        Assert.True(initial.GetProperty("pre_submit_parked").GetBoolean());
+        Assert.False(initial.GetProperty("pre_submit_retryable").GetBoolean());
+        await session.HandleAsync(Start(Run("new-run")), default);
+        await fixture.Until(() => fixture.Messages.Any(x => x.GetProperty("type").GetString() == "status" && x.GetProperty("run_id").GetString() == "new-run"
+            && x.GetProperty("pre_submit_parked").GetBoolean()));
+        await session.HandleAsync(Start(Run("new-run")), default);
+        await session.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        await session.HandleAsync(Start(Run("next-run")), default);
+        await fixture.Until(() => fixture.Messages.Any(x => x.GetProperty("type").GetString() == "status" && x.GetProperty("run_id").GetString() == "next-run"
+            && x.GetProperty("pre_submit_parked").GetBoolean()));
+        Assert.Equal(new[] { "new-run", "next-run" }, surface.PreparedRunIds);
+        Assert.Equal(0, surface.Submissions);
+        Assert.Equal(original, fixture.Record().GetRawText());
+        Assert.Equal(other, fixture.Record("other-run").GetRawText());
+    }
+
+    [Theory]
+    [InlineData("missing_intent")]
+    [InlineData("null_intent")]
+    [InlineData("submitted")]
+    [InlineData("binding")]
+    [InlineData("interrupted_write")]
+    [InlineData("interrupted_submit")]
+    [InlineData("sha")]
+    [InlineData("mime")]
+    [InlineData("artifact")]
+    [InlineData("download")]
+    [InlineData("artifact_directory")]
+    [InlineData("download_file")]
+    [InlineData("download_parent_file")]
+    public async Task An_unsubmitted_flag_alone_does_not_release_an_ambiguous_run_slot(string condition)
+    {
+        using var fixture = new Fixture(); fixture.Seed(condition);
+        var surface = new Surface();
+        await using var session = fixture.Session(surface);
+        var original = fixture.Record().GetRawText();
+        await session.ConnectedAsync(default);
+        Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_parked").GetBoolean());
+        await session.HandleAsync(Start(Run("new-run")), default);
+        Assert.Equal("adapter_busy", fixture.Record("new-run").GetProperty("reason").GetString());
+        Assert.Equal(0, surface.Prepares);
+        Assert.Equal(0, surface.Submissions);
+        Assert.Equal(original, fixture.Record().GetRawText());
+    }
+
+    [UnprivilegedSymlinkTheory]
+    [InlineData("artifact_reparse")]
+    [InlineData("downloads_reparse")]
+    public Task Dangling_reparse_paths_do_not_release_a_run_slot(string condition)
+        => An_unsubmitted_flag_alone_does_not_release_an_ambiguous_run_slot(condition);
+
+    [UnprivilegedDirectoryRemovalFact]
+    public async Task A_missing_bound_directory_is_not_an_observed_empty_parked_run()
+    {
+        using var fixture = new Fixture(); fixture.Seed();
+        var surface = new Surface();
+        await using var session = fixture.Session(surface);
+        // Linux can remove an open directory tree; Windows ownership locking
+        // prevents this fixture operation without changing the lock's contract.
+        Directory.Delete(fixture.Directory, true);
+        await session.HandleAsync(Status("same-run"), default);
+        var status = fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status");
+        Assert.False(status.GetProperty("pre_submit_parked").GetBoolean());
+        Assert.False(status.GetProperty("pre_submit_retryable").GetBoolean());
+        Assert.Equal(0, surface.Prepares);
+        Assert.Equal(0, surface.Submissions);
+    }
+
+    sealed class UnprivilegedSymlinkTheoryAttribute : TheoryAttribute
+    {
+        public UnprivilegedSymlinkTheoryAttribute()
+        {
+            if (OperatingSystem.IsWindows()) Skip = "Symlink fixtures run on Linux without enabling Windows developer mode or elevation.";
+        }
+    }
+
+    sealed class UnprivilegedDirectoryRemovalFactAttribute : FactAttribute
+    {
+        public UnprivilegedDirectoryRemovalFactAttribute()
+        {
+            if (OperatingSystem.IsWindows()) Skip = "Removing an open owned directory is exercised on Linux without changing Windows ownership locks.";
+        }
+    }
+
     [Theory]
     [InlineData("prepare")]
     [InlineData("write")]
@@ -84,6 +210,8 @@ public sealed class NativeResumeTests
         await restarted.HandleAsync(Status("same-run"), default);
         Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
         await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        await restarted.HandleAsync(Start(Run("independent")), default);
+        Assert.Equal("adapter_busy", fixture.Record("independent").GetProperty("reason").GetString());
         Assert.Equal(0, restartedSurface.Prepares);
         Assert.Equal(0, restartedSurface.Submissions);
     }
@@ -127,6 +255,8 @@ public sealed class NativeResumeTests
         Assert.False(interrupted.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
         await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
         Assert.Contains(interrupted.Messages, x => x.GetProperty("type").GetString() == "resume_rejected");
+        await restarted.HandleAsync(Start(Run("independent")), default);
+        Assert.Equal("adapter_busy", interrupted.Record("independent").GetProperty("reason").GetString());
         Assert.Equal(0, restartedSurface.Prepares);
         Assert.False(restartedSurface.WriteEntered.Task.IsCompleted);
         Assert.Equal(0, restartedSurface.Submissions);
@@ -256,6 +386,8 @@ public sealed class NativeResumeTests
                 await session.HandleAsync(Status("same-run"), default);
                 Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
                 await session.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+                await session.HandleAsync(Start(Run("during-cleanup")), default);
+                Assert.Equal("adapter_busy", fixture.Record("during-cleanup").GetProperty("reason").GetString());
                 Assert.Equal(1, surface.Prepares);
             }
             finally { release.TrySetResult(); }
@@ -265,6 +397,8 @@ public sealed class NativeResumeTests
         await restarted.HandleAsync(Status("same-run"), default);
         Assert.False(fixture.Messages.Last(x => x.GetProperty("type").GetString() == "status").GetProperty("pre_submit_retryable").GetBoolean());
         await restarted.HandleAsync(Resume(Run(), Guid.NewGuid().ToString()), default);
+        await restarted.HandleAsync(Start(Run("after-cleanup")), default);
+        Assert.Equal("adapter_busy", fixture.Record("after-cleanup").GetProperty("reason").GetString());
         Assert.Equal(0, restartedSurface.Prepares);
     }
 
@@ -356,7 +490,7 @@ public sealed class NativeResumeTests
         public bool FailArtifactReport;
         public Func<JsonElement, Task>? OnSend;
         public ImageAutomationSession Session(Surface surface) => new(Directory, surface, (message, _) => { Messages.Enqueue(message.Clone()); if (FailArtifactReport && message.GetProperty("type").GetString() == "artifact") throw Failure(); return OnSend?.Invoke(message) ?? Task.CompletedTask; });
-        public JsonElement Record() { using var stream = new FileStream(Database, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); using var json = JsonDocument.Parse(stream); return json.RootElement.GetProperty("same-run").Clone(); }
+        public JsonElement Record(string id = "same-run") { using var stream = new FileStream(Database, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); using var json = JsonDocument.Parse(stream); return json.RootElement.GetProperty(id).Clone(); }
         public async Task Until(Func<bool> condition) { using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(4)); try { while (!condition()) await Task.Delay(10, deadline.Token); } catch (OperationCanceledException) { throw new Xunit.Sdk.XunitException("Timed out; durable fixture record: " + Record().GetRawText()); } }
         public void Seed(string? condition = null)
         {
@@ -371,10 +505,16 @@ public sealed class NativeResumeTests
             if (condition == "sha") record["sha256"] = new string('a', 64);
             if (condition == "mime") record["mime_type"] = "image/png";
             if (condition == "artifact") File.WriteAllBytes(Artifact, Png);
+            if (condition == "artifact_directory") System.IO.Directory.CreateDirectory(Artifact);
+            if (condition == "artifact_reparse") File.CreateSymbolicLink(Artifact, Path.Combine(Directory, "missing-artifact"));
             if (condition == "download") { var path = Path.Combine(Directory, "downloads", "same-run"); System.IO.Directory.CreateDirectory(path); File.WriteAllBytes(Path.Combine(path, "original.png"), Png); }
-            if (condition == "limit") record["resume_request_ids"] = Enumerable.Range(0, 64).Select(_ => Guid.NewGuid().ToString()).ToArray();
+            if (condition == "download_file") { var path = Path.Combine(Directory, "downloads"); System.IO.Directory.CreateDirectory(path); File.WriteAllBytes(Path.Combine(path, "same-run"), Png); }
+            if (condition == "downloads_reparse") System.IO.Directory.CreateSymbolicLink(Path.Combine(Directory, "downloads"), Path.Combine(Directory, "missing-downloads"));
+            if (condition == "download_parent_file") File.WriteAllBytes(Path.Combine(Directory, "downloads"), Png);
+            if (condition == "history") record["resume_request_ids"] = new[] { "11111111-1111-4111-8111-111111111111" };
+            if (condition is "limit" or "parked_limit") record["resume_request_ids"] = Enumerable.Range(0, 64).Select(_ => Guid.NewGuid().ToString()).ToArray();
             var records = new Dictionary<string, object?> { ["same-run"] = record };
-            if (condition == "other_run") records["other-run"] = new { run_id = "other-run", task_id = "task", base_version_id = "version", prompt_sha256 = Run().PromptSha256, phase = "paused", submit_intent = false };
+            if (condition is "other_run" or "parked_limit") records["other-run"] = new { run_id = "other-run", task_id = "task", base_version_id = "version", prompt_sha256 = Run().PromptSha256, phase = "paused", submit_intent = condition == "other_run" ? (bool?)null : false };
             if (condition == "request_elsewhere") records["other-run"] = new { run_id = "other-run", task_id = "task", base_version_id = "version", prompt_sha256 = Run().PromptSha256, phase = "cancelled", submit_intent = false, resume_request_ids = new[] { "11111111-1111-4111-8111-111111111111" } };
             File.WriteAllBytes(Database, JsonSerializer.SerializeToUtf8Bytes(records));
         }
@@ -387,10 +527,11 @@ public sealed class NativeResumeTests
         public Task HoldWrite = Task.CompletedTask;
         public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string? Fail; public int Prepares; public int Submissions; public Action? BeforePrepare; public Task Cleanup = Task.CompletedTask;
+        public ConcurrentQueue<string> PreparedRunIds { get; } = new();
         public JsonElement? Binding; public Action? BeforeCleanup; public Action? BeforeWrite; public int FailingBindingExports;
         void Check(string stage) { if (Fail == stage) throw Failure(); }
         public Task<ImageSurfaceProbe> ProbeAsync(CancellationToken token) => Task.FromResult(new ImageSurfaceProbe(true, "ready"));
-        public Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Prepares); BeforePrepare?.Invoke(); Check("prepare"); return Task.FromResult<PreparedImageConversation>(new Conversation()); }
+        public Task<PreparedImageConversation> PrepareAsync(ImageAutomationRun run, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Prepares); PreparedRunIds.Enqueue(run.RunId); BeforePrepare?.Invoke(); Check("prepare"); return Task.FromResult<PreparedImageConversation>(new Conversation()); }
         public async Task WriteAndVerifyPromptAsync(PreparedImageConversation conversation, string prompt, CancellationToken token) { BeforeWrite?.Invoke(); WriteEntered.TrySetResult(); await HoldWrite.WaitAsync(token); Check("write"); }
         public Task SubmitOnceAsync(PreparedImageConversation conversation, CancellationToken token) { token.ThrowIfCancellationRequested(); Interlocked.Increment(ref Submissions); Check("submit"); return Task.CompletedTask; }
         public Task WaitForGeneratedImageAsync(PreparedImageConversation conversation, CancellationToken token) { Check("wait"); return Task.CompletedTask; }

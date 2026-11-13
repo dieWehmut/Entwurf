@@ -341,6 +341,380 @@ async fn paused_native(f: &Fixture, socket: &mut Socket, retryable: bool) {
     panic!("native eligibility was not reflected");
 }
 
+fn parked_database(count: usize) -> Value {
+    let mut runs = serde_json::Map::new();
+    for index in 1..=count {
+        let id = format!("run-{index}");
+        runs.insert(
+            id.clone(),
+            json!({
+                "run_id":id,"task_id":"task-1","base_version_id":"version-1",
+                "prompt_sha256":format!("{:x}",Sha256::digest(b"Make one fixture image.")),
+                "phase":"paused","reason":"needs_unlock","owner":"owner",
+                "sha256":null,"mime_type":null,"image_id":null,
+                "pre_submit_retryable":true,"pre_submit_parked":true,
+                "resume_requests":[uuid::Uuid::new_v4().to_string()],"pending_resume":null
+            }),
+        );
+    }
+    json!({"schema_version":2,"provider":"windows","extension_token":"fixture-browser-token",
+        "native_token":"fixture-native-token","access":[],"runs":runs})
+}
+async fn report_parked(f: &Fixture, socket: &mut Socket, id: &str, retryable: bool) {
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":id,"phase":"paused",
+        "detail":"needs_unlock","stage":"prepare","pre_submit_retryable":retryable,
+        "pre_submit_parked":true})
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        let view = f
+            .http(
+                "GET",
+                &format!("/api/automation/runs/{id}"),
+                &f.token,
+                json!(null),
+            )
+            .await
+            .1;
+        if view["pre_submit_parked"] == true && view["pre_submit_retryable"] == retryable {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("parked status did not become current");
+}
+fn separate_start(id: &str) -> Value {
+    json!({"run_id":id,"task_id":"task-new","base_version_id":"version-new","prompt":"A separate fixture image."})
+}
+
+#[tokio::test]
+async fn fresh_parked_native_run_allows_a_new_run_without_changing_or_resuming_it() {
+    let f = Fixture::with_database(Some(parked_database(1))).await;
+    let mut socket = native_ready(&f).await;
+    assert_eq!(read(&mut socket).await["type"], "status");
+    report_parked(&f, &mut socket, "run-1", true).await;
+    let before: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    assert_eq!(f.state.status().unwrap()["busy"], false);
+    assert_eq!(f.state.set_provider("browser").unwrap_err().0, "run_active");
+    let request = separate_start("independent-run");
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, request.clone())
+            .await
+            .0,
+        StatusCode::ACCEPTED
+    );
+    let command = read(&mut socket).await;
+    assert_eq!(command["type"], "start");
+    assert_eq!(command["run"]["run_id"], "independent-run");
+    assert_eq!(command["run"]["task_id"], "task-new");
+    assert_eq!(f.state.status().unwrap()["busy"], true);
+    let after: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    assert_eq!(after["runs"]["run-1"], before["runs"]["run-1"]);
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, request)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.http("POST", "/api/automation/runs", &f.token, start_request())
+            .await
+            .1["phase"],
+        "paused"
+    );
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("third-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    assert_eq!(
+        network_resume(
+            &f,
+            &f.token,
+            resume_request(&uuid::Uuid::new_v4().to_string())
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), socket.next())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn multiple_parked_runs_and_an_exhausted_resume_history_do_not_occupy_a_slot() {
+    let mut database = parked_database(2);
+    database["runs"]["run-1"]["resume_requests"] = json!((0..64)
+        .map(|_| uuid::Uuid::new_v4().to_string())
+        .collect::<Vec<_>>());
+    let f = Fixture::with_database(Some(database)).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    read(&mut socket).await;
+    report_parked(&f, &mut socket, "run-1", false).await;
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    report_parked(&f, &mut socket, "run-2", true).await;
+    assert_eq!(f.state.status().unwrap()["busy"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["run"]["run_id"], "new-run");
+    let database: Value =
+        serde_json::from_slice(&std::fs::read(f.dir.path().join("automation.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        database["runs"]["run-1"]["resume_requests"]
+            .as_array()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(database["runs"]["run-1"]["phase"], "paused");
+}
+
+#[tokio::test]
+async fn parked_evidence_is_revoked_on_missing_report_and_requires_a_new_peer_report() {
+    let f = Fixture::with_database(Some(parked_database(1))).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    assert_eq!(f.phase("paused").await["pre_submit_parked"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    report_parked(&f, &mut socket, "run-1", true).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused","pre_submit_retryable":true})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if f.phase("paused").await["pre_submit_parked"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(f.state.status().unwrap()["busy"], true);
+    report_parked(&f, &mut socket, "run-1", true).await;
+    // Even if disconnect persistence fails, a new peer cannot inherit its predecessor's proof.
+    let path = f.dir.path().join("automation.json");
+    let before = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    socket.close(None).await.unwrap();
+    for _ in 0..100 {
+        if f.state.status().unwrap()["connected"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, before).unwrap();
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    assert_eq!(f.phase("paused").await["pre_submit_parked"], false);
+    assert_eq!(f.phase("paused").await["pre_submit_retryable"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    report_parked(&f, &mut socket, "run-1", true).await;
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["type"], "start");
+}
+
+#[tokio::test]
+async fn unsafe_stage_and_pending_resume_cannot_release_the_execution_slot() {
+    let f = Fixture::with_database(Some(parked_database(1))).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused","stage":"capture",
+        "pre_submit_retryable":true,"pre_submit_parked":true})
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if f.phase("paused").await["stage"] == "capture" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(f.phase("paused").await["pre_submit_parked"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    report_parked(&f, &mut socket, "run-1", true).await;
+    let id = uuid::Uuid::new_v4().to_string();
+    assert_eq!(
+        network_resume(&f, &f.token, resume_request(&id)).await.0,
+        202
+    );
+    assert_eq!(read(&mut socket).await["type"], "resume_pre_submit");
+    socket
+        .send(Message::Text(
+            json!({"type":"status","run_id":"run-1","phase":"paused",
+        "stage":"prepare","pre_submit_retryable":true,"pre_submit_parked":true})
+            .to_string()
+            .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .1["error"],
+        "run_active"
+    );
+    assert_eq!(f.phase("queued").await["pre_submit_parked"], false);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), socket.next())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn ignored_later_unsafe_native_phase_revokes_proof_without_rewriting_history() {
+    let f = Fixture::with_database(Some(parked_database(1))).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    for phase in ["preparing", "submitting"] {
+        report_parked(&f, &mut socket, "run-1", true).await;
+        let path = f.dir.path().join("automation.json");
+        let before = std::fs::read(&path).unwrap();
+        socket
+            .send(Message::Text(
+                json!({"type":"status","run_id":"run-1","phase":phase,
+            "pre_submit_retryable":false,"pre_submit_parked":false})
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if f.phase("paused").await["pre_submit_parked"] == false {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let view = f.phase("paused").await;
+        assert_eq!(view["pre_submit_parked"], false);
+        assert_eq!(view["pre_submit_retryable"], false);
+        assert_eq!(f.state.status().unwrap()["busy"], true);
+        assert_eq!(
+            f.http(
+                "POST",
+                "/api/automation/runs",
+                &f.token,
+                separate_start("new-run")
+            )
+            .await
+            .1["error"],
+            "run_active"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(80), socket.next())
+                .await
+                .is_err()
+        );
+    }
+    report_parked(&f, &mut socket, "run-1", true).await;
+    assert_eq!(f.state.status().unwrap()["busy"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["type"], "start");
+}
+
 #[tokio::test]
 async fn explicit_resume_uses_same_identity_once_and_survives_restart_without_replay() {
     let f = Fixture::new().await;
@@ -1582,7 +1956,7 @@ async fn provider_switch_disconnects_old_peer_and_gates_reconnect_with_independe
     assert_eq!(f.state.provider().unwrap(), "windows");
     assert_eq!(
         f.state.status().unwrap(),
-        json!({"provider":"windows","connected":false,"available":false,"reason":"provider_changed"})
+        json!({"provider":"windows","connected":false,"available":false,"reason":"provider_changed","busy":false})
     );
     // New peer may connect before the old socket finishes disconnecting.
     let mut current = authenticate_token(&f, &native, true).await;
