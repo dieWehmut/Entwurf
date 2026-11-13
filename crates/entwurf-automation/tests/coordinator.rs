@@ -654,6 +654,68 @@ async fn unsafe_stage_and_pending_resume_cannot_release_the_execution_slot() {
 }
 
 #[tokio::test]
+async fn ignored_later_unsafe_native_phase_revokes_proof_without_rewriting_history() {
+    let f = Fixture::with_database(Some(parked_database(1))).await;
+    let mut socket = native_ready(&f).await;
+    read(&mut socket).await;
+    for phase in ["preparing", "submitting"] {
+        report_parked(&f, &mut socket, "run-1", true).await;
+        let path = f.dir.path().join("automation.json");
+        let before = std::fs::read(&path).unwrap();
+        socket
+            .send(Message::Text(
+                json!({"type":"status","run_id":"run-1","phase":phase,
+            "pre_submit_retryable":false,"pre_submit_parked":false})
+                .to_string()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if f.phase("paused").await["pre_submit_parked"] == false {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let view = f.phase("paused").await;
+        assert_eq!(view["pre_submit_parked"], false);
+        assert_eq!(view["pre_submit_retryable"], false);
+        assert_eq!(f.state.status().unwrap()["busy"], true);
+        assert_eq!(
+            f.http(
+                "POST",
+                "/api/automation/runs",
+                &f.token,
+                separate_start("new-run")
+            )
+            .await
+            .1["error"],
+            "run_active"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(80), socket.next())
+                .await
+                .is_err()
+        );
+    }
+    report_parked(&f, &mut socket, "run-1", true).await;
+    assert_eq!(f.state.status().unwrap()["busy"], false);
+    assert_eq!(
+        f.http(
+            "POST",
+            "/api/automation/runs",
+            &f.token,
+            separate_start("new-run")
+        )
+        .await
+        .0,
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(read(&mut socket).await["type"], "start");
+}
+
+#[tokio::test]
 async fn explicit_resume_uses_same_identity_once_and_survives_restart_without_replay() {
     let f = Fixture::new().await;
     let mut socket = native_ready(&f).await;

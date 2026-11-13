@@ -478,6 +478,11 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
                 && phase == "paused"
                 && value.get("pre_submit_parked") == Some(&Value::Bool(true));
             if r.view.phase == "paused" && phase != "paused" {
+                // A later unsafe observation cannot reopen an old durable
+                // phase, but it must revoke this peer's earlier idle proof.
+                let peer = i.peer.as_mut().unwrap();
+                peer.parked_runs.remove(id);
+                peer.retryable_runs.remove(id);
                 return Ok(());
             }
             let order = [
