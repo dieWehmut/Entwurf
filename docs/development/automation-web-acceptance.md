@@ -980,7 +980,10 @@ The normal installed application started once at `01:53:32Z`, without arguments
 or WebView debugging overrides. Its exact executable/PID/lifetime and Windows
 session were verified; it owned the `127.0.0.1:48123` listener and the pinned
 production `--automation-stdin` bridge child. The initial postlaunch oracle
-raised `RuntimeException` after checking bootstrap; its cause is not established.
+raised `RuntimeException` after checking bootstrap. A later restart reproduced
+the failure and located a case-insensitive PowerShell variable collision in the
+diagnostic helper: `$cold` replaced the retained `$Cold` coordinator snapshot.
+The subsequent preservation check then failed with `PropertyNotFoundStrict`.
 An independent read-only `VerifyOnly` run at `02:02:32Z` passed on the same app
 PID and creation time, including bootstrap and authenticated status/original-run
 reads. Adding failure-location reporting did not change those verification
@@ -1015,11 +1018,53 @@ with Linux copies outside Git. PR #16 recorded installation; its exact
 completed successfully. Deployed-site smoke for subsequent source changes
 remains a separate release check.
 
+## Native restart and deployed Pages smoke — 2026-11-13
+
+A native read-only snapshot at `02:48:42Z` found no Entwurf application, bridge or
+listener. The earlier application and ChatGPT process had ended; their exit
+causes were not established. The installed ChatGPT package was now
+`26.1106.6628.0`, so earlier process/window/preview bindings cannot be reused.
+The only visible ChatGPT window in that snapshot had native dialog class `#32770`.
+No dialog was dismissed and no historical response was rebound.
+
+Running native commands from the Windows task checkout with a live WSL interop
+endpoint succeeded, although subsequent calls still sometimes timed out.
+An already running Windows task worker started the unchanged, pinned normal
+launch helper in a fresh restart directory. The old launch claim and identity
+were preserved. The helper rechecked the sealed installer payload, complete
+project, paused journals and absence of applications/installers/listeners before
+creating its new single-use claim. The installed application started at
+`02:57:09Z` without arguments or debugging flags and owned the pinned production
+bridge and loopback listener.
+
+The postlaunch oracle reproduced the helper variable collision described above.
+A separate direct native `VerifyOnly` run completed at `02:59:23Z` and passed
+on the same PID and creation time. All **306 packaged resources**, **1,135
+project files** and both source files matched their preserved hashes. Existing
+access, paused run identity, explicit false submission intent and empty image
+state remained unchanged. The provider reported connected but unavailable.
+The app was left running. The outer launch wrapper did not reliably obtain its
+driver exit code, and the queued launch job still lacked a terminal receipt; these
+observer limitations do not authorize another launch. Private evidence is in
+`artifacts/native-normal-restart-20261113` and
+`artifacts/native-current-state-20261113`, outside Git.
+
+The [Pages workflow for `c3c0c1f`](https://github.com/dieWehmut/Entwurf/actions/runs/43350992744)
+completed successfully. A fresh dedicated browser profile exercised the deployed
+public app at desktop `1440×900` and mobile `390×844`: workbench, Settings and
+return to workbench, including closing the mobile sidebar. Visual review found
+no clipping or overlap. All ten requested resources returned HTTP 200, with no console
+warnings/errors, page errors or network failures. The smoke completed at
+`02:36:01Z`; its receipts and reviewed screenshots are retained in
+`artifacts/pages-c3c0c1f-20261113`, outside Git. It did not open existing paired
+profiles or establish native generation, original delivery or ACK.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
-older local WebUI/Pages companions reported `windows_locked`. The latest native
-snapshot above was connected and unlocked. Actual locked/background native image
+older local WebUI/Pages companions reported `windows_locked`. Earlier snapshots
+included a connected, unlocked Windows session; the newest restoration reported
+connected but unavailable. Actual locked/background native image
 generation and original retrieval still require live acceptance.
 
 The last inspected original local coordinator run remained paused with
