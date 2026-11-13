@@ -974,6 +974,47 @@ Private installation, verification and comparison receipts are retained in
 These checks do not establish startup, real original delivery, frontend ACK,
 locked generation, final reinstall cycles or tray acceptance.
 
+## Normal installed startup and existing preview checks — 2026-11-13
+
+The normal installed application started once at `01:53:32Z`, without arguments
+or WebView debugging overrides. Its exact executable/PID/lifetime and Windows
+session were verified; it owned the `127.0.0.1:48123` listener and the pinned
+production `--automation-stdin` bridge child. The initial postlaunch oracle
+raised `RuntimeException` after checking bootstrap; its cause is not established.
+An independent read-only `VerifyOnly` run at `02:02:32Z` passed on the same app
+PID and creation time, including bootstrap and authenticated status/original-run
+reads. Adding failure-location reporting did not change those verification
+conditions or restart the app. The native provider reported connected and
+available; the original run remained paused with explicit false submission
+intent, unchanged run/task/base/prompt/resume history and no image. Existing
+pairing/access bindings and all **1,135 project files**, including both source
+files, remained unchanged. Two independent Linux poststartup reads also matched
+every project byte to the cold backup. The normal installed app was left running.
+These checks issue no prompt, resume, generation, import or ACK.
+
+At `01:47:37Z`, an independently reviewed, read-only diagnostic verified the
+existing real image preview, its exact historical process/window/Document and
+absence of conflicting available original user evidence. The preview contained one direct generated
+image plus four nested button icons; only the unique accurately labelled direct
+image was selected. The complete image/ancestor identity and current absence of
+Save As/modal/menu windows were retained in a hashed inspection receipt. Thirty
+pure guard checks passed without Windows calls or UI dispatches. A subsequent
+single-use menu-diagnostic launch encountered a WSL transport timeout. Native
+read-only enumeration at `02:05:43Z` found no process for it and no menu claim or
+receipt. A fresh launch at `02:06:46Z` positively rechecked the bound image, then
+refused before creating its action claim because the preview/image dimensions
+differed from the reviewed inspection. It wrote a refusal receipt with dispatch
+count zero. The existing receipt was retained; no menu dispatch, supported save
+path, original bytes or frontend transaction is claimed.
+
+Private startup/preservation and preview evidence is retained in
+`artifacts/native-normal-start-20261113` and
+`artifacts/native-preview-context-menu-20261113` in the Windows task checkout,
+with Linux copies outside Git. PR #16 recorded installation; its exact
+[Pages workflow](https://github.com/dieWehmut/Entwurf/actions/runs/43345773516)
+completed successfully. Deployed-site smoke for subsequent source changes
+remains a separate release check.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
@@ -1004,7 +1045,7 @@ must deliver original bytes into the application transaction, receive
 same committed image. Acceptance must include actual locked/background execution.
 Implementation tests, browser fixtures and no-submit diagnostics cannot establish
 these native-provider behaviors. The merged candidate has passed installation
-byte verification above. Normal installed startup, two complete final
+byte and normal startup verification above. Two complete final
 uninstall/reinstall cycles preserving projects and generated images, and tray
 restoration/exit acceptance with a normal installed app left available remain
 required. Release and Pages checks must be refreshed after the remaining changes,
