@@ -982,7 +982,7 @@ session were verified; it owned the `127.0.0.1:48123` listener and the pinned
 production `--automation-stdin` bridge child. The initial postlaunch oracle
 raised `RuntimeException` after checking bootstrap; its cause is not established.
 An independent read-only `VerifyOnly` run at `02:02:32Z` passed on the same app
-PID and creation time, including authenticated bootstrap/status/original-run
+PID and creation time, including bootstrap and authenticated status/original-run
 reads. Adding failure-location reporting did not change those verification
 conditions or restart the app. The native provider reported connected and
 available; the original run remained paused with explicit false submission
