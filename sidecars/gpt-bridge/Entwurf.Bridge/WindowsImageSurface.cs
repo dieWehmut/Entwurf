@@ -543,11 +543,11 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
             var role = element.ControlType.ToString();
             // Only transient, bounded matching values; account fields, edit values and arbitrary message text are never exported.
             var name = "";
-            if (role is "Button" or "Text" or "MenuItem" or "Window" or "Group")
+            if (role is "Button" or "Text" or "MenuItem" or "Window" or "Group" or "Hyperlink")
             {
                 var label = element.Name;
                 if (role == "Group" && label.Length != 0) namedGroups.Add(id);
-                if (KnownLabel(label)) name = label;
+                if (role == "Hyperlink" ? KnownHyperlinkLabel(label) : KnownLabel(label)) name = label;
                 else if (role == "Text" && conversation is not null && label.Length <= 200_000
                     && !conversation.Before.Contains(id) && (conversation.UserHeadingId is not null || conversation.UserId is null || id == conversation.UserId)
                     && NativeImageEvidence.MatchesHash(label, conversation.PromptSha256)) name = label;
@@ -585,6 +585,9 @@ public sealed class WindowsImageSurface : IImageAutomationSurface
         var interactive = enabled.TryGetValue(out var isEnabled) && isEnabled;
         return (visible, interactive);
     }
+
+    internal static bool KnownHyperlinkLabel(string label) => NativeImageEvidence.IsPreviewDownload(label)
+        || NativeImageEvidence.IsPreviewClose(label) || NativeImageEvidence.IsGenerating(label);
 
     internal static bool KnownLabel(string label) => NativeImageEvidence.IsPreviewDownload(label) || NativeImageEvidence.IsPreview(label)
         || NativeImageEvidence.IsPreviewClose(label)
