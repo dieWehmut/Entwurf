@@ -121,32 +121,64 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 var begin = resume.Task;
                 running = Task.Run(async () => { await begin; await RecoverAsync(record, control.Cancellation.Token); });
-                _ = ReportAfterWorkerAsync(running, id);
+                _ = ReportAfterWorkerAsync(running);
             }
             report = record;
         }
         finally { gate.Release(); }
-        try { if (report is not null) await ReportAsync(report, cancellation); }
+        try
+        {
+            if (report is not null) await ReportAsync(report, cancellation);
+            if (report is { Terminal: true } && type is "cancel" or "artifact_accepted")
+                await ReportIdlePausedAsync(cancellation);
+        }
         finally { resume?.TrySetResult(); }
     }
 
-    bool PreSubmitRetryable(ImageRunRecord record)
+    bool CanParkBeforeSubmit(ImageRunRecord record)
     {
         if (record.Phase != "paused" || record.SubmitIntent is not false || record.SurfaceBinding is not null
             || record.Stage is not (null or "prepare")
-            || record.Sha256 is not null || record.MimeType is not null || !running.IsCompleted
-            || (record.ResumeRequestIds?.Length ?? 0) >= MaximumResumeRequests
-            || records.Values.Any(other => other.RunId != record.RunId && !other.Terminal)) return false;
+            || record.Sha256 is not null || record.MimeType is not null || !running.IsCompleted) return false;
         try
         {
+            var boundDirectory = ObservedOrdinaryAttributes(directory);
+            if (boundDirectory is null || (boundDirectory.Value & FileAttributes.Directory) == 0) return false;
             var artifact = ArtifactPath(record.RunId);
-            EnsureOrdinaryPath(artifact);
-            if (File.Exists(artifact) || Directory.Exists(artifact)) return false;
+            if (ObservedOrdinaryAttributes(artifact) is not null) return false;
             var downloads = Path.Combine(directory, "downloads", record.RunId);
-            EnsureOrdinaryPath(downloads);
-            return !File.Exists(downloads) && (!Directory.Exists(downloads) || !Directory.EnumerateFileSystemEntries(downloads).Any());
+            var attributes = ObservedOrdinaryAttributes(downloads);
+            return attributes is null || (attributes.Value & FileAttributes.Directory) != 0
+                && !Directory.EnumerateFileSystemEntries(downloads).Any();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ImageAutomationException) { return false; }
+    }
+
+    // A paused record remains durable and nonterminal. Only a positively observed
+    // empty pre-prepare state can release the execution slot without being resumed.
+    bool OccupiesRunSlot(ImageRunRecord record) => !record.Terminal && !CanParkBeforeSubmit(record);
+    bool PreSubmitRetryable(ImageRunRecord record) => CanParkBeforeSubmit(record)
+        && (record.ResumeRequestIds?.Length ?? 0) < MaximumResumeRequests
+        && !records.Values.Any(other => other.RunId != record.RunId && OccupiesRunSlot(other));
+
+    static FileAttributes? ObservedOrdinaryAttributes(string path)
+    {
+        FileAttributes? result = null;
+        var first = true;
+        for (var current = Path.GetFullPath(path); !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+        {
+            try
+            {
+                var attributes = File.GetAttributes(current);
+                if ((attributes & FileAttributes.ReparsePoint) != 0 || !first && (attributes & FileAttributes.Directory) == 0)
+                    throw new IOException("unobservable_run_path");
+                if (first) result = attributes;
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            first = false;
+        }
+        return result;
     }
 
     async Task ResumePreSubmitAsync(ImageAutomationRun run, string requestId, CancellationToken cancellation)
@@ -172,7 +204,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 start = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 var begin = start.Task;
                 running = Task.Run(async () => { await begin; await ExecuteAsync(run, control.Cancellation.Token); });
-                _ = ReportAfterWorkerAsync(running, run.RunId);
+                _ = ReportAfterWorkerAsync(running);
             }
         }
         finally { gate.Release(); }
@@ -184,17 +216,22 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         finally { start?.TrySetResult(); }
     }
 
-    async Task ReportAfterWorkerAsync(Task worker, string id)
+    async Task ReportIdlePausedAsync(CancellationToken cancellation)
+    {
+        ImageRunRecord[] snapshot;
+        await gate.WaitAsync(cancellation);
+        try { snapshot = records.Values.Where(record => record is { Phase: "paused", SubmitIntent: false }).ToArray(); }
+        finally { gate.Release(); }
+        foreach (var record in snapshot) await ReportAsync(record, cancellation);
+    }
+
+    async Task ReportAfterWorkerAsync(Task worker)
     {
         try
         {
             await worker;
             if (lifetime.IsCancellationRequested) return;
-            ImageRunRecord? record;
-            await gate.WaitAsync(lifetime.Token);
-            try { records.TryGetValue(id, out record); }
-            finally { gate.Release(); }
-            if (record is { Phase: "paused", SubmitIntent: false }) await ReportAsync(record, lifetime.Token);
+            await ReportIdlePausedAsync(lifetime.Token);
         }
         catch { /* A failed report never schedules work or changes the durable record. */ }
     }
@@ -203,6 +240,7 @@ public sealed class ImageAutomationSession : IAsyncDisposable
     {
         ImageRunRecord report;
         TaskCompletionSource? start = null;
+        var refreshPaused = false;
         await gate.WaitAsync(cancellation);
         try
         {
@@ -211,10 +249,11 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 if (!existing.Matches(run)) throw new ImageAutomationException("run_identity_conflict");
                 report = existing; // Includes preparing/submitting/paused: repeated start is never executable.
             }
-            else if (records.Values.Any(x => !x.Terminal) || !running.IsCompleted)
+            else if (records.Values.Any(OccupiesRunSlot) || !running.IsCompleted)
             {
                 report = new(run.RunId, run.TaskId, run.BaseVersionId, run.PromptSha256, "failed", "adapter_busy");
                 Save(report);
+                refreshPaused = true;
             }
             else
             {
@@ -225,11 +264,16 @@ public sealed class ImageAutomationSession : IAsyncDisposable
                 start = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 var begin = start.Task;
                 running = Task.Run(async () => { await begin; await ExecuteAsync(run, control.Cancellation.Token); });
-                _ = ReportAfterWorkerAsync(running, run.RunId);
+                _ = ReportAfterWorkerAsync(running);
+                refreshPaused = true;
             }
         }
         finally { gate.Release(); }
-        try { await ReportAsync(report, cancellation); }
+        try
+        {
+            await ReportAsync(report, cancellation);
+            if (refreshPaused) await ReportIdlePausedAsync(cancellation);
+        }
         finally { start?.TrySetResult(); }
     }
 
@@ -440,18 +484,18 @@ public sealed class ImageAutomationSession : IAsyncDisposable
         try
         {
             await gate.WaitAsync(cancellation);
-            bool retryable;
-            try { record = records[record.RunId]; retryable = PreSubmitRetryable(record); }
+            bool retryable, parked;
+            try { record = records[record.RunId]; parked = CanParkBeforeSubmit(record); retryable = PreSubmitRetryable(record); }
             finally { gate.Release(); }
-            await ReportCurrentAsync(record, retryable, cancellation);
+            await ReportCurrentAsync(record, retryable, parked, cancellation);
         }
         catch (Exception error) { error.Data["EntwurfStage"] = "report"; error.Data["EntwurfFailureMethod"] = "ReportAsync"; throw; }
         finally { reports.Release(); }
     }
-    async Task ReportCurrentAsync(ImageRunRecord record, bool retryable, CancellationToken cancellation)
+    async Task ReportCurrentAsync(ImageRunRecord record, bool retryable, bool parked, CancellationToken cancellation)
     {
         await send(ImageAutomationJson.Element(new { type = "status", run_id = record.RunId, phase = record.Phase, detail = record.Reason,
-            pre_submit_retryable = retryable, resume_request_id = record.ResumeRequestIds?.LastOrDefault(), stage = record.Stage,
+            pre_submit_retryable = retryable, pre_submit_parked = parked, resume_request_id = record.ResumeRequestIds?.LastOrDefault(), stage = record.Stage,
             exception_type = record.ExceptionType, exception_types = record.ExceptionTypes, failure_method = record.FailureMethod }), cancellation);
         if (record.Phase != "awaiting_import") return;
         byte[] bytes;
