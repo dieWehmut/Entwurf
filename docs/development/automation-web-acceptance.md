@@ -945,6 +945,35 @@ plugin was unavailable, so regular Playwright supplied this basic smoke check.
 It does not establish an existing paired Pages profile, real image generation,
 original-byte import/ACK, locked operation or native installation.
 
+## Resumed native installation verification — 2026-11-13
+
+The inherited `WSL_INTEROP` path no longer existed. Selecting the already
+listening `/run/WSL/910_interop` endpoint restored native PowerShell execution
+without restarting WSL or changing Windows processes. At `01:21:12Z`, the native
+read-only audit found no Entwurf app, bridge, installer, uninstaller, delivery
+worker or localhost listener, and no claim for the original installation job.
+The same queued job `ac745ad4-53fd-427f-a1e3-5c0731c27931` then ran once.
+
+Its pinned installer completed with exit 0 at `01:22:12Z`. The installation
+helper verified the expected executable and all **306 resources**, unchanged
+project/application bytes, shortcuts and autostart registration, plus the exact
+original paused coordinator/native journal bytes with false submission intent.
+The outer artifact wrapper subsequently returned exit 1 because StrictMode
+rejected its unset `$LASTEXITCODE`; this occurred after the successful helper
+return and did not indicate an installer failure. The consumed job was not
+replayed. Running the same pinned helper directly in read-only `Verify` mode
+completed with exit 0 at `01:23:34Z`.
+
+Independent Linux reads compared the installed executable, uninstaller and
+bridge executable/DLL byte for byte with the previously extracted NSIS payload;
+all matched. The installed uninstaller SHA-256 is
+`8fa5346b63b2a35818d81b52a65c355c6d815f18013229ac0ae973a53f70d564`.
+Private installation, verification and comparison receipts are retained in
+`artifacts/i15` in the Windows task checkout and
+`artifacts/native-install-81117d5-20261113` in the Linux checkout, outside Git.
+These checks do not establish startup, real original delivery, frontend ACK,
+locked generation, final reinstall cycles or tray acceptance.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
@@ -974,9 +1003,10 @@ must deliver original bytes into the application transaction, receive
 `artifact_accepted`, retain the generated version after reload and download the
 same committed image. Acceptance must include actual locked/background execution.
 Implementation tests, browser fixtures and no-submit diagnostics cannot establish
-these native-provider behaviors. The merged candidate still needs installation,
-two complete final uninstall/reinstall cycles preserving projects and generated
-images, and tray restoration/exit acceptance with a normal installed app left
-available. Release and Pages checks must be refreshed after the remaining
-changes, including a deployed-site smoke test. Private source
+these native-provider behaviors. The merged candidate has passed installation
+byte verification above. Normal installed startup, two complete final
+uninstall/reinstall cycles preserving projects and generated images, and tray
+restoration/exit acceptance with a normal installed app left available remain
+required. Release and Pages checks must be refreshed after the remaining changes,
+including a deployed-site smoke test. Private source
 images, account information and generated acceptance images remain outside Git.
