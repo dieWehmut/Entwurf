@@ -1044,7 +1044,7 @@ project files** and both source files matched their preserved hashes. Existing
 access, paused run identity, explicit false submission intent and empty image
 state remained unchanged. The provider reported connected but unavailable.
 The app was left running. The outer launch wrapper did not reliably obtain its
-driver exit code, and its worker output drain has no terminal receipt; these
+driver exit code, and the queued launch job still lacked a terminal receipt; these
 observer limitations do not authorize another launch. Private evidence is in
 `artifacts/native-normal-restart-20261113` and
 `artifacts/native-current-state-20261113`, outside Git.
@@ -1053,7 +1053,7 @@ The [Pages workflow for `c3c0c1f`](https://github.com/dieWehmut/Entwurf/actions/
 completed successfully. A fresh dedicated browser profile exercised the deployed
 public app at desktop `1440×900` and mobile `390×844`: workbench, Settings and
 return to workbench, including closing the mobile sidebar. Visual review found
-no clipping or overlap. All ten resources returned HTTP 200, with no console
+no clipping or overlap. All ten requested resources returned HTTP 200, with no console
 warnings/errors, page errors or network failures. The smoke completed at
 `02:36:01Z`; its receipts and reviewed screenshots are retained in
 `artifacts/pages-c3c0c1f-20261113`, outside Git. It did not open existing paired
@@ -1062,9 +1062,9 @@ profiles or establish native generation, original delivery or ACK.
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
-older local WebUI/Pages companions reported `windows_locked`. The latest native
-snapshot was connected and unlocked; the newest restoration reported connected
-but unavailable. Actual locked/background native image
+older local WebUI/Pages companions reported `windows_locked`. Earlier snapshots
+included a connected, unlocked Windows session; the newest restoration reported
+connected but unavailable. Actual locked/background native image
 generation and original retrieval still require live acceptance.
 
 The last inspected original local coordinator run remained paused with
