@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -35,6 +35,8 @@ struct Inner {
 struct Peer {
     id: String,
     sender: mpsc::Sender<Value>,
+    parked_runs: BTreeSet<String>,
+    retryable_runs: BTreeSet<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Database {
@@ -76,6 +78,8 @@ pub struct RunView {
     pub mime_type: Option<String>,
     #[serde(default)]
     pub pre_submit_retryable: bool,
+    #[serde(default)]
+    pub pre_submit_parked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,6 +133,32 @@ fn valid_id(value: &str) -> bool {
 }
 fn active(phase: &str) -> bool {
     !matches!(phase, "completed" | "failed" | "cancelled")
+}
+fn parked(inner: &Inner, run: &StoredRun) -> bool {
+    inner.database.provider == "windows"
+        && run.view.phase == "paused"
+        && run.view.pre_submit_parked
+        && inner
+            .peer
+            .as_ref()
+            .is_some_and(|peer| peer.parked_runs.contains(&run.view.run_id))
+        && run.pending_resume.is_none()
+        && run.view.sha256.is_none()
+        && run.view.mime_type.is_none()
+        && run.image_id.is_none()
+        && matches!(run.view.stage.as_deref(), None | Some("prepare"))
+}
+fn occupies_execution_slot(inner: &Inner, run: &StoredRun) -> bool {
+    active(&run.view.phase) && !parked(inner, run)
+}
+fn current_view(inner: &Inner, run: &StoredRun) -> RunView {
+    let mut view = run.view.clone();
+    view.pre_submit_parked = parked(inner, run);
+    view.pre_submit_retryable &= inner
+        .peer
+        .as_ref()
+        .is_some_and(|peer| peer.retryable_runs.contains(&view.run_id));
+    view
 }
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -227,6 +257,7 @@ impl AutomationState {
             let mut inner = state.lock()?;
             for run in inner.database.runs.values_mut() {
                 run.view.pre_submit_retryable = false;
+                run.view.pre_submit_parked = false;
                 run.pending_resume = None;
                 if active(&run.view.phase) && run.view.phase != "awaiting_import" {
                     run.view.phase = "paused".into();
@@ -375,26 +406,27 @@ impl AutomationState {
     pub fn status(&self) -> Result<Value> {
         let i = self.lock()?;
         Ok(
-            json!({"connected":i.peer.is_some(),"available":i.peer.is_some() && i.available,"reason":i.reason,"provider":i.database.provider}),
+            json!({"connected":i.peer.is_some(),"available":i.peer.is_some() && i.available,"reason":i.reason,"provider":i.database.provider,"busy":i.database.runs.values().any(|run| occupies_execution_slot(&i,run))}),
         )
     }
     fn list(&self, owner: &str, task: Option<&str>) -> Result<Vec<RunView>> {
-        Ok(self
-            .lock()?
+        let inner = self.lock()?;
+        Ok(inner
             .database
             .runs
             .values()
             .filter(|r| r.owner == owner && task.is_none_or(|t| r.view.task_id == t))
-            .map(|r| r.view.clone())
+            .map(|r| current_view(&inner, r))
             .collect())
     }
     fn get(&self, owner: &str, id: &str) -> Result<RunView> {
-        self.lock()?
+        let inner = self.lock()?;
+        inner
             .database
             .runs
             .get(id)
             .filter(|r| r.owner == owner)
-            .map(|r| r.view.clone())
+            .map(|r| current_view(&inner, r))
             .ok_or(AutomationError("run_not_found"))
     }
     fn start(&self, owner: &str, request: StartRun) -> Result<(bool, RunView)> {
@@ -418,12 +450,16 @@ impl AutomationState {
             {
                 return Err(AutomationError("run_conflict"));
             }
-            return Ok((false, old.view.clone()));
+            return Ok((false, current_view(&i, old)));
         }
         if *self.0.shutdown.borrow() {
             return Err(AutomationError("server_shutting_down"));
         }
-        if i.database.runs.values().any(|r| active(&r.view.phase)) {
+        if i.database
+            .runs
+            .values()
+            .any(|r| occupies_execution_slot(&i, r))
+        {
             return Err(AutomationError("run_active"));
         }
         if !i.available || i.peer.is_none() {
@@ -439,6 +475,7 @@ impl AutomationState {
             sha256: None,
             mime_type: None,
             pre_submit_retryable: false,
+            pre_submit_parked: false,
             resume_request_id: None,
             stage: None,
             exception_type: None,
@@ -497,7 +534,7 @@ impl AutomationState {
         }
         // Consumed requests never retransmit, including after cancellation or restart.
         if old.resume_requests.contains(&request.request_id) {
-            return Ok((false, old.view.clone()));
+            return Ok((false, current_view(&i, old)));
         }
         if i.database
             .runs
@@ -514,6 +551,10 @@ impl AutomationState {
             || i.peer.is_none()
             || old.view.phase != "paused"
             || !old.view.pre_submit_retryable
+            || !i
+                .peer
+                .as_ref()
+                .is_some_and(|peer| peer.retryable_runs.contains(id))
             || old.view.sha256.is_some()
             || old.view.mime_type.is_some()
             || old.pending_resume.is_some()
@@ -523,7 +564,7 @@ impl AutomationState {
         if i.database
             .runs
             .iter()
-            .any(|(other, r)| other != id && active(&r.view.phase))
+            .any(|(other, r)| other != id && occupies_execution_slot(&i, r))
         {
             return Err(AutomationError("run_active"));
         }
@@ -539,6 +580,7 @@ impl AutomationState {
         record.pending_resume = Some(request.request_id.clone());
         record.view.resume_request_id = Some(request.request_id);
         record.view.pre_submit_retryable = false;
+        record.view.pre_submit_parked = false;
         record.view.phase = "queued".into();
         record.view.reason = None;
         record.view.stage = None;
@@ -576,6 +618,7 @@ impl AutomationState {
         }
         r.view.phase = "cancelled".into();
         r.view.pre_submit_retryable = false;
+        r.view.pre_submit_parked = false;
         r.pending_resume = None;
         r.view.reason = Some("external_generation_not_stopped".into());
         let view = r.view.clone();
@@ -629,6 +672,7 @@ impl AutomationState {
         r.image_id = Some(ack.image_id);
         r.view.phase = "completed".into();
         r.view.pre_submit_retryable = false;
+        r.view.pre_submit_parked = false;
         r.pending_resume = None;
         r.view.reason = None;
         let view = r.view.clone();

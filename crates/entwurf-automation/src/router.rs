@@ -293,6 +293,8 @@ async fn session_active(state: AutomationState, mut socket: WebSocket) {
         i.peer = Some(Peer {
             id: id.clone(),
             sender,
+            parked_runs: Default::default(),
+            retryable_runs: Default::default(),
         });
         i.available = false;
         i.reason = "probing".into();
@@ -359,6 +361,7 @@ fn disconnect(state: &AutomationState, id: &str) {
             let mut database = i.database.clone();
             for r in database.runs.values_mut() {
                 r.view.pre_submit_retryable = false;
+                r.view.pre_submit_parked = false;
                 r.pending_resume = None;
                 if active(&r.view.phase) && r.view.phase != "awaiting_import" {
                     r.view.phase = "paused".into();
@@ -426,6 +429,7 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
             r.pending_resume = None;
             r.view.phase = "paused".into();
             r.view.pre_submit_retryable = false;
+            r.view.pre_submit_parked = false;
             r.view.reason = Some(reason(value.get("reason")));
             return state.commit(&mut i, database);
         }
@@ -470,6 +474,9 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
             let retryable = i.database.provider == "windows"
                 && phase == "paused"
                 && value.get("pre_submit_retryable") == Some(&Value::Bool(true));
+            let parked = i.database.provider == "windows"
+                && phase == "paused"
+                && value.get("pre_submit_parked") == Some(&Value::Bool(true));
             if r.view.phase == "paused" && phase != "paused" {
                 return Ok(());
             }
@@ -490,6 +497,7 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
                 r.view.phase = phase.into();
                 r.view.reason = value.get("detail").map(|d| reason(Some(d)));
                 r.view.pre_submit_retryable = retryable;
+                r.view.pre_submit_parked = parked;
                 r.view.stage = diagnostic_name(value.get("stage"));
                 r.view.exception_type = diagnostic_name(value.get("exception_type"));
                 r.view.failure_method = diagnostic_name(value.get("failure_method"));
@@ -503,7 +511,19 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
                             .filter_map(|v| diagnostic_name(Some(v)))
                             .collect()
                     });
+                // A failed status write cannot keep an older peer observation
+                // authorized. Only a committed report from this peer reopens it.
+                let peer = i.peer.as_mut().unwrap();
+                peer.parked_runs.remove(id);
+                peer.retryable_runs.remove(id);
                 state.commit(&mut i, database)?;
+                let peer = i.peer.as_mut().unwrap();
+                if parked {
+                    peer.parked_runs.insert(id.into());
+                }
+                if retryable {
+                    peer.retryable_runs.insert(id.into());
+                }
             }
             return Ok(());
         }
@@ -568,6 +588,7 @@ fn apply_extension(state: &AutomationState, peer_id: &str, value: Value) -> Resu
     r.view.mime_type = Some(mime.into());
     r.view.phase = "awaiting_import".into();
     r.view.pre_submit_retryable = false;
+    r.view.pre_submit_parked = false;
     r.pending_resume = None;
     r.view.reason = None;
     state.commit(&mut i, database)

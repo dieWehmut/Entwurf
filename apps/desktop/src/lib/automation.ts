@@ -4,7 +4,7 @@ export type AutomationPhase = "queued" | "preparing" | "submitting" | "generatin
 export interface AutomationRun {
   run_id: string; task_id: string; base_version_id: string; prompt_sha256: string;
   phase: AutomationPhase; reason?: string; sha256?: string; mime_type?: string;
-  pre_submit_retryable?: boolean; resume_request_id?: string;
+  pre_submit_retryable?: boolean; pre_submit_parked?: boolean; resume_request_id?: string;
   stage?: string; exception_type?: string; exception_types?: string[]; failure_method?: string;
 }
 export const automationOrigin = "http://127.0.0.1:48123";
@@ -89,7 +89,7 @@ export function createAutomationService(access: AutomationAccess) {
     return response.status === 204 ? null : response.json();
   }
   return {
-    status: () => request("/status") as Promise<{ connected: boolean; available: boolean; reason: string; provider?: string }>,
+    status: () => request("/status") as Promise<{ connected: boolean; available: boolean; reason: string; provider?: string; busy?: boolean }>,
     list: (taskId: string) => request(`/runs?task_id=${encodeURIComponent(taskId)}`) as Promise<AutomationRun[]>,
     get: (id: string) => request(`/runs/${encodeURIComponent(id)}`) as Promise<AutomationRun>,
     start: (run: { run_id: string; task_id: string; base_version_id: string; prompt: string }) => request("/runs", run) as Promise<AutomationRun>,
