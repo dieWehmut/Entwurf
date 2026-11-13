@@ -59,7 +59,7 @@ public static class NativeImageEvidence
         if (!map.TryGetValue(previewRootId, out var root) || !root.Visible || root.Role is not ("Group" or "Window")
             || before.Contains(root.Id) || !IsPreviewDialog(root.Name)) throw new ImageAutomationException("download_unavailable");
         // A generic Download label is evidence only within this run's new preview.
-        var downloads = nodes.Where(x => x.Role == "Button" && x.Visible && x.Enabled && !before.Contains(x.Id)
+        var downloads = nodes.Where(x => x.Role is ("Button" or "Hyperlink") && x.Visible && x.Enabled && !before.Contains(x.Id)
             && IsPreviewDownload(x.Name) && IsWithin(x.Id, previewRootId, map)).ToArray();
         if (downloads.Length > 1) throw new ImageAutomationException("download_unavailable");
         return downloads.SingleOrDefault();
