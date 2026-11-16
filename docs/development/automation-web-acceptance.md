@@ -1093,6 +1093,38 @@ paired profile, native service, generation, import or ACK. It establishes curren
 public-site rendering and resource availability, not the remaining native
 generation and release gates below.
 
+## Current main installed startup verification — 2026-11-16
+
+Read-only completion verification of the installed `b04f994` candidate finished
+at `07:07:24Z`, passing all **30 checks**. It verified the candidate's **306
+resources**, executable and production bridge, preserved project and application
+data, shortcuts and autostart setting. The original installer had exited with
+code zero; its wrapper retained a stale exit-code sentinel and remains recorded
+as failed. The completion verifier did not replay the installer.
+
+A normal zero-argument launch started the installed application at `07:09:08Z`.
+Its initial receipt subsequently captured a PowerShell `WriteErrorException` and
+remains `passed: false`; that receipt does not identify the underlying cause.
+A separate **VerifyOnly** pass completed all **64 checks** against the same
+application and production-bridge lifetimes at `07:10:03Z`, without another
+launch. The service owned its loopback listener and returned the Windows/SQLite
+bootstrap. All **1,135 project files**, both source files, the original unsubmitted
+paused run, its explicit `submit_intent: false`, and pairing state were preserved.
+The normal installed application was left running.
+
+At `07:18:39Z`, a fresh read-only service check reported the Windows provider
+connected, not busy and unavailable with `chatgpt_mode_required`. The sole saved
+run was still paused, without an image, and reported both `pre_submit_parked`
+and `pre_submit_retryable` as true. This establishes current slot availability
+for the preserved unsubmitted pause, not successful native generation.
+
+Private evidence is retained in the Windows acceptance checkout under
+`artifacts/native-installed-completion-b04f994-20261114`,
+`artifacts/native-normal-start-b04f994-20261114` and
+`artifacts/continuation-20261116`. These checks do not establish original-image
+delivery, import/ACK, locked execution, tray behavior or the two final reinstall
+cycles.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
