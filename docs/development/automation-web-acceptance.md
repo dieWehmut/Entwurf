@@ -1059,6 +1059,40 @@ warnings/errors, page errors or network failures. The smoke completed at
 `artifacts/pages-c3c0c1f-20261113`, outside Git. It did not open existing paired
 profiles or establish native generation, original delivery or ACK.
 
+## Current main deployed-site verification — 2026-11-16
+
+The [Pages workflow for `b04f994`](https://github.com/dieWehmut/Entwurf/actions/runs/43468394635)
+completed successfully, with **104 frontend tests**, **12 browser tests** and the
+real WASM smoke checks passing. Fresh GitHub queries before and after this
+verification confirmed that its source remained both remote main and the latest
+Pages deployment.
+
+A new dedicated Playwright profile loaded the public app at **1440×900** and
+**390×844**, opened Settings and returned to the workbench. The mobile sidebar
+also closed correctly. Page identity, meaningful rendered content, absence of
+framework overlays and horizontal overflow, and both navigation loops passed.
+All ten browser resource responses returned HTTP 200, with zero console errors
+or warnings, page errors, failed requests or blocked requests. The five captured
+screenshots were visually reviewed, including the open mobile sidebar and the
+unobstructed mobile workbench. No clipping or unintended overlap was found. The
+smoke completed at `2026-11-16T07:06:55Z`. Regular Playwright was used because the
+Browser plugin was not available; no dependencies were installed.
+
+Separate read-only GETs completed at `07:08:12Z` for all ten public resources:
+**106,563,392 bytes** total, each matching its declared Content-Length. The eight
+complete bodies available from the browser matched these downloads by SHA-256.
+Chromium had evicted the 79,794,168-byte WASM and 25,648,464-byte font from its
+inspection cache; their independent full downloads matched the previously
+recorded public hashes. Those two downloads are not recovered browser response
+bodies, and resource hashes alone do not cryptographically bind a deployment to
+a Git commit.
+
+Receipts, scripts and reviewed screenshots are retained outside the repository
+under `/tmp/entwurf-pages-b04f994-20261116-hzvnswja`. This check used no existing
+paired profile, native service, generation, import or ACK. It establishes current
+public-site rendering and resource availability, not the remaining native
+generation and release gates below.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
