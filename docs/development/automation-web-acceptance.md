@@ -1152,6 +1152,36 @@ coverage. The check opened no existing paired profile and sent no generation
 request. Receipts, rendered-font samples and reviewed screenshots are retained
 outside Git in `artifacts/continuation-20261116/pages-ba5cd75`.
 
+## Installed site-font candidate verification — 2026-11-16
+
+The `ba5cd75` Windows candidate was rebuilt offline and installed once after a
+verified cold backup. The **79,645,716-byte** NSIS installer has SHA-256
+`424dff967c65d51c40f88da96824e5e9c877c7da50a7af05e4578b77bab81293`.
+Installation completed with exit zero at `08:23:39Z`; the installed executable
+and all **306 resources** matched the sealed candidate.
+
+A normal zero-argument launch started the app at `08:24:22Z`. Its initial Start
+receipt subsequently retained a PowerShell `WriteErrorException` and remains
+failed. A separate read-only completion finished at `08:35:57Z`, passing all
+**45 checks** against the same app and production-bridge lifetimes, without
+relaunching or reinstalling. It verified the installed payload/resources,
+production listener, primary WenKai CSS, all **1,135 desktop-project files** and
+**11 local-WebUI project files**, including every original hash, length and
+directory. Existing pairing and the unsubmitted paused run were preserved.
+
+The actual installed service also returned the complete **25,648,464-byte**
+WenKai font, matching the supplied site's SHA-256 above. The normal app was left
+running. Fresh process/listener inspection at `10:02:33Z` confirmed the same
+application and production-bridge identities. The provider remained connected,
+not busy and unavailable with `chatgpt_mode_required`; the original run remained
+paused, retryable, parked and without an image.
+
+These results verify the font upgrade and normal installed startup. They do not
+complete the required final uninstall/reinstall cycles preserving real generated
+images. Original failed receipts and successful completion evidence are retained
+outside Git in `artifacts/continuation-20261116/font-upgrade`; the frozen older
+release evidence remains intact.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
@@ -1168,13 +1198,21 @@ submission intents. The real Bayes-diagram diagnostic is a separate run: its
 single submission and generated response do not establish a frontend transaction
 and cannot be rebound to the paused coordinator run.
 
-The current client has passed complete no-submit production fresh-window
-preparation on a previously verified source, with the original source input hash
+Earlier complete no-submit production fresh-window preparation passed on a
+previously verified source, with the original source input hash
 unchanged. That proof used the retained source identity; cold-start selection
 among the additional diagnostic windows is outside its scope. The correlated
 real response and its preview are verified. Live Download exposed an ownerless
 Save As dialog, so a supported exactly owned save path and original-byte
 retrieval remain required.
+
+On November 16, one scoped UIA New Window invocation at `08:48:14Z` ended with
+`new_window_not_observed`, without typing or sending. Its original intent and
+failed result remain preserved. A read-only capture at `10:05:20Z` confirmed the
+current source draft and all five original top-level windows were unchanged.
+The input-desktop read at `10:02:33Z` failed with Windows error 5. These checks
+establish preservation, while an independent usable ChatGPT window remains
+unverified.
 
 One coordinated real native generation from each frontend is still required with
 its explicitly selected, connected provider, preserving unrelated drafts. Each
