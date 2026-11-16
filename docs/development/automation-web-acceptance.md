@@ -1059,6 +1059,72 @@ warnings/errors, page errors or network failures. The smoke completed at
 `artifacts/pages-c3c0c1f-20261113`, outside Git. It did not open existing paired
 profiles or establish native generation, original delivery or ACK.
 
+## Current main deployed-site verification — 2026-11-16
+
+The [Pages workflow for `b04f994`](https://github.com/dieWehmut/Entwurf/actions/runs/43468394635)
+completed successfully, with **104 frontend tests**, **12 browser tests** and the
+real WASM smoke checks passing. Fresh GitHub queries before and after this
+verification confirmed that its source remained both remote main and the latest
+Pages deployment.
+
+A new dedicated Playwright profile loaded the public app at **1440×900** and
+**390×844**, opened Settings and returned to the workbench. The mobile sidebar
+also closed correctly. Page identity, meaningful rendered content, absence of
+framework overlays and horizontal overflow, and both navigation loops passed.
+All ten browser resource responses returned HTTP 200, with zero console errors
+or warnings, page errors, failed requests or blocked requests. The five captured
+screenshots were visually reviewed, including the open mobile sidebar and the
+unobstructed mobile workbench. No clipping or unintended overlap was found. The
+smoke completed at `2026-11-16T07:06:55Z`. Regular Playwright was used because the
+Browser plugin was not available; no dependencies were installed.
+
+Separate read-only GETs completed at `07:08:12Z` for all ten public resources:
+**106,563,392 bytes** total, each matching its declared Content-Length. The eight
+complete bodies available from the browser matched these downloads by SHA-256.
+Chromium had evicted the 79,794,168-byte WASM and 25,648,464-byte font from its
+inspection cache; their independent full downloads matched the previously
+recorded public hashes. Those two downloads are not recovered browser response
+bodies, and resource hashes alone do not cryptographically bind a deployment to
+a Git commit.
+
+Receipts, scripts and reviewed screenshots are retained outside the repository
+under `/tmp/entwurf-pages-b04f994-20261116-hzvnswja`. This check used no existing
+paired profile, native service, generation, import or ACK. It establishes current
+public-site rendering and resource availability, not the remaining native
+generation and release gates below.
+
+## Current main installed startup verification — 2026-11-16
+
+Read-only completion verification of the installed `b04f994` candidate finished
+at `07:07:24Z`, passing all **30 checks**. It verified the candidate's **306
+resources**, executable and production bridge, preserved project and application
+data, shortcuts and autostart setting. The original installer had exited with
+code zero; its wrapper retained a stale exit-code sentinel and remains recorded
+as failed. The completion verifier did not replay the installer.
+
+A normal zero-argument launch started the installed application at `07:09:08Z`.
+Its initial receipt subsequently captured a PowerShell `WriteErrorException` and
+remains `passed: false`; that receipt does not identify the underlying cause.
+A separate **VerifyOnly** pass completed all **64 checks** against the same
+application and production-bridge lifetimes at `07:10:03Z`, without another
+launch. The service owned its loopback listener and returned the Windows/SQLite
+bootstrap. All **1,135 project files**, both source files, the original unsubmitted
+paused run, its explicit `submit_intent: false`, and pairing state were preserved.
+The normal installed application was left running.
+
+At `07:18:39Z`, a fresh read-only service check reported the Windows provider
+connected, not busy and unavailable with `chatgpt_mode_required`. The sole saved
+run was still paused, without an image, and reported both `pre_submit_parked`
+and `pre_submit_retryable` as true. This establishes current slot availability
+for the preserved unsubmitted pause, not successful native generation.
+
+Private evidence is retained in the Windows acceptance checkout under
+`artifacts/native-installed-completion-b04f994-20261114`,
+`artifacts/native-normal-start-b04f994-20261114` and
+`artifacts/continuation-20261116`. These checks do not establish original-image
+delivery, import/ACK, locked execution, tray behavior or the two final reinstall
+cycles.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
