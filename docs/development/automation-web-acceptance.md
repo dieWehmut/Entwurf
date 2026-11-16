@@ -1125,6 +1125,33 @@ Private evidence is retained in the Windows acceptance checkout under
 delivery, import/ACK, locked execution, tray behavior or the two final reinstall
 cycles.
 
+## Shared site-font and deployed Pages verification — 2026-11-16
+
+PR #22 makes the bundled WenKai font the shared interface's first font at
+`a9f64d9`, merged into main as `ba5cd75`. Its original font bytes match the
+supplied `dieWehmut.github.io` checkout: **25,648,464 bytes**, SHA-256
+`151210456c0e832ea63f17b463b838b783da0d37678bd16b27836c9a9b05d0e3`.
+
+The [Pages workflow for `ba5cd75`](https://github.com/dieWehmut/Entwurf/actions/runs/43827053923)
+successfully built and deployed that source, passing **104 frontend tests**,
+**12 browser tests** and all five real-WASM smoke groups. Deployment
+`7818711591` completed successfully at `08:10:02Z`. Fresh GitHub queries on this
+continuation confirmed the merged source and the completed workflow.
+
+The public-site smoke completed at `08:12:34Z`. Chromium's rendered-font
+inspection verified **14 custom LXGW WenKai glyph samples** across desktop and
+mobile workbench and Settings, at **1440×900** and **390×844**. Body and form
+controls used `Entwurf UI` first. Both Settings round trips and mobile sidebar
+closure passed. All five screenshots were reviewed without unintended clipping
+or overlap; there were no console or page errors.
+
+The owned browser and profile were reused, but the font still returned HTTP 200
+and transferred **12,915,071 compressed bytes** over about **20.3 seconds**. This
+does not prove a zero-network cache hit or complete worker/WASM response-body
+coverage. The check opened no existing paired profile and sent no generation
+request. Receipts, rendered-font samples and reviewed screenshots are retained
+outside Git in `artifacts/continuation-20261116/pages-ba5cd75`.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
