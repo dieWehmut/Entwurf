@@ -1,6 +1,8 @@
 @font-face {
   font-family: "Entwurf UI";
   src: url("/fonts/LXGWWenKai-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
   font-display: swap;
 }
 
@@ -16,7 +18,7 @@
   --content-width: 1060px;
   --radius: 12px;
   --radius-sm: 8px;
-  --font-ui: "Segoe UI", "Microsoft YaHei", "Entwurf UI", system-ui, -apple-system, sans-serif;
+  --font-ui: "Entwurf UI", "LXGW WenKai Screen", "Noto Serif SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Entwurf Mono", "Entwurf UI", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   --bg: #181818;
   --bg-soft: #1b1d1f;
