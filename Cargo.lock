@@ -1485,6 +1485,7 @@ dependencies = [
  "entwurf-automation",
  "entwurf-core",
  "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

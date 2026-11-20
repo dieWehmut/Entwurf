@@ -45,5 +45,6 @@ workspace commands or select local files. The extension receives its own durable
 credential through the authenticated local setup page. No token is placed in a URL.
 
 `cargo test --locked -p entwurf-web` checks access boundaries, batch rollback,
-upload ownership, actual SQLite restart and external-edit recovery. Browser
-acceptance exercises the rendered shared UI against the real HTTP service.
+upload ownership, SQLite reopen through a restarted production server process,
+and external-edit recovery. Browser acceptance exercises the rendered shared UI
+against the real HTTP service.
