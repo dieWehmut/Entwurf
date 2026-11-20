@@ -1182,6 +1182,49 @@ images. Original failed receipts and successful completion evidence are retained
 outside Git in `artifacts/continuation-20261116/font-upgrade`; the frozen older
 release evidence remains intact.
 
+## Windows client revalidation — 2026-11-20
+
+The later November 19 native receipts establish that the independently created
+window finished loading and selected the menu item
+`ChatGPT Work 创建、学习和探索` at `06:46:13Z`. The original window's composer
+fingerprint and the top-level window set were preserved by that operation. This
+supersedes the earlier inability to observe an independent window; it does not verify the
+production adapter's required ChatGPT Images surface.
+
+A fresh read-only capture at `01:59:01Z` on November 20 verified the same client
+process creation time, package and independent window identity. It exposed
+`切换模式，当前模式：ChatGPT Work`, a disabled Send button and the same composer
+fingerprint recorded after the mode selection. That fingerprint alone does not
+prove an empty composer. The capture did not expose an Images navigation control.
+The independent window was minimized; one scoped background restore subsequently
+passed at `02:08:26Z`, preserving the complete top-level window set and requesting
+no foreground focus, typing, mode change or submission.
+
+The previously installed Entwurf process and localhost listener were absent.
+After verifying the installed executable still matched SHA-256
+`c443046db8bcecef998e843642ab32f82d0f2704928c85d9e10033818c9ee6e6`,
+one normal launch passed at `02:00:22Z`: the new application owned the listener,
+`/api/bootstrap` returned 200 and exactly one production bridge belonged to it.
+The `02:02:51Z` status check found the Windows provider connected and idle but
+unavailable with `chatgpt_mode_required`. The sole original run remained paused,
+parked and eligible for explicit pre-submit recovery, without an image.
+
+The local WebUI `--prepare-only` check then failed its page-idle assertion at
+`02:09:59Z`. Its receipt records zero start, upload, import, artifact and ACK
+requests, with the original paused-run history, source files and knowledge hashes
+preserved. The common assertion's line number does not identify which navigation
+stage failed; no authentication or application defect has been established.
+Subsequent WSL reads of the entire Windows drive returned `Input/output error`,
+and native PowerShell could no longer be launched through that connection.
+Windows connectivity must be restored before continuing the native inspection.
+
+Private receipts remain outside Git under `artifacts/continuation-20261119` and
+`artifacts/continuation-20261120` in the dedicated native acceptance workspace.
+Replacement diagnostic helpers are prepared in the Linux checkout's ignored
+`artifacts/continuation-20261120`; their native execution is not verified.
+None of these checks submitted a new generation, imported an original image or
+completed a remaining release gate.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
@@ -1211,8 +1254,8 @@ On November 16, one scoped UIA New Window invocation at `08:48:14Z` ended with
 failed result remain preserved. A read-only capture at `10:05:20Z` confirmed the
 current source draft and all five original top-level windows were unchanged.
 The input-desktop read at `10:02:33Z` failed with Windows error 5. These checks
-establish preservation, while an independent usable ChatGPT window remains
-unverified.
+establish preservation. The later independent Work-window observations above
+still do not establish an available ChatGPT Images surface.
 
 One coordinated real native generation from each frontend is still required with
 its explicitly selected, connected provider, preserving unrelated drafts. Each
