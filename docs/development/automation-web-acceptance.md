@@ -1225,6 +1225,34 @@ Replacement diagnostic helpers are prepared in the Linux checkout's ignored
 None of these checks submitted a new generation, imported an original image or
 completed a remaining release gate.
 
+## Current Pages smoke — 2026-11-20
+
+Pages workflow [44659883856](https://github.com/dieWehmut/Entwurf/actions/runs/44659883856)
+completed its build and deploy jobs successfully for merge commit
+`6e920e9847a066e62034291486822be2930e3d0c`. A fresh unauthenticated visit to
+`https://diewehmut.github.io/Entwurf/` returned HTTP 200 with a
+`2026-11-20T02:35:49Z` last-modified header. The deployed HTML, CSS, entry and
+browser-worker JavaScript, wasm-bindgen JavaScript, fonts and WebAssembly module
+all returned HTTP 200. The browser initialized the WebAssembly workspace and the
+main region eventually reached `aria-busy=false`.
+
+At 1440×900, the project workspace opened, Settings and the workbench navigated
+in both directions, category selection and OCR search worked, and the document
+had no horizontal overflow. At 390×844, the mobile Settings selector, ChatGPT
+category, OCR search and return to the project workspace worked without
+horizontal overflow. Both bundled font faces reported loaded. The inspected
+requests had no failures; console messages, page errors and warnings were empty.
+This smoke used a fresh browser profile and created no project or generated
+image.
+
+Cold-cache start remained slow on this test connection: the 25,648,464-byte
+WenKai font took about 131 seconds, and the 79,794,168-byte WebAssembly module
+(32,102,629 transferred bytes) took about 172 seconds to complete. The workspace
+stayed busy while these resources loaded. These measured durations describe this
+smoke environment, not every visitor's connection. This confirms the final Pages
+candidate's browser path after the documentation-only deployment; it does not
+satisfy any native-account generation or installed-app gate.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
