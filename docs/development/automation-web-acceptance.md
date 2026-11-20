@@ -1253,6 +1253,20 @@ smoke environment, not every visitor's connection. This confirms the final Pages
 candidate's browser path after the documentation-only deployment; it does not
 satisfy any native-account generation or installed-app gate.
 
+## Pages browser persistence after reload — 2026-11-20
+
+In a new isolated browser context, the live Pages app created the synthetic
+project `Pages persistence smoke 2026-11-20` and task
+`Synthetic persistence check`. A full navigation back to the deployed route
+restored the project, task and selected task. The bundled WebAssembly module
+returned HTTP 200, and the browser console had no errors. No source or image was
+imported, and the context used no account data.
+
+This verifies browser workspace persistence across reload for a synthetic
+project on the deployed candidate. It does not verify persistence of real
+generated images, local SQLite restart, the user's browser profile, or any
+Windows/provider release gate.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
