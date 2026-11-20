@@ -1267,6 +1267,26 @@ project on the deployed candidate. It does not verify persistence of real
 generated images, local SQLite restart, the user's browser profile, or any
 Windows/provider release gate.
 
+## Local WebUI process restart — 2026-11-20
+
+The new `production_server_process_restart_reopens_saved_sqlite_project`
+integration test launches Cargo's exact `entwurf-web` production executable on
+an ephemeral loopback port with an isolated temporary data directory. Through
+the listening HTTP service it creates a synthetic project and task, confirms
+the project's SQLite file exists, forcibly stops the server process, and starts
+the same executable again against that data directory. The restarted service
+issues a new workspace session token, rejects the previous token, and reopens
+the project with the same task ID and title. The temporary project and database
+are removed when the test exits.
+
+`cargo test --locked -p entwurf-web` passed, including 6 access tests, 11 HTTP
+tests and this production-process restart test; `cargo +1.96.0 fmt --all
+-- --check` and `cargo clippy --no-deps --locked -p entwurf-web --test
+process_restart -- -D warnings` also passed. This establishes SQLite recovery
+after an abrupt production-process stop and cold start. It does not exercise
+graceful Ctrl+C shutdown, a real ChatGPT generation or any Windows acceptance
+gate.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
