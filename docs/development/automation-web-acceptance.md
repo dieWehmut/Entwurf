@@ -1287,12 +1287,46 @@ after an abrupt production-process stop and cold start. It does not exercise
 graceful Ctrl+C shutdown, a real ChatGPT generation or any Windows acceptance
 gate.
 
+## Restored native preflight and storage blocker — 2026-11-21
+
+At `07:31Z`, a read-only native UIA probe verified the independently created
+client window's original process, creation time and package identity. The window
+was not minimized and exposed the exact `ChatGPT` mode and `图像` navigation
+controls. Its sole writable composer normalized to empty using the production
+normalizer; the bounded raw composer tree was complete. The probe dispatched no
+UI actions. This supersedes the earlier Work-mode-only observations, but does
+not verify production fresh-window preparation, Send or original-image capture.
+
+The existing installed service reported the Windows provider connected, available,
+idle and `ready`. Its sole original run remained paused, parked, retryable and
+without an image. The installed executable still matched the recorded font
+candidate, and the existing app continued to own the localhost listener and its
+production bridge. No replacement app or service was started.
+
+The local WebUI acceptance attempt returned `driver_setup_failed`. Subsequent
+native checks found no new entry setup, submission intent, state file or driver
+lock. A diagnostic-copy attempt then explicitly failed with insufficient disk
+space; at `07:42Z`, Windows reported **0 free bytes on C:** and no running
+Rust/.NET build processes. The generic driver error alone does not identify its
+failing operation.
+
+Later Windows command launches timed out with
+`UtilAcceptVsock:273: accept4 failed 110`, while `/mnt/c` still returned I/O
+errors. A guarded cleanup of Entwurf's rebuildable native debug cache produced
+neither its start nor completion receipt, so no native cleanup is claimed.
+The Linux incremental build cache was removed separately; no resulting change
+to Windows free space could be verified. Windows-side space recovery was
+requested. All private probe, helper and failure evidence stays outside Git under
+`artifacts/continuation-20261121` and the earlier native acceptance workspace.
+No new generation, original-image import or final reinstall gate is credited.
+
 ## Remaining release gates
 
 Historical checks on November 4–5 found a locked or disconnected session, and
-older local WebUI/Pages companions reported `windows_locked`. Earlier snapshots
-included a connected, unlocked Windows session; the newest restoration reported
-connected but unavailable. Actual locked/background native image
+older local WebUI/Pages companions reported `windows_locked`. The November 21
+preflight reported a connected, available provider. Later Windows command
+launches timed out; the last storage check reported no free space. Actual
+locked/background native image
 generation and original retrieval still require live acceptance.
 
 The last inspected original local coordinator run remained paused with
@@ -1316,8 +1350,9 @@ On November 16, one scoped UIA New Window invocation at `08:48:14Z` ended with
 failed result remain preserved. A read-only capture at `10:05:20Z` confirmed the
 current source draft and all five original top-level windows were unchanged.
 The input-desktop read at `10:02:33Z` failed with Windows error 5. These checks
-establish preservation. The later independent Work-window observations above
-still do not establish an available ChatGPT Images surface.
+establish preservation. The November 21 independent-window probe establishes
+current ChatGPT/Images controls and an empty composer, with live production
+preparation and generation still unverified.
 
 One coordinated real native generation from each frontend is still required with
 its explicitly selected, connected provider, preserving unrelated drafts. Each
